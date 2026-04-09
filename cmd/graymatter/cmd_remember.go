@@ -10,11 +10,14 @@ import (
 )
 
 func rememberCmd() *cobra.Command {
-	return &cobra.Command{
+	var shared bool
+
+	cmd := &cobra.Command{
 		Use:   "remember <agent-id> <text>",
 		Short: "Store a fact for an agent",
 		Example: `  graymatter remember "sales-closer" "Maria didn't reply Wednesday. Third touchpoint due Friday."
-  graymatter remember "code-reviewer" "Always check for nil pointer dereferences in Go code."`,
+  graymatter remember "code-reviewer" "Always check for nil pointer dereferences in Go code."
+  graymatter remember --shared "Global preference: always use bullet points."`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID, text := args[0], args[1]
@@ -26,6 +29,19 @@ func rememberCmd() *cobra.Command {
 				return err
 			}
 			defer mem.Close()
+
+			if shared {
+				if err := mem.RememberShared(text); err != nil {
+					return err
+				}
+				if jsonOut {
+					data, _ := json.Marshal(map[string]string{"scope": "shared", "status": "stored"})
+					fmt.Println(string(data))
+				} else if !quiet {
+					fmt.Printf("Remembered (shared): %s\n", text)
+				}
+				return nil
+			}
 
 			if err := mem.Remember(agentID, text); err != nil {
 				return err
@@ -40,4 +56,7 @@ func rememberCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&shared, "shared", false, "store in shared memory (readable by all agents)")
+	return cmd
 }

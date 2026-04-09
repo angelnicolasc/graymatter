@@ -107,16 +107,40 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		topK = len(allScored)
 	}
 	result := make([]string, 0, topK)
+	seen := make(map[string]bool, topK)
 	for _, sc := range allScored[:topK] {
 		f, ok := factByID[sc.id]
 		if !ok {
 			continue
 		}
 		result = append(result, f.Text)
+		seen[f.Text] = true
 		// Update access metadata (best-effort, non-blocking).
 		f.AccessCount++
 		f.AccessedAt = time.Now().UTC()
 		go func(fact Fact) { _ = s.UpdateFact(fact.AgentID, fact) }(*f)
+	}
+
+	// Enrich with knowledge graph neighbors (optional; graph may be nil).
+	s.mu.RLock()
+	graph := s.graph
+	extractor := s.extractor
+	s.mu.RUnlock()
+	if graph != nil && extractor != nil && len(result) > 0 {
+		// Extract entity IDs from the top-ranked fact and surface neighbors.
+		ids, _ := extractor.ExtractIDs(result[0])
+		for _, id := range ids {
+			neighborTexts, gErr := graph.NeighborTexts(id, 1)
+			if gErr != nil {
+				break
+			}
+			for _, nt := range neighborTexts {
+				if !seen[nt] {
+					seen[nt] = true
+					result = append(result, nt)
+				}
+			}
+		}
 	}
 
 	return result, nil

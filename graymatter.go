@@ -119,6 +119,43 @@ func (m *Memory) Consolidate(ctx context.Context, agentID string) error {
 	return m.store.Consolidate(ctx, agentID, m.cfg)
 }
 
+// RememberShared stores an observation in the shared memory namespace,
+// readable by all agents via RecallShared and RecallAll.
+func (m *Memory) RememberShared(text string) error {
+	if m.store == nil {
+		return nil
+	}
+	if err := m.store.PutShared(context.Background(), text); err != nil {
+		return fmt.Errorf("graymatter: remember shared: %w", err)
+	}
+	return nil
+}
+
+// RecallShared returns the top-k most relevant shared facts for query.
+func (m *Memory) RecallShared(query string) ([]string, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	facts, err := m.store.RecallShared(context.Background(), query, m.cfg.TopK)
+	if err != nil {
+		return nil, fmt.Errorf("graymatter: recall shared: %w", err)
+	}
+	return facts, nil
+}
+
+// RecallAll merges agent-scoped and shared memory results for agentID,
+// deduplicates, and returns at most TopK combined facts.
+func (m *Memory) RecallAll(agentID, query string) ([]string, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	facts, err := m.store.RecallAll(context.Background(), agentID, query, m.cfg.TopK)
+	if err != nil {
+		return nil, fmt.Errorf("graymatter: recall all: %w", err)
+	}
+	return facts, nil
+}
+
 // Close flushes pending writes and closes the underlying database.
 // Always call Close when done; failing to do so may leave gray.db locked.
 func (m *Memory) Close() error {

@@ -85,6 +85,25 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 			_ = s.Delete(agentID, f.ID)
 		}
 	}
+
+	// Step 4: run entity extraction on all surviving facts and upsert into graph.
+	s.mu.RLock()
+	extractor := s.extractor
+	graph := s.graph
+	s.mu.RUnlock()
+	if extractor != nil && graph != nil {
+		facts, _ = s.List(agentID)
+		for _, f := range facts {
+			ids, extractErr := extractor.ExtractIDs(f.Text)
+			if extractErr != nil {
+				continue
+			}
+			for _, id := range ids {
+				_ = graph.UpsertNode(id, id, "fact")
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -21,11 +21,34 @@ var (
 	bucketAgents   = []byte("agents")
 )
 
+// SharedAgentID is the reserved agent ID for the shared memory namespace.
+// Facts stored here are readable by all agents via RecallShared and RecallAll.
+//
+// Concurrency note: bbolt serialises concurrent write access via a file-level
+// lock. Multiple processes writing shared memory will serialise, not race.
+// Concurrent reads are always safe.
+const SharedAgentID = "__shared__"
+
 // StoreConfig is passed to Open to configure the Store.
 type StoreConfig struct {
 	DataDir       string
 	Embedder      embedding.Provider
 	DecayHalfLife time.Duration
+}
+
+// GraphAccessor is a narrow interface that pkg/memory uses to interact with
+// the knowledge graph without importing pkg/kg (prevents import cycles).
+type GraphAccessor interface {
+	// Upsert inserts or updates a node in the graph.
+	UpsertNode(id, label, entityType string) error
+	// NeighborTexts returns text labels of nodes reachable from nodeID within depth hops.
+	NeighborTexts(nodeID string, depth int) ([]string, error)
+}
+
+// EntityExtractorAccessor extracts entities from a text string.
+// Implemented by pkg/kg.EntityExtractor.
+type EntityExtractorAccessor interface {
+	ExtractIDs(text string) ([]string, error) // returns canonical node IDs
 }
 
 // Store is the central storage layer. It combines bbolt for durable
@@ -39,6 +62,11 @@ type Store struct {
 
 	mu         sync.RWMutex
 	collection map[string]*chromem.Collection // agentID → collection
+
+	// graph and extractor are set via SetKG after Open().
+	// They are optional; Consolidate and Recall work without them.
+	graph     GraphAccessor
+	extractor EntityExtractorAccessor
 }
 
 // Open creates or opens the GrayMatter store at cfg.DataDir.
@@ -226,6 +254,60 @@ func (s *Store) Close() error {
 // DB exposes the raw bbolt handle (used by session package).
 func (s *Store) DB() *bolt.DB {
 	return s.db
+}
+
+// PutShared stores a new observation in the shared memory namespace.
+// Shared facts are accessible to all agents via RecallShared and RecallAll.
+func (s *Store) PutShared(ctx context.Context, text string) error {
+	return s.Put(ctx, SharedAgentID, text)
+}
+
+// RecallShared returns the top-k most relevant shared facts for query.
+func (s *Store) RecallShared(ctx context.Context, query string, topK int) ([]string, error) {
+	return s.Recall(ctx, SharedAgentID, query, topK)
+}
+
+// RecallAll merges agent-scoped and shared-scoped results, deduplicates, and
+// re-ranks by Reciprocal Rank Fusion. It returns at most topK combined facts.
+func (s *Store) RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error) {
+	agentResults, err := s.Recall(ctx, agentID, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("recall agent: %w", err)
+	}
+	sharedResults, err := s.Recall(ctx, SharedAgentID, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("recall shared: %w", err)
+	}
+
+	// Deduplicate and merge, preserving agent-scoped results first.
+	seen := make(map[string]bool, len(agentResults)+len(sharedResults))
+	merged := make([]string, 0, len(agentResults)+len(sharedResults))
+	for _, f := range agentResults {
+		if !seen[f] {
+			seen[f] = true
+			merged = append(merged, f)
+		}
+	}
+	for _, f := range sharedResults {
+		if !seen[f] {
+			seen[f] = true
+			merged = append(merged, f)
+		}
+	}
+	if len(merged) > topK {
+		merged = merged[:topK]
+	}
+	return merged, nil
+}
+
+// SetKG wires an optional knowledge graph and entity extractor into the store.
+// Call this after Open() to enable graph enrichment in Recall and Consolidate.
+// Both arguments are optional; pass nil to disable the corresponding feature.
+func (s *Store) SetKG(graph GraphAccessor, extractor EntityExtractorAccessor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.graph = graph
+	s.extractor = extractor
 }
 
 // --- internal helpers ---
