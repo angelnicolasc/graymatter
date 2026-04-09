@@ -1,12 +1,20 @@
-# GrayMatter
+<h1 align="center"> GrayMatter </h1>
 
-[![CI](https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg)](https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg)](https://pkg.go.dev/github.com/angelnicolasc/graymatter)
-
-Your AI agents forget everything between runs. GrayMatter fixes that.
-
-Single Go binary. Zero infra. Works with Claude Code, or any
-tool that calls the Anthropic Messages API.
+<div align="center">
+  <img width="1500" height="276" alt="graymatter-banner" src=".github/assets/graymatter1.jpg" />
+</div>
+<p align="center">
+  <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
+</p>
+<div align="center">
+  <strong>Three lines of code to give your AI agents persistent memory.</strong>
+  <br />
+  Single Go binary. Zero infra. Works with Claude Code, or any tool that calls the Anthropic Messages API.
+  <br /><br />
+  Free, offline, no account required.
+</div>
+<br /><br />
 
 ```bash
 go get github.com/angelnicolasc/graymatter
