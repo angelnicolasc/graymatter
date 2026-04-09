@@ -14,6 +14,11 @@ func (a *GraphAdapter) UpsertNode(id, label, entityType string) error {
 	return a.g.Upsert(Node{ID: id, Label: label, EntityType: entityType})
 }
 
+// LinkNodes creates an edge between two nodes. Implements mcp.KGLinker.
+func (a *GraphAdapter) LinkNodes(from, to, relation string) error {
+	return a.g.Link(Edge{From: from, To: to, Relation: relation})
+}
+
 // NeighborTexts implements memory.GraphAccessor.
 // It returns the Label of each node reachable from nodeID within depth hops.
 func (a *GraphAdapter) NeighborTexts(nodeID string, depth int) ([]string, error) {

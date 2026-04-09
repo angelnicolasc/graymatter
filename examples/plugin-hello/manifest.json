@@ -1,0 +1,12 @@
+{
+  "name": "hello",
+  "version": "1.0.0",
+  "description": "Reference plugin: greets a named person.",
+  "binary": "./plugin-hello",
+  "tools": [
+    {
+      "name": "hello_greet",
+      "description": "Greet a person by name. Input: {\"name\": \"<string>\"}."
+    }
+  ]
+}

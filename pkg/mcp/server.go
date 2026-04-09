@@ -28,10 +28,18 @@ const (
 	serverVersion = "0.1.0"
 )
 
+// KGLinker is a narrow interface for creating knowledge-graph edges.
+// Implemented by *kg.GraphAdapter in production.
+type KGLinker interface {
+	LinkNodes(from, to, relation string) error
+	UpsertNode(id, label, entityType string) error
+}
+
 // Server wraps mcp-go with GrayMatter memory handlers.
 type Server struct {
-	mem    *graymatter.Memory
-	mcpSrv *server.MCPServer
+	mem      *graymatter.Memory
+	mcpSrv   *server.MCPServer
+	kgLinker KGLinker // optional; enables memory_reflect "link" action
 }
 
 // New creates a configured MCP server backed by mem.
@@ -43,6 +51,10 @@ func New(mem *graymatter.Memory) *Server {
 	s.registerTools()
 	return s
 }
+
+// SetKGLinker wires an optional knowledge-graph linker so that the
+// memory_reflect tool can create graph edges. Call after New().
+func (s *Server) SetKGLinker(l KGLinker) { s.kgLinker = l }
 
 // ServeStdio starts the MCP server over stdin/stdout (used by Claude Code).
 // Blocks until the client disconnects.
@@ -118,6 +130,30 @@ func (s *Server) registerTools() {
 			),
 		),
 		s.handleCheckpointResume,
+	)
+
+	// memory_reflect
+	s.mcpSrv.AddTool(
+		mcp.NewTool("memory_reflect",
+			mcp.WithDescription("Update your own knowledge graph mid-session. Use when you discover a contradiction, complete a task, or learn a user preference that should persist."),
+			mcp.WithString("action",
+				mcp.Required(),
+				mcp.Description("One of: add, update, forget, link."),
+				mcp.Enum("add", "update", "forget", "link"),
+			),
+			mcp.WithString("agent",
+				mcp.Required(),
+				mcp.Description("The agent whose memory to modify."),
+			),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("The fact text for add/update, or description for link."),
+			),
+			mcp.WithString("target",
+				mcp.Description("For update/forget: the fact text to supersede. For link: the target node ID."),
+			),
+		),
+		s.handleMemoryReflect,
 	)
 }
 

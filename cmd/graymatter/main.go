@@ -38,6 +38,7 @@ func main() {
 		tuiCmd(),
 		runCmd(),
 		sessionsCmd(),
+		pluginCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
