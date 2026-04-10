@@ -260,3 +260,118 @@ func TestUnknownRoute(t *testing.T) {
 		t.Errorf("expected 404 for unknown route, got %d", resp.StatusCode)
 	}
 }
+
+// TestConcurrentRememberAndRecall validates that the single-store architecture
+// (Fase-0A fix) handles concurrent reads and writes without races or errors.
+// Before the fix, bbolt's file lock caused every concurrent request to fail.
+func TestConcurrentRememberAndRecall(t *testing.T) {
+	base, stop := startTestServer(t)
+	defer stop()
+
+	const writers = 10
+	const readers = 10
+	const factsPerWriter = 5
+
+	errs := make(chan string, (writers+readers)*factsPerWriter)
+
+	// Pre-populate one fact so recall has something to return.
+	status, body := doJSON(t, http.MethodPost, base+"/remember", map[string]string{
+		"agent": "concurrent-agent",
+		"text":  "seed fact for concurrent recall test",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("seed remember failed: %d %s", status, body)
+	}
+
+	done := make(chan struct{})
+	// Writers.
+	for w := 0; w < writers; w++ {
+		go func(id int) {
+			for i := 0; i < factsPerWriter; i++ {
+				st, b := doJSON(t, http.MethodPost, base+"/remember", map[string]string{
+					"agent": "concurrent-agent",
+					"text":  fmt.Sprintf("writer %d fact %d", id, i),
+				})
+				if st != http.StatusOK {
+					errs <- fmt.Sprintf("writer %d/%d: status %d body %s", id, i, st, b)
+				}
+			}
+			done <- struct{}{}
+		}(w)
+	}
+	// Readers.
+	for r := 0; r < readers; r++ {
+		go func(id int) {
+			for i := 0; i < factsPerWriter; i++ {
+				st, b := doJSON(t, http.MethodGet,
+					fmt.Sprintf("%s/recall?agent=concurrent-agent&q=fact&k=5", base), nil)
+				if st != http.StatusOK {
+					errs <- fmt.Sprintf("reader %d/%d: status %d body %s", id, i, st, b)
+				}
+			}
+			done <- struct{}{}
+		}(r)
+	}
+
+	for i := 0; i < writers+readers; i++ {
+		<-done
+	}
+	close(errs)
+
+	for e := range errs {
+		t.Error(e)
+	}
+
+	// Verify all written facts are persisted.
+	st, body := doJSON(t, http.MethodGet,
+		fmt.Sprintf("%s/facts?agent=concurrent-agent&limit=1000", base), nil)
+	if st != http.StatusOK {
+		t.Fatalf("facts status = %d", st)
+	}
+	var got map[string][]map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := 1 + writers*factsPerWriter // seed + all writers
+	if len(got["facts"]) != want {
+		t.Errorf("expected %d facts, got %d", want, len(got["facts"]))
+	}
+}
+
+// TestRequestContext_Cancellation verifies that using a cancelled context on the
+// client side is handled gracefully — the server must not deadlock or panic.
+func TestRequestContext_Cancellation(t *testing.T) {
+	base, stop := startTestServer(t)
+	defer stop()
+
+	// Seed a fact so there's data to recall.
+	doJSON(t, http.MethodPost, base+"/remember", map[string]string{
+		"agent": "ctx-agent",
+		"text":  "context cancellation test fact",
+	})
+
+	// Fire several requests with an already-cancelled context.
+	// The client will fail fast; the server must not be left in a bad state.
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+			base+"/recall?agent=ctx-agent&q=test&k=5", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		// We accept either an error (context cancelled) or a 200 (server was
+		// fast enough). What we must not see is a hang or a 5xx.
+		if err == nil && resp.StatusCode >= 500 {
+			t.Errorf("unexpected 5xx after cancelled context: %d", resp.StatusCode)
+		}
+	}
+
+	// Server must still be healthy after all the cancelled requests.
+	st, _ := doJSON(t, http.MethodGet, base+"/healthz", nil)
+	if st != http.StatusOK {
+		t.Errorf("server unhealthy after cancelled requests: status %d", st)
+	}
+}
