@@ -9,6 +9,8 @@
   <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.2.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/coverage-73.5%25-brightgreen" alt="Coverage 73.5%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
+  <img src="https://goreportcard.com/badge/github.com/angelnicolasc/graymatter" alt="Go Report Card">
+  <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 </p>
 <div align="center">
   <strong>Three lines of code to give your AI agents persistent memory.</strong>
