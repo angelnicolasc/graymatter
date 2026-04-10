@@ -22,6 +22,27 @@ type ConsolidateConfig interface {
 	GetDecayHalfLife() time.Duration
 }
 
+// LaunchAsyncConsolidate starts MaybeConsolidate in a tracked, bounded goroutine.
+// Non-blocking: if the semaphore is at capacity the trigger is silently dropped
+// rather than blocking the caller.
+func (s *Store) LaunchAsyncConsolidate(agentID string, cfg ConsolidateConfig) {
+	select {
+	case s.sema <- struct{}{}: // acquired slot
+	default:
+		return // at capacity; skip this consolidation cycle
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer func() { <-s.sema }()
+		if err := s.MaybeConsolidate(s.shutdownCtx, agentID, cfg); err != nil {
+			if s.cfg.OnConsolidateError != nil {
+				s.cfg.OnConsolidateError(agentID, err)
+			}
+		}
+	}()
+}
+
 // MaybeConsolidate triggers consolidation only when the fact count for
 // agentID meets or exceeds the threshold. Safe to call concurrently.
 func (s *Store) MaybeConsolidate(ctx context.Context, agentID string, cfg ConsolidateConfig) error {

@@ -118,7 +118,11 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		// Update access metadata (best-effort, non-blocking).
 		f.AccessCount++
 		f.AccessedAt = time.Now().UTC()
-		go func(fact Fact) { _ = s.UpdateFact(fact.AgentID, fact) }(*f)
+		s.wg.Add(1)
+		go func(fact Fact) {
+			defer s.wg.Done()
+			_ = s.UpdateFact(fact.AgentID, fact)
+		}(*f)
 	}
 
 	// Enrich with knowledge graph neighbors (optional; graph may be nil).

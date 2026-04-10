@@ -79,6 +79,16 @@ type Config struct {
 	// AsyncConsolidate runs consolidation in a background goroutine after Remember.
 	// Default: true
 	AsyncConsolidate bool
+
+	// MaxAsyncConsolidations bounds how many consolidation goroutines may run
+	// concurrently. Additional triggers while at capacity are silently dropped.
+	// Default: 2
+	MaxAsyncConsolidations int
+
+	// OnConsolidateError is called when an async consolidation goroutine returns
+	// an error. If nil, errors are discarded. The callback must be safe for
+	// concurrent use.
+	OnConsolidateError func(agentID string, err error)
 }
 
 // DefaultConfig returns a Config with all defaults applied from environment
@@ -97,7 +107,8 @@ func DefaultConfig() Config {
 		ConsolidateModel:     "claude-haiku-4-5-20251001",
 		ConsolidateThreshold: 100,
 		DecayHalfLife:        720 * time.Hour,
-		AsyncConsolidate:     true,
+		AsyncConsolidate:       true,
+		MaxAsyncConsolidations: 2,
 	}
 }
 

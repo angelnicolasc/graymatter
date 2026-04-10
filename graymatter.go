@@ -58,9 +58,11 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 	})
 
 	store, err := memory.Open(memory.StoreConfig{
-		DataDir:       cfg.DataDir,
-		Embedder:      embedder,
-		DecayHalfLife: cfg.DecayHalfLife,
+		DataDir:               cfg.DataDir,
+		Embedder:              embedder,
+		DecayHalfLife:         cfg.DecayHalfLife,
+		MaxAsyncConsolidations: cfg.MaxAsyncConsolidations,
+		OnConsolidateError:    cfg.OnConsolidateError,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graymatter: open store: %w", err)
@@ -85,9 +87,7 @@ func (m *Memory) Remember(agentID, text string) error {
 		return fmt.Errorf("graymatter: remember: %w", err)
 	}
 	if m.cfg.AsyncConsolidate {
-		go func() {
-			_ = m.store.MaybeConsolidate(context.Background(), agentID, m.cfg)
-		}()
+		m.store.LaunchAsyncConsolidate(agentID, m.cfg)
 	}
 	return nil
 }
@@ -156,6 +156,56 @@ func (m *Memory) RecallAll(agentID, query string) ([]string, error) {
 		return nil, fmt.Errorf("graymatter: recall all: %w", err)
 	}
 	return facts, nil
+}
+
+// Extract calls the configured LLM and returns atomic facts distilled from
+// llmResponse. Each returned string is a self-contained declarative sentence
+// suitable for passing directly to Remember.
+//
+// Requires an Anthropic API key. Without one, Extract returns the raw response
+// as a single-element slice so the caller always receives a usable result.
+//
+//	facts, _ := mem.Extract(ctx, assistantReply)
+//	for _, f := range facts {
+//	    mem.Remember("agent", f)
+//	}
+func (m *Memory) Extract(ctx context.Context, llmResponse string) ([]string, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	facts, err := memory.ExtractFacts(ctx, llmResponse, m.cfg)
+	if err != nil {
+		return nil, fmt.Errorf("graymatter: extract: %w", err)
+	}
+	return facts, nil
+}
+
+// RememberExtracted combines Extract and Remember in a single call: it extracts
+// atomic facts from llmResponse and stores each one for agentID.
+// This is the idiomatic replacement for the extractKeyFacts() pattern shown
+// in the README.
+//
+//	mem.RememberExtracted(ctx, "sales-closer", assistantReply)
+func (m *Memory) RememberExtracted(ctx context.Context, agentID, llmResponse string) error {
+	if m.store == nil {
+		return nil
+	}
+	facts, err := memory.ExtractFacts(ctx, llmResponse, m.cfg)
+	if err != nil {
+		return fmt.Errorf("graymatter: remember extracted: %w", err)
+	}
+	for _, f := range facts {
+		if f == "" {
+			continue
+		}
+		if err := m.store.Put(ctx, agentID, f); err != nil {
+			return fmt.Errorf("graymatter: remember extracted put: %w", err)
+		}
+		if m.cfg.AsyncConsolidate {
+			m.store.LaunchAsyncConsolidate(agentID, m.cfg)
+		}
+	}
+	return nil
 }
 
 // Close flushes pending writes and closes the underlying database.

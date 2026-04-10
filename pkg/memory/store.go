@@ -34,6 +34,14 @@ type StoreConfig struct {
 	DataDir       string
 	Embedder      embedding.Provider
 	DecayHalfLife time.Duration
+
+	// MaxAsyncConsolidations bounds concurrent background consolidations.
+	// 0 is normalised to 2 by Open().
+	MaxAsyncConsolidations int
+
+	// OnConsolidateError is called when an async consolidation goroutine errors.
+	// If nil, errors are discarded. Must be safe for concurrent use.
+	OnConsolidateError func(agentID string, err error)
 }
 
 // GraphAccessor is a narrow interface that pkg/memory uses to interact with
@@ -67,10 +75,22 @@ type Store struct {
 	// They are optional; Consolidate and Recall work without them.
 	graph     GraphAccessor
 	extractor EntityExtractorAccessor
+
+	// Goroutine lifecycle. All goroutines launched by Store must acquire sema
+	// and register with wg before doing work. Close() cancels shutdownCtx,
+	// then waits for wg to reach zero before closing bbolt.
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	wg             sync.WaitGroup
+	sema           chan struct{} // bounded semaphore; cap = MaxAsyncConsolidations
 }
 
 // Open creates or opens the GrayMatter store at cfg.DataDir.
 func Open(cfg StoreConfig) (*Store, error) {
+	if cfg.MaxAsyncConsolidations <= 0 {
+		cfg.MaxAsyncConsolidations = 2
+	}
+
 	dbPath := filepath.Join(cfg.DataDir, "gray.db")
 	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: 5 * time.Second})
 	if err != nil {
@@ -97,16 +117,24 @@ func Open(cfg StoreConfig) (*Store, error) {
 		return nil, fmt.Errorf("open chromem: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Store{
-		db:         db,
-		vdb:        vdb,
-		embedder:   cfg.Embedder,
-		cfg:        cfg,
-		collection: make(map[string]*chromem.Collection),
+		db:             db,
+		vdb:            vdb,
+		embedder:       cfg.Embedder,
+		cfg:            cfg,
+		collection:     make(map[string]*chromem.Collection),
+		shutdownCtx:    ctx,
+		shutdownCancel: cancel,
+		sema:           make(chan struct{}, cfg.MaxAsyncConsolidations),
 	}
 
 	// Hydrate known agent IDs so collections are ready.
 	_ = s.loadAgents()
+
+	// Re-index any facts that are in bbolt but missing from the vector store
+	// (e.g. after a crash between a bbolt commit and the vector write).
+	s.reconcileVectors()
 
 	return s, nil
 }
@@ -246,8 +274,11 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 	})
 }
 
-// Close flushes and closes the underlying stores.
+// Close signals all background goroutines to stop, waits for them to exit,
+// then flushes and closes the underlying stores.
 func (s *Store) Close() error {
+	s.shutdownCancel()
+	s.wg.Wait()
 	return s.db.Close()
 }
 
@@ -321,6 +352,31 @@ func (s *Store) loadAgents() error {
 		s.ensureCollection(id)
 	}
 	return nil
+}
+
+// reconcileVectors ensures every bbolt fact with an embedding is present in
+// the chromem-go vector index. Called once at Open() to repair divergences
+// caused by crashes between the bbolt write and the vector write.
+// Best-effort: individual errors are silently ignored (bbolt is source of truth).
+// chromem-go AddDocument overwrites on duplicate ID, so this is idempotent.
+func (s *Store) reconcileVectors() {
+	agents, err := s.ListAgents()
+	if err != nil {
+		return
+	}
+	ctx := context.Background()
+	for _, agentID := range agents {
+		facts, err := s.List(agentID)
+		if err != nil {
+			continue
+		}
+		for _, f := range facts {
+			if len(f.Embedding) == 0 {
+				continue
+			}
+			_ = s.addToVector(ctx, agentID, f)
+		}
+	}
 }
 
 func (s *Store) ensureCollection(agentID string) *chromem.Collection {
