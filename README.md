@@ -52,13 +52,14 @@ No Docker. No Redis. No Python. No API key required for storage.
 **Binary (recommended):**
 
 ```bash
-# macOS / Linux
-curl -sSL https://github.com/angelnicolasc/graymatter/releases/latest/download/graymatter_$(uname -s)_$(uname -m).tar.gz | tar xz
+# macOS (Apple Silicon)
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.2.0/graymatter_0.2.0_darwin_arm64.tar.gz
+tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/latest/download/graymatter_Windows_x86_64.zip -OutFile graymatter.zip
-Expand-Archive graymatter.zip; Move-Item graymatter\graymatter.exe C:\Windows\System32\
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.2.0/graymatter_0.2.0_windows_amd64.zip -OutFile graymatter.zip
+Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
 **Go install:**

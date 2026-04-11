@@ -54,6 +54,19 @@ func initCmd() *cobra.Command {
 				fmt.Printf("  graymatter remember \"my-agent\" \"user prefers bullet points\"\n")
 				fmt.Printf("  graymatter recall  \"my-agent\" \"how should I format this?\"\n")
 			}
+
+			if added, pathErr := addExeDirToUserPath(); pathErr != nil {
+				if !quiet {
+					exe, _ := os.Executable()
+					fmt.Fprintf(os.Stderr,
+						"  Warning: could not add %s to PATH: %v\n  Add it manually so you can type 'graymatter' from any directory.\n",
+						filepath.Dir(exe), pathErr)
+				}
+			} else if added && !quiet {
+				exe, _ := os.Executable()
+				fmt.Printf("  Added %s to your PATH — restart PowerShell to apply\n", filepath.Dir(exe))
+			}
+
 			return nil
 		},
 	}

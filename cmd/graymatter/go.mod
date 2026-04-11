@@ -12,6 +12,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/spf13/cobra v1.8.1
 	go.etcd.io/bbolt v1.3.11
+	golang.org/x/sys v0.34.0
 )
 
 require (
@@ -43,7 +44,6 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 )
 
