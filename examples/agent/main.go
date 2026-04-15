@@ -50,17 +50,20 @@ func main() {
 	// ── GrayMatter integration — 3 lines before the API call ─────────────────
 	mem := graymatter.New(project.Root + "/.graymatter")
 	defer mem.Close()
+	if !mem.Healthy() {
+		log.Fatalf("graymatter: %v", mem.Status().InitError)
+	}
 
 	ctx := context.Background()
 
 	// Pre-populate with context from previous runs (simulates prior history).
-	_ = mem.Remember(skill.Name, "Maria Rodriguez, VP Sales at Acme Corp. Demo was March 12.")
-	_ = mem.Remember(skill.Name, "Maria's pain point: their current CRM doesn't integrate with Slack.")
-	_ = mem.Remember(skill.Name, "Maria has budget approval. Deal size: $48k ARR.")
-	_ = mem.Remember(skill.Name, "Maria went quiet after demo on March 12. No reply to follow-up on March 15.")
+	_ = mem.Remember(ctx, skill.Name, "Maria Rodriguez, VP Sales at Acme Corp. Demo was March 12.")
+	_ = mem.Remember(ctx, skill.Name, "Maria's pain point: their current CRM doesn't integrate with Slack.")
+	_ = mem.Remember(ctx, skill.Name, "Maria has budget approval. Deal size: $48k ARR.")
+	_ = mem.Remember(ctx, skill.Name, "Maria went quiet after demo on March 12. No reply to follow-up on March 15.")
 
 	// Recall relevant memory for this task.
-	memCtx, err := mem.Recall(skill.Name, task.Description)
+	memCtx, err := mem.Recall(ctx, skill.Name, task.Description)
 	if err != nil {
 		log.Fatalf("recall: %v", err)
 	}
@@ -103,7 +106,7 @@ func main() {
 
 	// ── After run: store key observations ────────────────────────────────────
 	keyFact := "Sent follow-up email to Maria on 2026-04-09. Subject: re: the Slack integration demo."
-	if err := mem.Remember(skill.Name, keyFact); err != nil {
+	if err := mem.Remember(ctx, skill.Name, keyFact); err != nil {
 		log.Printf("warn: remember: %v", err)
 	}
 

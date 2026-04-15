@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -30,8 +31,13 @@ func rememberCmd() *cobra.Command {
 			}
 			defer mem.Close()
 
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
 			if shared {
-				if err := mem.RememberShared(text); err != nil {
+				if err := mem.RememberShared(ctx, text); err != nil {
 					return err
 				}
 				if jsonOut {
@@ -43,7 +49,7 @@ func rememberCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := mem.Remember(agentID, text); err != nil {
+			if err := mem.Remember(ctx, agentID, text); err != nil {
 				return err
 			}
 

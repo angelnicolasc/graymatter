@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -37,17 +38,22 @@ func recallCmd() *cobra.Command {
 			}
 			defer mem.Close()
 
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
 			var facts []string
 			var scope string
 			switch {
 			case all:
-				facts, err = mem.RecallAll(agentID, query)
+				facts, err = mem.RecallAll(ctx, agentID, query)
 				scope = "all"
 			case shared:
-				facts, err = mem.RecallShared(query)
+				facts, err = mem.RecallShared(ctx, query)
 				scope = "shared"
 			default:
-				facts, err = mem.Recall(agentID, query)
+				facts, err = mem.Recall(ctx, agentID, query)
 				scope = agentID
 			}
 			if err != nil {

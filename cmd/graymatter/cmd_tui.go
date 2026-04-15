@@ -186,7 +186,7 @@ const (
 // ── Main model ────────────────────────────────────────────────────────────────
 
 type tuiModel struct {
-	store   *memory.Store
+	store   graymatter.AdvancedStore
 	dataDir string
 	graph   *kg.Graph
 
@@ -638,7 +638,7 @@ Views (switch with 1-4 or tab/shift+tab):
 			}
 			defer mem.Close()
 
-			store := mem.Store()
+			store := mem.Advanced()
 			if store == nil {
 				return fmt.Errorf("store not initialised")
 			}

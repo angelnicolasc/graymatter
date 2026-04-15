@@ -26,9 +26,10 @@ go get github.com/angelnicolasc/graymatter
 ```
 
 ```go
+ctx := context.Background()
 mem := graymatter.New(".graymatter")
-mem.Remember("agent", "user prefers bullet points, hates long intros")
-ctx := mem.Recall("agent", "how should I format this response?")
+mem.Remember(ctx, "agent", "user prefers bullet points, hates long intros")
+facts, _ := mem.Recall(ctx, "agent", "how should I format this response?")
 // ["user prefers bullet points, hates long intros"]
 ```
 
@@ -53,12 +54,12 @@ No Docker. No Redis. No Python. No API key required for storage.
 
 ```bash
 # macOS (Apple Silicon)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.2.1/graymatter_0.2.1_darwin_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.3.0/graymatter_0.3.0_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.2.1/graymatter_0.2.1_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.3.0/graymatter_0.3.0_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
@@ -78,42 +79,53 @@ go get github.com/angelnicolasc/graymatter
 
 ## Library usage
 
-Three functions. That's the entire API surface.
+Three functions. That's the entire API surface. All methods accept `context.Context` as the first argument so timeouts and cancellation propagate end-to-end — no wrappers needed.
 
 ```go
 import "github.com/angelnicolasc/graymatter"
+
+ctx := context.Background()
 
 // Open (or create) a memory store in the given directory.
 mem := graymatter.New(".graymatter")
 defer mem.Close()
 
+// Always check health in production — New() never panics, but it may degrade
+// to no-op mode if the data dir is unwritable or bbolt fails to open.
+if !mem.Healthy() {
+    log.Fatalf("graymatter: %v", mem.Status().InitError)
+}
+
 // Store an observation.
-mem.Remember("sales-closer", "Maria didn't reply Wednesday. Third touchpoint due Friday.")
+mem.Remember(ctx, "sales-closer", "Maria didn't reply Wednesday. Third touchpoint due Friday.")
 
 // Retrieve relevant context for a query.
-ctx := mem.Recall("sales-closer", "follow up Maria")
-// ctx is a []string ready to inject into a system prompt:
+facts, _ := mem.Recall(ctx, "sales-closer", "follow up Maria")
 // ["Maria didn't reply Wednesday. Third touchpoint due Friday."]
 ```
 
-Every method has a context-aware variant that respects deadlines and cancellation signals end-to-end — no wrappers needed:
+Context propagates everywhere — timeouts and traces work as expected:
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 defer cancel()
 
-if err := mem.RememberCtx(ctx, "agent", "observation"); err != nil { ... }
-results, err := mem.RecallCtx(ctx, "agent", "query")
+if err := mem.Remember(ctx, "agent", "observation"); err != nil { ... }
+results, err := mem.Recall(ctx, "agent", "query")
 ```
 
 ### Full agent pattern
 
 ```go
+ctx := context.Background()
 mem := graymatter.New(project.Root + "/.graymatter")
 defer mem.Close()
+if !mem.Healthy() {
+    log.Fatalf("graymatter: %v", mem.Status().InitError)
+}
 
 // 1. Recall before calling the LLM.
-memCtx, _ := mem.Recall(skill.Name, task.Description)
+memCtx, _ := mem.Recall(ctx, skill.Name, task.Description)
 
 messages := []anthropic.MessageParam{
     {Role: "system", Content: skill.Identity + "\n\n## Memory\n" + strings.Join(memCtx, "\n")},
@@ -124,7 +136,7 @@ messages := []anthropic.MessageParam{
 response, _ := client.Messages.New(ctx, anthropic.MessageNewParams{...})
 
 // 3. Remember after the run.
-mem.Remember(skill.Name, extractKeyFacts(response))
+mem.Remember(ctx, skill.Name, extractKeyFacts(response))
 ```
 
 ### Config
@@ -202,6 +214,15 @@ store, err := memory.Open(memory.StoreConfig{
     OnPut: func(agentID, factID string, d time.Duration) {
         metrics.Increment("graymatter.facts.stored")
     },
+
+    // Called when a vector upsert fails after the bbolt write succeeded.
+    // The fact is durably queued and retried on the next reconcile tick.
+    OnVectorIndexError: func(agentID, factID string, err error) {
+        log.Printf("vector index lag: agent=%s fact=%s err=%v", agentID, factID, err)
+    },
+
+    // How often to drain the pending-vector queue (default 30s, 0 disables).
+    VectorReconcileInterval: 30 * time.Second,
 
     // Routes internal log events to any standard logger.
     Logger: slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
@@ -404,7 +425,12 @@ packaged as a library you import in two lines.
 - [x] REST API server mode (`graymatter server --addr :8080`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)
 - [x] 4-view Bubble Tea TUI (Memory / Sessions / Knowledge Graph / Stats)
-- [x] Context-propagation API (`RememberCtx`, `RecallCtx`, `RecallAllCtx`, …)
+- [x] Context-propagation API — all public methods accept `context.Context` (ctx-first, uniform)
+- [x] `Healthy()` / `Status()` — observable no-op mode; production callers detect init failures
+- [x] Durable vector reconciliation — `bucketPendingVector` closes the crash window; background reconcile loop (configurable interval); `PendingVectorCount()` for health introspection
+- [x] `AdvancedStore` interface — narrow, stable public surface for CLI/MCP/TUI; internal refactors no longer break public API
+- [x] `ConsolidateThreshold` default lowered to 20 — consolidation fires in demos and first-week production use
+- [x] `OnVectorIndexError` / `VectorReconcileInterval` hooks for durable vector retry observability
 - [x] Pluggable `VectorStore` interface (swap chromem-go for Qdrant, pgvector, etc.)
 - [x] expvar `/metrics` endpoint — zero-dep, stdlib-only observability
 - [x] `OnRecall` / `OnPut` / `Logger` hooks for APM integration
@@ -417,4 +443,4 @@ packaged as a library you import in two lines.
 
 ---
 
-*GrayMatter — v0.2.1 — April 2026*
+*GrayMatter — v0.3.0 — April 2026*

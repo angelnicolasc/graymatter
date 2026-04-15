@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	bucketFacts    = []byte("facts")
-	bucketSessions = []byte("sessions")
-	bucketMeta     = []byte("meta")
-	bucketAgents   = []byte("agents")
+	bucketFacts         = []byte("facts")
+	bucketSessions      = []byte("sessions")
+	bucketMeta          = []byte("meta")
+	bucketAgents        = []byte("agents")
+	bucketPendingVector = []byte("pending_vector")
 )
 
 // SharedAgentID is the reserved agent ID for the shared memory namespace.
@@ -47,6 +48,17 @@ type StoreConfig struct {
 	// OnConsolidateError is called when an async consolidation goroutine errors.
 	// If nil, errors are discarded. Must be safe for concurrent use.
 	OnConsolidateError func(agentID string, err error)
+
+	// OnVectorIndexError is called when an inline vector upsert fails after the
+	// bbolt write has already committed. The fact remains in the pending-vector
+	// queue and will be retried by the background reconciler. Must be safe for
+	// concurrent use.
+	OnVectorIndexError func(agentID, factID string, err error)
+
+	// VectorReconcileInterval controls how often the background reconciler
+	// drains the pending-vector queue. 0 disables the background loop entirely
+	// (Open() still runs one drain at startup).
+	VectorReconcileInterval time.Duration
 
 	// OnRecall, if non-nil, is called after each Recall with timing and count.
 	OnRecall func(agentID, query string, resultCount int, duration time.Duration)
@@ -114,7 +126,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 
 	// Ensure top-level buckets exist.
 	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents} {
+		for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents, bucketPendingVector} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -155,14 +167,34 @@ func Open(cfg StoreConfig) (*Store, error) {
 		s.checkEmbedDimensions(cfg.Embedder)
 	}
 
-	// Re-index any facts that are in bbolt but missing from the vector store
-	// (e.g. after a crash between a bbolt commit and the vector write).
+	// Drain any vector writes that did not complete on the previous run
+	// (crash between bbolt commit and vector upsert, or transient failures).
 	s.reconcileVectors()
+
+	// Background reconcile loop: retries pending vectors on a cadence so the
+	// inconsistency window collapses to at most VectorReconcileInterval rather
+	// than "until next process restart". Disabled when the interval is 0.
+	if cfg.VectorReconcileInterval > 0 {
+		s.wg.Add(1)
+		go s.vectorReconcileLoop(cfg.VectorReconcileInterval)
+	}
 
 	return s, nil
 }
 
 // Put stores a new observation for agentID.
+//
+// Durability model:
+//  1. Compute embedding (best-effort; on failure the fact is keyword-only).
+//  2. Single bbolt transaction commits the fact AND, if an embedding exists,
+//     a marker in bucketPendingVector. The marker is the durable "this still
+//     needs to land in the vector store" intent.
+//  3. Inline vector upsert. On success the marker is cleared. On failure the
+//     marker remains and the background reconciler will retry it; the caller
+//     still sees nil because bbolt is the source of truth.
+//
+// This closes the crash window between the bbolt write and the vector write:
+// after a crash, reconcileVectors() at Open() drains the pending bucket.
 func (s *Store) Put(ctx context.Context, agentID, text string) error {
 	start := time.Now()
 
@@ -171,14 +203,13 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 		var err error
 		emb, err = s.embedder.Embed(ctx, text)
 		if err != nil {
-			// Non-fatal: fall back to keyword-only for this fact.
 			emb = nil
 		}
 	}
 
 	f := newFact(agentID, text, emb)
+	hasEmbedding := len(emb) > 0
 
-	// Persist to bbolt.
 	if err := s.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.Bucket(bucketFacts).CreateBucketIfNotExists([]byte(agentID))
 		if err != nil {
@@ -191,18 +222,31 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 		if err := b.Put([]byte(f.ID), data); err != nil {
 			return err
 		}
-		// Register agent.
-		return tx.Bucket(bucketAgents).Put([]byte(agentID), []byte("1"))
+		if err := tx.Bucket(bucketAgents).Put([]byte(agentID), []byte("1")); err != nil {
+			return err
+		}
+		if hasEmbedding {
+			pb, err := tx.Bucket(bucketPendingVector).CreateBucketIfNotExists([]byte(agentID))
+			if err != nil {
+				return err
+			}
+			if err := pb.Put([]byte(f.ID), []byte{1}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("put fact: %w", err)
 	}
 
-	// Add to vector index if we have an embedding.
-	if len(emb) > 0 {
+	if hasEmbedding {
 		s.recordEmbedDimensions(len(emb))
 		if err := s.addToVector(ctx, agentID, f); err != nil {
-			// Non-fatal: bbolt write already succeeded.
-			_ = err
+			if s.cfg.OnVectorIndexError != nil {
+				s.cfg.OnVectorIndexError(agentID, f.ID, err)
+			}
+		} else {
+			s.clearPendingVector(agentID, f.ID)
 		}
 	}
 
@@ -384,29 +428,146 @@ func (s *Store) loadAgents() error {
 	return nil
 }
 
-// reconcileVectors ensures every bbolt fact with an embedding is present in
-// the vector store. Called once at Open() to repair divergences caused by crashes
-// between the bbolt write and the vector write.
-// Best-effort: individual errors are silently ignored (bbolt is source of truth).
-// AddDocument is idempotent (overwrites on duplicate ID).
+// reconcileVectors drains the pending-vector bucket: for every (agentID, factID)
+// marker, it loads the fact from bbolt and re-attempts the vector upsert. On
+// success the marker is cleared; on failure it stays and the next tick retries.
+//
+// O(pending) rather than O(total): callers that never crash see this as a no-op.
+// AddDocument is idempotent so retries are safe even after partial successes.
 func (s *Store) reconcileVectors() {
-	agents, err := s.ListAgents()
-	if err != nil {
+	pending := s.snapshotPendingVectors()
+	if len(pending) == 0 {
 		return
 	}
-	ctx := context.Background()
-	for _, agentID := range agents {
-		facts, err := s.List(agentID)
-		if err != nil {
-			continue
-		}
-		for _, f := range facts {
-			if len(f.Embedding) == 0 {
+	ctx := s.shutdownCtx
+	for agentID, factIDs := range pending {
+		for _, factID := range factIDs {
+			if ctx.Err() != nil {
+				return
+			}
+			f, ok := s.loadFact(agentID, factID)
+			if !ok {
+				// Fact was deleted between marker write and reconcile; drop the marker.
+				s.clearPendingVector(agentID, factID)
 				continue
 			}
-			_ = s.addToVector(ctx, agentID, f)
+			if len(f.Embedding) == 0 {
+				s.clearPendingVector(agentID, factID)
+				continue
+			}
+			if err := s.addToVector(ctx, agentID, f); err != nil {
+				if s.cfg.OnVectorIndexError != nil {
+					s.cfg.OnVectorIndexError(agentID, factID, err)
+				}
+				continue
+			}
+			s.clearPendingVector(agentID, factID)
 		}
 	}
+}
+
+// vectorReconcileLoop runs reconcileVectors on a fixed cadence until shutdown.
+func (s *Store) vectorReconcileLoop(interval time.Duration) {
+	defer s.wg.Done()
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.shutdownCtx.Done():
+			return
+		case <-t.C:
+			s.reconcileVectors()
+		}
+	}
+}
+
+// PendingVectorCount returns the number of facts currently waiting to be
+// indexed in the vector store. A non-zero value after a quiescent period
+// indicates a persistent embedder/vector-store failure worth investigating.
+func (s *Store) PendingVectorCount() int {
+	count := 0
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketPendingVector)
+		if root == nil {
+			return nil
+		}
+		return root.ForEach(func(k, v []byte) error {
+			if v != nil {
+				return nil // not a sub-bucket
+			}
+			sub := root.Bucket(k)
+			if sub == nil {
+				return nil
+			}
+			stats := sub.Stats()
+			count += stats.KeyN
+			return nil
+		})
+	})
+	return count
+}
+
+func (s *Store) clearPendingVector(agentID, factID string) {
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketPendingVector)
+		if root == nil {
+			return nil
+		}
+		sub := root.Bucket([]byte(agentID))
+		if sub == nil {
+			return nil
+		}
+		return sub.Delete([]byte(factID))
+	})
+}
+
+func (s *Store) snapshotPendingVectors() map[string][]string {
+	out := make(map[string][]string)
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketPendingVector)
+		if root == nil {
+			return nil
+		}
+		return root.ForEach(func(k, v []byte) error {
+			if v != nil {
+				return nil
+			}
+			sub := root.Bucket(k)
+			if sub == nil {
+				return nil
+			}
+			agentID := string(k)
+			_ = sub.ForEach(func(fk, _ []byte) error {
+				out[agentID] = append(out[agentID], string(fk))
+				return nil
+			})
+			return nil
+		})
+	})
+	return out
+}
+
+func (s *Store) loadFact(agentID, factID string) (Fact, bool) {
+	var f Fact
+	var ok bool
+	_ = s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
+		if b == nil {
+			return nil
+		}
+		raw := b.Get([]byte(factID))
+		if raw == nil {
+			return nil
+		}
+		parsed, err := unmarshalFact(raw)
+		if err != nil {
+			return nil
+		}
+		f = parsed
+		ok = true
+		return nil
+	})
+	return f, ok
 }
 
 // checkEmbedDimensions reads the stored embedding dimension from the meta bucket

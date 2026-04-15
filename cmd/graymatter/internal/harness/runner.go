@@ -121,7 +121,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	}
 	defer func() { _ = gm.Close() }()
 
-	db := gm.Store().DB()
+	db := gm.Advanced().DB()
 
 	// Ensure harness_sessions bucket exists.
 	if err := initHarnessBucket(db); err != nil {
@@ -155,7 +155,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	}
 
 	// Recall relevant memory and inject into system prompt.
-	memFacts, _ := gm.Recall(def.Name, def.Task)
+	memFacts, _ := gm.Recall(ctx, def.Name, def.Task)
 	systemContent := def.SystemPrompt
 	if len(memFacts) > 0 {
 		systemContent += "\n\n## Memory\n" + strings.Join(memFacts, "\n")
@@ -225,7 +225,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 		// Store observation in memory (best-effort).
 		if finalReply != "" {
-			_ = gm.Remember(def.Name, finalReply)
+			_ = gm.Remember(ctx, def.Name, finalReply)
 		}
 
 		// Checkpoint: persist full message history to bbolt.

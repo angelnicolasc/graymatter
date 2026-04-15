@@ -35,7 +35,7 @@ func checkpointListCmd() *cobra.Command {
 			}
 			defer mem.Close()
 
-			store := mem.Store()
+			store := mem.Advanced()
 			if store == nil {
 				return fmt.Errorf("store not initialised")
 			}
@@ -83,7 +83,7 @@ func checkpointResumeCmd() *cobra.Command {
 			}
 			defer mem.Close()
 
-			store := mem.Store()
+			store := mem.Advanced()
 			if store == nil {
 				return fmt.Errorf("store not initialised")
 			}
@@ -118,7 +118,7 @@ func checkpointSaveCmd() *cobra.Command {
 			}
 			defer mem.Close()
 
-			store := mem.Store()
+			store := mem.Advanced()
 			if store == nil {
 				return fmt.Errorf("store not initialised")
 			}
