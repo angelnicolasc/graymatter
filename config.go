@@ -68,7 +68,7 @@ type Config struct {
 	ConsolidateModel string
 
 	// ConsolidateThreshold is the minimum fact count that triggers consolidation.
-	// Default: 100
+	// Default: 20
 	ConsolidateThreshold int
 
 	// DecayHalfLife is the half-life for the exponential weight decay curve.
@@ -89,6 +89,20 @@ type Config struct {
 	// an error. If nil, errors are discarded. The callback must be safe for
 	// concurrent use.
 	OnConsolidateError func(agentID string, err error)
+
+	// OnVectorIndexError is called when the vector store fails to index a fact
+	// after the bbolt write has already succeeded. The fact is durably marked
+	// as pending and will be retried on the next reconcile tick or process
+	// restart. If nil, errors are silently retried. Must be safe for concurrent
+	// use.
+	OnVectorIndexError func(agentID, factID string, err error)
+
+	// VectorReconcileInterval controls how often the background reconciler
+	// drains the pending-vector queue. Vectors that failed to index inline
+	// (e.g. transient embedder error) are retried on this cadence.
+	// Default: 30s. Set to 0 to disable the background loop (reconciliation
+	// will then only run at Open()).
+	VectorReconcileInterval time.Duration
 }
 
 // DefaultConfig returns a Config with all defaults applied from environment
@@ -105,7 +119,8 @@ func DefaultConfig() Config {
 		OpenAIModel:          envOrDefault("GRAYMATTER_OPENAI_MODEL", "text-embedding-3-small"),
 		ConsolidateLLM:       resolveConsolidateLLM(),
 		ConsolidateModel:     "claude-haiku-4-5-20251001",
-		ConsolidateThreshold: 100,
+		ConsolidateThreshold: 20,
+		VectorReconcileInterval: 30 * time.Second,
 		DecayHalfLife:        720 * time.Hour,
 		AsyncConsolidate:       true,
 		MaxAsyncConsolidations: 2,

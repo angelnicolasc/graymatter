@@ -27,7 +27,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	}
 	topK := getInt(args, "top_k", s.mem.Config().TopK)
 
-	facts, err := s.mem.Recall(agentID, query)
+	facts, err := s.mem.Recall(ctx, agentID, query)
 	if err != nil {
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
@@ -59,7 +59,7 @@ func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (
 		return toolError("text is required")
 	}
 
-	if err := s.mem.Remember(agentID, text); err != nil {
+	if err := s.mem.Remember(ctx, agentID, text); err != nil {
 		return toolError(fmt.Sprintf("remember error: %v", err))
 	}
 
@@ -80,7 +80,7 @@ func (s *Server) handleCheckpointSave(ctx context.Context, req mcp.CallToolReque
 		}
 	}
 
-	store := s.mem.Store()
+	store := s.mem.Advanced()
 	if store == nil {
 		return toolError("memory store not initialised")
 	}
@@ -106,7 +106,7 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		return toolError("agent_id is required")
 	}
 
-	store := s.mem.Store()
+	store := s.mem.Advanced()
 	if store == nil {
 		return toolError("memory store not initialised")
 	}
@@ -146,7 +146,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	}
 	target, _ := getString(args, "target")
 
-	store := s.mem.Store()
+	store := s.mem.Advanced()
 	if store == nil {
 		return toolError("memory store not initialised")
 	}
@@ -156,7 +156,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 
 	switch action {
 	case "add":
-		if err := s.mem.Remember(agentID, text); err != nil {
+		if err := s.mem.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add failed: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Added fact for agent %q.", agentID)
@@ -180,7 +180,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if oldText == "" {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
-		if err := s.mem.Remember(agentID, text); err != nil {
+		if err := s.mem.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add updated fact: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)

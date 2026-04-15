@@ -21,17 +21,21 @@ func main() {
 	// ── 1. Open memory ─────────────────────────────────────────────────────────
 	mem := graymatter.New(".graymatter-demo")
 	defer mem.Close()
+	if !mem.Healthy() {
+		log.Fatalf("graymatter: %v", mem.Status().InitError)
+	}
+
+	ctx := context.Background()
 
 	// ── 2. Pre-seed a couple of facts (simulates previous runs) ───────────────
-	_ = mem.Remember(agentID, "User's name is Alex. They prefer concise, bullet-point answers.")
-	_ = mem.Remember(agentID, "Alex is building a sales automation tool in Go. Deadline: Q2 2026.")
-	_ = mem.Remember(agentID, "Alex gets frustrated when responses are too long or repeat context.")
+	_ = mem.Remember(ctx, agentID, "User's name is Alex. They prefer concise, bullet-point answers.")
+	_ = mem.Remember(ctx, agentID, "Alex is building a sales automation tool in Go. Deadline: Q2 2026.")
+	_ = mem.Remember(ctx, agentID, "Alex gets frustrated when responses are too long or repeat context.")
 
 	// ── 3. Recall relevant context for the current task ────────────────────────
 	task := "How should I structure the outreach sequence for a new lead?"
-	ctx := context.Background()
 
-	memCtx, err := mem.Recall(agentID, task)
+	memCtx, err := mem.Recall(ctx, agentID, task)
 	if err != nil {
 		log.Fatalf("recall: %v", err)
 	}
@@ -74,7 +78,7 @@ func main() {
 
 	// ── 6. Store the agent's observation from this run ─────────────────────────
 	observation := "Alex asked about outreach sequencing for a new lead."
-	_ = mem.Remember(agentID, observation)
+	_ = mem.Remember(ctx, agentID, observation)
 
 	fmt.Printf("\n[Memory stored: %q]\n", observation)
 	fmt.Printf("Token efficiency: memory context = %d tokens vs full history injection.\n",
