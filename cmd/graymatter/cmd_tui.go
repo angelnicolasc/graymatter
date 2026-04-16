@@ -17,52 +17,8 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
-var (
-	colorAccent  = lipgloss.Color("#5F5FFF")
-	colorOrange  = lipgloss.Color("#FF875F")
-	colorDim     = lipgloss.Color("#777777")
-	colorGreen   = lipgloss.Color("#5FAF5F")
-	colorRed     = lipgloss.Color("#FF5F5F")
-	colorYellow  = lipgloss.Color("#FFAF00")
-	colorWhite   = lipgloss.Color("#FFFFFF")
-
-	styleTitle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorWhite).
-			Background(colorAccent).
-			Padding(0, 1)
-
-	styleTabActive = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorWhite).
-			Background(colorAccent).
-			Padding(0, 2)
-
-	styleTabInactive = lipgloss.NewStyle().
-				Foreground(colorDim).
-				Padding(0, 2)
-
-	styleBorderActive = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorOrange)
-
-	styleBorderInactive = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorAccent)
-
-	styleHelp = lipgloss.NewStyle().
-			Foreground(colorDim).
-			Padding(0, 1)
-
-	styleDimText = lipgloss.NewStyle().
-			Foreground(colorDim)
-
-	styleStatusOK      = lipgloss.NewStyle().Foreground(colorGreen)
-	styleStatusFail    = lipgloss.NewStyle().Foreground(colorRed)
-	styleStatusPending = lipgloss.NewStyle().Foreground(colorYellow)
-)
+// Styles (palette, border styles, dashboard helpers) live in tui_styles.go.
+// Dashboard data loading + panel rendering live in tui_dashboard.go.
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -72,7 +28,7 @@ const (
 	tabMemory   tabID = iota // 3-pane memory browser
 	tabSessions              // harness sessions list
 	tabGraph                 // knowledge graph nodes
-	tabStats                 // per-agent statistics
+	tabStats                 // observability dashboard
 )
 
 var tabNames = []string{"Memory", "Sessions", "Graph", "Stats"}
@@ -146,30 +102,12 @@ func (n nodeItem) Description() string {
 }
 func (n nodeItem) FilterValue() string { return n.n.Label + " " + n.n.EntityType }
 
-// --- Stats tab ---
-
-type statItem struct {
-	agent string
-	st    memory.MemoryStats
-}
-
-func (s statItem) Title() string { return s.agent }
-func (s statItem) Description() string {
-	if s.st.FactCount == 0 {
-		return "no facts"
-	}
-	return fmt.Sprintf("%d facts · avg weight %.3f · newest %s",
-		s.st.FactCount, s.st.AvgWeight, s.st.NewestAt.Format("2006-01-02"))
-}
-func (s statItem) FilterValue() string { return s.agent }
-
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 type agentsLoadedMsg struct{ agents []agentItem }
 type factsLoadedMsg struct{ facts []factItem }
 type sessionsLoadedMsg struct{ sessions []sessionItem }
 type nodesLoadedMsg struct{ nodes []nodeItem }
-type statsLoadedMsg struct{ stats []statItem }
 type errMsg struct{ err error }
 type statusMsg struct{ text string }
 
@@ -207,15 +145,21 @@ type tuiModel struct {
 	sessionList list.Model
 
 	// graph tab
-	nodeList    list.Model
-	nodeDetail  viewport.Model
+	nodeList   list.Model
+	nodeDetail viewport.Model
 
-	// stats tab
-	statList list.Model
+	// stats tab (observability dashboard)
+	dashboard dashboardData
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(m.loadAgents(), m.loadSessions(), m.loadNodes(), m.loadStats())
+	return tea.Batch(
+		m.loadAgents(),
+		m.loadSessions(),
+		m.loadNodes(),
+		m.loadDashboard(),
+		dashboardTick(),
+	)
 }
 
 // ── Loaders ───────────────────────────────────────────────────────────────────
@@ -251,7 +195,7 @@ func (m tuiModel) loadFacts(agentID string) tea.Cmd {
 
 func (m tuiModel) loadSessions() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := harness.ListSessions(m.dataDir)
+		sessions, err := harness.ListSessionsDB(m.store.DB())
 		if err != nil {
 			return sessionsLoadedMsg{} // non-fatal
 		}
@@ -277,21 +221,6 @@ func (m tuiModel) loadNodes() tea.Cmd {
 			items[i] = nodeItem{n}
 		}
 		return nodesLoadedMsg{items}
-	}
-}
-
-func (m tuiModel) loadStats() tea.Cmd {
-	return func() tea.Msg {
-		agents, err := m.store.ListAgents()
-		if err != nil {
-			return statsLoadedMsg{}
-		}
-		items := make([]statItem, 0, len(agents))
-		for _, a := range agents {
-			st, _ := m.store.Stats(a)
-			items = append(items, statItem{agent: a, st: st})
-		}
-		return statsLoadedMsg{items}
 	}
 }
 
@@ -327,6 +256,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.updateMemoryKey(msg)...)
 			case tabSessions:
 				cmds = append(cmds, m.updateSessionsKey(msg)...)
+			case tabStats:
+				cmds = append(cmds, m.updateStatsKey(msg)...)
 			}
 		}
 
@@ -363,12 +294,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.nodeList.SetItems(items)
 
-	case statsLoadedMsg:
-		items := make([]list.Item, len(msg.stats))
-		for i, s := range msg.stats {
-			items[i] = s
-		}
-		m.statList.SetItems(items)
+	case dashboardLoadedMsg:
+		m.dashboard = msg.data
+
+	case dashboardTickMsg:
+		// Refresh the dashboard periodically and re-arm the ticker.
+		cmds = append(cmds, m.loadDashboard(), dashboardTick())
 
 	case errMsg:
 		m.err = msg.err
@@ -399,10 +330,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nodeList, cmd1 = m.nodeList.Update(msg)
 		m.nodeDetail, cmd2 = m.nodeDetail.Update(msg)
 		cmds = append(cmds, cmd1, cmd2)
-	case tabStats:
-		var cmd tea.Cmd
-		m.statList, cmd = m.statList.Update(msg)
-		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -436,12 +363,12 @@ func (m *tuiModel) updateMemoryKey(msg tea.KeyMsg) []tea.Cmd {
 				if agSel, ok2 := m.agentList.SelectedItem().(agentItem); ok2 {
 					_ = m.store.Delete(agSel.id, sel.fact.ID)
 					m.status = "Deleted fact " + sel.fact.ID[:8]
-					return []tea.Cmd{m.loadFacts(agSel.id), m.loadStats()}
+					return []tea.Cmd{m.loadFacts(agSel.id), m.loadDashboard()}
 				}
 			}
 		}
 	case "r":
-		return []tea.Cmd{m.loadAgents(), m.loadStats()}
+		return []tea.Cmd{m.loadAgents(), m.loadDashboard()}
 	}
 	return nil
 }
@@ -463,6 +390,13 @@ func (m *tuiModel) updateSessionsKey(msg tea.KeyMsg) []tea.Cmd {
 	return nil
 }
 
+func (m *tuiModel) updateStatsKey(msg tea.KeyMsg) []tea.Cmd {
+	if msg.String() == "r" {
+		return []tea.Cmd{m.loadDashboard()}
+	}
+	return nil
+}
+
 // ── View ──────────────────────────────────────────────────────────────────────
 
 func (m tuiModel) View() string {
@@ -478,25 +412,54 @@ func (m tuiModel) View() string {
 }
 
 func (m tuiModel) renderHeader() string {
-	title := styleTitle.Render(" GrayMatter ")
+	logo := styleLogo.Render(" GRAYMATTER ")
+
 	tabs := make([]string, len(tabNames))
 	for i, name := range tabNames {
+		label := fmt.Sprintf("[%d] %s", i+1, name)
 		if tabID(i) == m.activeTab {
-			tabs[i] = styleTabActive.Render(fmt.Sprintf("[%d] %s", i+1, name))
+			tabs[i] = styleTabActive.Render("▸ " + name + " ")
+			_ = label
 		} else {
-			tabs[i] = styleTabInactive.Render(fmt.Sprintf("[%d] %s", i+1, name))
+			tabs[i] = styleTabInactive.Render(label)
 		}
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
-	statusText := ""
+
+	// Right side: version + clock + optional status.
+	ver := styleVersion.Render("v" + version)
+	clock := styleDimText.Render("· " + time.Now().Format("15:04"))
+	right := lipgloss.JoinHorizontal(lipgloss.Top, ver, clock)
+
+	// Optional status chip (e.g. after delete/kill).
+	statusChip := ""
 	if m.status != "" {
-		statusText = styleDimText.Render("  · " + m.status)
+		statusChip = "  " + styleSubText.Render("· "+m.status)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Center, title, " ", tabBar, statusText)
+
+	left := lipgloss.JoinHorizontal(lipgloss.Top, logo, " ", tabBar, statusChip)
+
+	// Justify left/right across full width.
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap := m.width - leftW - rightW
+	if gap < 1 {
+		gap = 1
+	}
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), right)
+
+	// Thin separator line below the header.
+	sep := lipgloss.NewStyle().Foreground(colorSlate).Render(
+		strings.Repeat("─", max(1, m.width)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, bar, sep)
 }
 
 func (m tuiModel) renderBody() string {
-	bodyH := m.height - 3 // header + footer
+	bodyH := m.height - 4 // header (2) + footer (1) + spacing
+	if bodyH < 5 {
+		bodyH = 5
+	}
 	switch m.activeTab {
 	case tabMemory:
 		return m.renderMemory(bodyH)
@@ -505,31 +468,50 @@ func (m tuiModel) renderBody() string {
 	case tabGraph:
 		return m.renderGraph(bodyH)
 	case tabStats:
-		return m.renderStats(bodyH)
+		return m.renderDashboard(bodyH)
 	}
 	return ""
 }
 
 func (m tuiModel) renderFooter() string {
-	var help string
+	k := styleHelpKey.Render
+	sep := "  " + styleHelpSep.Render("│") + "  "
+
+	var groups []string
 	switch m.activeTab {
 	case tabMemory:
-		help = "←/→: pane  j/k: navigate  enter: select  d: delete  r: refresh  q: quit"
+		groups = []string{
+			k("j/k") + " " + styleDimText.Render("nav") + "  " +
+				k("←/→") + " " + styleDimText.Render("pane"),
+			k("enter") + " " + styleDimText.Render("select") + "  " +
+				k("d") + " " + styleDimText.Render("delete") + "  " +
+				k("r") + " " + styleDimText.Render("refresh"),
+			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
+				k("q") + " " + styleDimText.Render("quit"),
+		}
 	case tabSessions:
-		help = "j/k: navigate  k: kill session  r: refresh  q: quit"
+		groups = []string{
+			k("j/k") + " " + styleDimText.Render("nav"),
+			k("k") + " " + styleDimText.Render("kill") + "  " +
+				k("r") + " " + styleDimText.Render("refresh"),
+			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
+				k("q") + " " + styleDimText.Render("quit"),
+		}
 	case tabGraph:
-		help = "j/k: navigate  q: quit"
+		groups = []string{
+			k("j/k") + " " + styleDimText.Render("nav"),
+			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
+				k("q") + " " + styleDimText.Render("quit"),
+		}
 	case tabStats:
-		help = "j/k: navigate  q: quit"
+		groups = []string{
+			k("r") + " " + styleDimText.Render("refresh") + "  " +
+				styleDimText.Render("(auto every 5s)"),
+			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
+				k("q") + " " + styleDimText.Render("quit"),
+		}
 	}
-	return styleHelp.Render("1-4/tab: switch view  " + help)
-}
-
-func border(active bool) lipgloss.Style {
-	if active {
-		return styleBorderActive
-	}
-	return styleBorderInactive
+	return styleHelp.Render(strings.Join(groups, sep))
 }
 
 // ── Memory tab ────────────────────────────────────────────────────────────────
@@ -566,17 +548,17 @@ func (m tuiModel) renderGraph(h int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 }
 
-// ── Stats tab ─────────────────────────────────────────────────────────────────
-
-func (m tuiModel) renderStats(h int) string {
-	return styleBorderInactive.Width(m.width - 4).Height(h - 2).Render(m.statList.View())
-}
-
 // ── Size management ───────────────────────────────────────────────────────────
 
 func (m *tuiModel) updateSizes() {
-	bodyH := m.height - 3
+	bodyH := m.height - 4
+	if bodyH < 5 {
+		bodyH = 5
+	}
 	listH := bodyH - 4
+	if listH < 3 {
+		listH = 3
+	}
 
 	colW := m.width / 3
 	m.agentList.SetSize(colW-4, listH)
@@ -585,7 +567,6 @@ func (m *tuiModel) updateSizes() {
 	m.detail.Height = listH
 
 	m.sessionList.SetSize(m.width-6, listH)
-	m.statList.SetSize(m.width-6, listH)
 
 	leftW := m.width * 2 / 5
 	m.nodeList.SetSize(leftW-4, listH)
@@ -615,19 +596,26 @@ func min(a, b int) int {
 	return b
 }
 
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // ── Command wiring ─────────────────────────────────────────────────────────────
 
 func tuiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
-		Short: "Browse memories, sessions, KG, and stats in a terminal UI",
+		Short: "Observability dashboard for GrayMatter",
 		Long: `Interactive 4-view terminal UI for GrayMatter.
 
 Views (switch with 1-4 or tab/shift+tab):
   1. Memory   — browse agents, facts, and full fact detail
   2. Sessions — view and kill managed agent sessions
   3. Graph    — browse knowledge graph nodes and edges
-  4. Stats    — per-agent memory statistics`,
+  4. Stats    — observability dashboard (KPIs, agent activity, weight distribution, 30d sparkline)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := graymatter.DefaultConfig()
 			cfg.DataDir = dataDir
@@ -667,7 +655,6 @@ Views (switch with 1-4 or tab/shift+tab):
 				factList:    newList("Facts"),
 				sessionList: newList("Sessions"),
 				nodeList:    newList("KG Nodes"),
-				statList:    newList("Statistics"),
 				detail:      viewport.New(40, 20),
 				nodeDetail:  viewport.New(40, 20),
 			}

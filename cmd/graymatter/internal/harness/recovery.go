@@ -25,6 +25,16 @@ func ListSessions(dataDir string) ([]HarnessSession, error) {
 	return listHarnessSessions(db)
 }
 
+// ListSessionsDB returns all HarnessSession records from an already-open db
+// handle. Use this from processes that already hold the write lock (like the
+// TUI) — on Windows, bbolt refuses a second open, even read-only.
+func ListSessionsDB(db *bolt.DB) ([]HarnessSession, error) {
+	if db == nil {
+		return nil, fmt.Errorf("nil db")
+	}
+	return listHarnessSessions(db)
+}
+
 // KillSession sends a termination signal to the background process recorded
 // in the HarnessSession for sessionID, then marks its status as "killed".
 //
