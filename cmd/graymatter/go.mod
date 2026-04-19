@@ -3,7 +3,8 @@ module github.com/angelnicolasc/graymatter/cmd/graymatter
 go 1.23.0
 
 require (
-	github.com/angelnicolasc/graymatter v0.0.0
+	github.com/BurntSushi/toml v1.4.0
+	github.com/angelnicolasc/graymatter v0.5.0
 	github.com/anthropics/anthropic-sdk-go v1.33.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4
@@ -16,7 +17,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
@@ -47,5 +47,3 @@ require (
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 )
-
-replace github.com/angelnicolasc/graymatter => ../..
