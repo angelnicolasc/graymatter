@@ -3,7 +3,7 @@ module github.com/angelnicolasc/graymatter/cmd/graymatter
 go 1.23.0
 
 require (
-	github.com/angelnicolasc/graymatter v0.0.0
+	github.com/angelnicolasc/graymatter v0.5.0
 	github.com/anthropics/anthropic-sdk-go v1.33.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4
@@ -47,5 +47,3 @@ require (
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 )
-
-replace github.com/angelnicolasc/graymatter => ../..
