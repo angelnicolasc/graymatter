@@ -1,8 +1,10 @@
+<div align="center">
+  <img width="1500" height="276" alt="graymatter-banner" src=".github/assets/graymatter-banner-1.jpg" />
+</div>
+
 <h1 align="center"> GrayMatter </h1>
 
-<div align="center">
-  <img width="1500" height="276" alt="graymatter-banner" src=".github/assets/graymatter1.jpg" />
-</div>
+
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
@@ -29,10 +31,6 @@ Free. Offline. No account required.
 <br />
 </div>
 
-```bash
-go get github.com/angelnicolasc/graymatter
-```
-
 ```go
 ctx := context.Background()
 mem := graymatter.New(".graymatter")
@@ -45,16 +43,59 @@ facts, _ := mem.Recall(ctx, "agent", "how should I format this response?")
 
 ## Why
 
-Every AI agent today is stateless by default. Every run starts from zero.
+Every AI agent is **stateless by default**. Each run re-injects the full
+conversation history — and that history grows linearly. Two prompts in and you've already burned half of your daily quota.
 
-Mem0, Zep, Supermemory solve this — but in Python or TypeScript, and they
-require a server. Go has zero production-ready, embeddable, zero-deps
-memory layer for agents. That gap is GrayMatter.
+That's not just a memory problem. That's a money and performance problem.
 
-**~90% token reduction** at 100 sessions versus full-history injection.
-No Docker. No Redis. No Python. No API key required for storage.
+
+**Mem0, Zep, Supermemory** solve this — but they're Python/TypeScript-only
+and require a running server. The Go ecosystem has no production-ready,
+embeddable, zero-dependency memory layer for agents.
+
+That gap is GrayMatter.
+
+<p align="center">
+  <img src=".github/assets/token-reduction-chart1.jpg" alt="GrayMatter-Chart1" width="800px" style="max-width: 900px;">
+</p>
+
+
+<p align="center">
+<strong>~97% reduction in context tokens</strong> — versus full-history injection.<br>
+Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
+No Docker. No Redis. No API key required for storage.<br><br>
+Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
+</p>
 
 ---
+
+## Observability
+
+You can't improve what you can't see.
+
+`graymatter tui` opens a live terminal dashboard with everything your
+agent memory is doing — no extra setup required.
+
+<p align="center">
+  <img src=".github/assets/tui-graymatter.jpg" alt="GrayMatter-TUI" width="900px" style="max-width: 900px;">
+</p>
+
+**What you get at a glance:**
+
+- **Facts** — total stored, distributed across agents
+- **Memory cost** — KB on disk (text + embeddings), not tokens
+- **Recalls** — cumulative access count across all sessions
+- **Health** — percentage of facts above relevance threshold (weight > 0.5)
+- **Token cost (30d)** — real spend breakdown by model, with cache hit rate
+- **Agent activity** — facts vs recalls per agent, side by side
+- **Weight distribution** — how consolidated your memory is over time
+- **Activity timeline** — facts created per day, last 30 days
+
+The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
+`r` to force refresh, `q` to quit.
+
+---
+
 
 ## Install
 
@@ -82,6 +123,78 @@ go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
 ```bash
 go get github.com/angelnicolasc/graymatter
 ```
+---
+
+## MCP clients (drop-in)
+
+```bash
+graymatter init
+```
+
+One command auto-wires GrayMatter into every supported client at once.
+Existing entries from other MCP servers are **merged, not overwritten** —
+safe to run in any repo.
+
+| Client | Config file auto-wired | Scope |
+|--------|------------------------|-------|
+| Claude Code | `.mcp.json` | project |
+| Cursor | `.cursor/mcp.json` | project |
+| Codex (OpenAI) | `~/.codex/config.toml` | home |
+| OpenCode | `opencode.jsonc` | project |
+| Antigravity (Google) | `mcp_config.json` | project (opt-in: `--with-antigravity`) |
+
+Narrow down what gets wired:
+
+```bash
+graymatter init --only claudecode,cursor     # whitelist
+graymatter init --skip-codex --skip-opencode # blacklist
+graymatter init --with-antigravity           # include opt-in clients
+```
+
+Then **restart your editor** (or toggle the MCP server off/on in its
+settings). Five tools become available:
+
+| Tool | What it does |
+|------|-------------|
+| `memory_search` | Recall facts for a query |
+| `memory_add` | Store a new fact |
+| `checkpoint_save` | Snapshot current session |
+| `checkpoint_resume` | Restore last checkpoint |
+| `memory_reflect` | Add / update / forget / link memories (agent self-edit) |
+
+### Any other MCP-compatible client
+
+GrayMatter speaks plain MCP. If your client isn't on the table above,
+point it at the binary:
+
+```bash
+graymatter mcp serve              # stdio transport
+graymatter mcp serve --http :8080 # HTTP transport
+```
+
+The schema is identical to every other MCP server — `command` +
+`args: ["mcp", "serve"]`. No proprietary glue.
+
+### Global install (all projects)
+
+If you'd rather not run `graymatter init` in every repo, drop the same
+JSON into the editor's global config — `~/.cursor/mcp.json` for Cursor,
+`~/.claude/mcp.json` for Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "graymatter": {
+      "command": "graymatter",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+`graymatter` must be on `PATH`. The `init` command handles this
+automatically on Windows via the User `PATH` registry; on macOS / Linux
+the recommended install path `/usr/local/bin` is already on `PATH`.
 
 ---
 
@@ -216,7 +329,149 @@ Global flags: `--dir` (data dir), `--quiet`, `--json`
 
 ---
 
-## Observability
+
+
+## Memory lifecycle
+
+```
+Recall(agent, task)          ← hybrid: vector + keyword + recency → top-8 facts
+    ↓
+Inject into system prompt    ← your 3 lines of code
+    ↓
+Agent runs
+    ↓
+Remember(agent, observation) ← store key facts during/after run
+    ↓
+Consolidate() [async]        ← summarise + decay + prune (LLM optional)
+```
+
+Consolidation is the only "smart" step. Everything else is deterministic.
+Without consolidation, GrayMatter still works — it just doesn't compress over time.
+
+Consolidation auto-enables when `ANTHROPIC_API_KEY` is set. To use Ollama:
+
+```go
+cfg := graymatter.DefaultConfig()
+cfg.ConsolidateLLM = "ollama"
+```
+
+---
+
+
+## Token efficiency
+
+Numbers produced by `go run ./benchmarks/token_count` — real Recall calls,
+keyword embedder, no LLM required:
+
+| Sessions | Full injection | GrayMatter | Reduction |
+|----------|---------------|------------|-----------|
+| 1        | ~80 tokens    | ~80 tokens | 0% |
+| 10       | ~630 tokens   | ~550 tokens | 12% |
+| 30       | ~1,880 tokens | ~550 tokens | 71% |
+| 100      | ~6,960 tokens | ~670 tokens | **90%** |
+
+Each "session" = one paragraph-length agent observation (~60 words).
+GrayMatter always injects only the top-8 most relevant observations for the query.
+With vector embeddings the recall precision improves, maintaining similar reduction ratios.
+
+Reproduce locally:
+
+```bash
+go run ./benchmarks/token_count
+```
+
+
+---
+
+## Storage
+
+| Layer | Tech | What it holds |
+|-------|------|--------------|
+| KV store | bbolt (pure Go, ACID) | Sessions, checkpoints, facts, metadata, KG |
+| Vector index | chromem-go (pure Go) | Semantic embeddings, hybrid retrieval |
+| Export | Markdown files | Human-readable, git-friendly, Obsidian-compatible |
+
+Single file: `~/.graymatter/gray.db`  
+Single folder: `.graymatter/vectors/`
+
+No migrations. No schema versions. Append-only with decay-based eviction.
+
+---
+
+## Embeddings
+
+GrayMatter degrades gracefully. It works without any embedding model.
+
+| Mode | When |
+|------|------|
+| **Ollama** (default) | Machine has Ollama running with `nomic-embed-text` |
+| **OpenAI** | `OPENAI_API_KEY` set, Ollama not available |
+| **Anthropic** | `ANTHROPIC_API_KEY` set, Ollama and OpenAI not available |
+| **Keyword-only** | No embedding available — TF-IDF + recency, zero deps |
+
+Auto-detection order in `EmbeddingAuto` mode: Ollama → OpenAI → Anthropic → keyword.
+
+```bash
+# Pull the embedding model once (Ollama):
+ollama pull nomic-embed-text
+
+# Or set an API key (OpenAI or Anthropic):
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+
+
+---
+
+## Testing
+
+The full test suite requires no LLM and no network — every test uses
+`t.TempDir()` with a keyword embedder or injected stubs. Runs clean on
+Linux, macOS, and Windows in CI.
+
+```bash
+# Core library
+go test -count=1 -timeout=120s ./pkg/memory/...
+
+# CLI / server / plugins
+cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
+```
+
+| Package | Tests | What's covered |
+|---------|-------|----------------|
+| `pkg/memory` | 42 unit tests + 3 fuzz targets | Store lifecycle, hybrid recall, RRF fusion, decay math, semaphore, concurrent writes, vector paths, dimension guard |
+| `internal/harness` | 21 | Agent file parsing, retry/backoff, session recovery |
+| `internal/kg` | 21 | Graph CRUD, entity extraction, weight decay, Obsidian export |
+| `internal/server` | 11 | All REST endpoints, concurrent remember/recall, cancelled-context requests |
+| `internal/plugin` | 10 | Install, list, remove, E2E echo plugin binary |
+
+**Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` — each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
+
+**Core library coverage: 73.5%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
+
+Token-reduction benchmark (also zero deps):
+
+```bash
+go run ./benchmarks/token_count
+```
+
+---
+
+## Build from source
+
+```bash
+git clone https://github.com/angelnicolasc/graymatter
+cd graymatter
+CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=dev" -o graymatter ./cmd/graymatter
+```
+
+Output: single static binary, ~10 MB, no runtime dependencies.
+
+---
+
+## Metrics & APM hooks
+
 
 The REST server (`graymatter server`) exposes a `/metrics` endpoint powered by Go's standard `expvar` package — zero extra dependencies.
 
@@ -269,213 +524,6 @@ store, err := memory.Open(memory.StoreConfig{
 
 ---
 
-## MCP clients (drop-in)
-
-```bash
-graymatter init
-```
-
-One command auto-wires GrayMatter into every supported client at once.
-Existing entries from other MCP servers are **merged, not overwritten** —
-safe to run in any repo.
-
-| Client | Config file auto-wired | Scope |
-|--------|------------------------|-------|
-| Claude Code | `.mcp.json` | project |
-| Cursor | `.cursor/mcp.json` | project |
-| Codex (OpenAI) | `~/.codex/config.toml` | home |
-| OpenCode | `opencode.jsonc` | project |
-| Antigravity (Google) | `mcp_config.json` | project (opt-in: `--with-antigravity`) |
-
-Narrow down what gets wired:
-
-```bash
-graymatter init --only claudecode,cursor     # whitelist
-graymatter init --skip-codex --skip-opencode # blacklist
-graymatter init --with-antigravity           # include opt-in clients
-```
-
-Then **restart your editor** (or toggle the MCP server off/on in its
-settings). Five tools become available:
-
-| Tool | What it does |
-|------|-------------|
-| `memory_search` | Recall facts for a query |
-| `memory_add` | Store a new fact |
-| `checkpoint_save` | Snapshot current session |
-| `checkpoint_resume` | Restore last checkpoint |
-| `memory_reflect` | Add / update / forget / link memories (agent self-edit) |
-
-### Any other MCP-compatible client
-
-GrayMatter speaks plain MCP. If your client isn't on the table above,
-point it at the binary:
-
-```bash
-graymatter mcp serve              # stdio transport
-graymatter mcp serve --http :8080 # HTTP transport
-```
-
-The schema is identical to every other MCP server — `command` +
-`args: ["mcp", "serve"]`. No proprietary glue.
-
-### Global install (all projects)
-
-If you'd rather not run `graymatter init` in every repo, drop the same
-JSON into the editor's global config — `~/.cursor/mcp.json` for Cursor,
-`~/.claude/mcp.json` for Claude Code:
-
-```json
-{
-  "mcpServers": {
-    "graymatter": {
-      "command": "graymatter",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-`graymatter` must be on `PATH`. The `init` command handles this
-automatically on Windows via the User `PATH` registry; on macOS / Linux
-the recommended install path `/usr/local/bin` is already on `PATH`.
-
----
-
-## Storage
-
-| Layer | Tech | What it holds |
-|-------|------|--------------|
-| KV store | bbolt (pure Go, ACID) | Sessions, checkpoints, facts, metadata, KG |
-| Vector index | chromem-go (pure Go) | Semantic embeddings, hybrid retrieval |
-| Export | Markdown files | Human-readable, git-friendly, Obsidian-compatible |
-
-Single file: `~/.graymatter/gray.db`  
-Single folder: `.graymatter/vectors/`
-
-No migrations. No schema versions. Append-only with decay-based eviction.
-
----
-
-## Embeddings
-
-GrayMatter degrades gracefully. It works without any embedding model.
-
-| Mode | When |
-|------|------|
-| **Ollama** (default) | Machine has Ollama running with `nomic-embed-text` |
-| **OpenAI** | `OPENAI_API_KEY` set, Ollama not available |
-| **Anthropic** | `ANTHROPIC_API_KEY` set, Ollama and OpenAI not available |
-| **Keyword-only** | No embedding available — TF-IDF + recency, zero deps |
-
-Auto-detection order in `EmbeddingAuto` mode: Ollama → OpenAI → Anthropic → keyword.
-
-```bash
-# Pull the embedding model once (Ollama):
-ollama pull nomic-embed-text
-
-# Or set an API key (OpenAI or Anthropic):
-export OPENAI_API_KEY=sk-...
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
----
-
-## Memory lifecycle
-
-```
-Recall(agent, task)          ← hybrid: vector + keyword + recency → top-8 facts
-    ↓
-Inject into system prompt    ← your 3 lines of code
-    ↓
-Agent runs
-    ↓
-Remember(agent, observation) ← store key facts during/after run
-    ↓
-Consolidate() [async]        ← summarise + decay + prune (LLM optional)
-```
-
-Consolidation is the only "smart" step. Everything else is deterministic.
-Without consolidation, GrayMatter still works — it just doesn't compress over time.
-
-Consolidation auto-enables when `ANTHROPIC_API_KEY` is set. To use Ollama:
-
-```go
-cfg := graymatter.DefaultConfig()
-cfg.ConsolidateLLM = "ollama"
-```
-
----
-
-## Token efficiency
-
-Numbers produced by `go run ./benchmarks/token_count` — real Recall calls,
-keyword embedder, no LLM required:
-
-| Sessions | Full injection | GrayMatter | Reduction |
-|----------|---------------|------------|-----------|
-| 1        | ~80 tokens    | ~80 tokens | 0% |
-| 10       | ~630 tokens   | ~550 tokens | 12% |
-| 30       | ~1,880 tokens | ~550 tokens | 71% |
-| 100      | ~6,960 tokens | ~670 tokens | **90%** |
-
-Each "session" = one paragraph-length agent observation (~60 words).
-GrayMatter always injects only the top-8 most relevant observations for the query.
-With vector embeddings the recall precision improves, maintaining similar reduction ratios.
-
-Reproduce locally:
-
-```bash
-go run ./benchmarks/token_count
-```
-
----
-
-## Build from source
-
-```bash
-git clone https://github.com/angelnicolasc/graymatter
-cd graymatter
-CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=dev" -o graymatter ./cmd/graymatter
-```
-
-Output: single static binary, ~10 MB, no runtime dependencies.
-
----
-
-## Testing
-
-The full test suite requires no LLM and no network — every test uses
-`t.TempDir()` with a keyword embedder or injected stubs. Runs clean on
-Linux, macOS, and Windows in CI.
-
-```bash
-# Core library
-go test -count=1 -timeout=120s ./pkg/memory/...
-
-# CLI / server / plugins
-cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
-```
-
-| Package | Tests | What's covered |
-|---------|-------|----------------|
-| `pkg/memory` | 42 unit tests + 3 fuzz targets | Store lifecycle, hybrid recall, RRF fusion, decay math, semaphore, concurrent writes, vector paths, dimension guard |
-| `internal/harness` | 21 | Agent file parsing, retry/backoff, session recovery |
-| `internal/kg` | 21 | Graph CRUD, entity extraction, weight decay, Obsidian export |
-| `internal/server` | 11 | All REST endpoints, concurrent remember/recall, cancelled-context requests |
-| `internal/plugin` | 10 | Install, list, remove, E2E echo plugin binary |
-
-**Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` — each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
-
-**Core library coverage: 73.5%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
-
-Token-reduction benchmark (also zero deps):
-
-```bash
-go run ./benchmarks/token_count
-```
-
----
 
 ## What GrayMatter is NOT
 
@@ -486,7 +534,7 @@ go run ./benchmarks/token_count
 - Not trying to win the enterprise memory market.
 
 It is exactly one thing: **the missing stateful layer for Go CLI agents**,
-packaged as a library you import in two lines.
+packaged as a library you import in three lines.
 
 ---
 
