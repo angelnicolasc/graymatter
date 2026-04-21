@@ -102,6 +102,16 @@ The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 **Binary (recommended):**
 
 ```bash
+# Linux (x86_64)
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.5.1/graymatter_0.5.1_linux_amd64.tar.gz
+tar -xzf graymatter.tar.gz
+sudo mv graymatter /usr/local/bin/
+
+# Linux (ARM64)
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.5.1/graymatter_0.5.1_linux_arm64.tar.gz
+tar -xzf graymatter.tar.gz
+sudo mv graymatter /usr/local/bin/
+
 # macOS (Apple Silicon)
 curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.5.1/graymatter_0.5.1_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
