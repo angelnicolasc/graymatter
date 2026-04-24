@@ -371,3 +371,102 @@ func TestEmbedDimensionValidation_RecordsOnFirstWrite(t *testing.T) {
 
 	_ = s.Close()
 }
+
+// ── Read-only store tests ─────────────────────────────────────────────────────
+
+// TestOpen_ForceReadOnly verifies that StoreConfig.ReadOnly=true opens the
+// store in read-only mode: IsReadOnly() is true and read operations work.
+func TestOpen_ForceReadOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed the store with a fact using a normal write-mode open.
+	rw, err := Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour})
+	if err != nil {
+		t.Fatalf("write open: %v", err)
+	}
+	_ = rw.Put(context.Background(), "ro-agent", "persisted fact")
+	_ = rw.Close()
+
+	// Reopen in forced read-only mode.
+	ro, err := Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour, ReadOnly: true})
+	if err != nil {
+		t.Fatalf("read-only open: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+
+	if !ro.IsReadOnly() {
+		t.Fatal("IsReadOnly() should be true when ReadOnly config is set")
+	}
+
+	// Read operations must still work.
+	facts, err := ro.List("ro-agent")
+	if err != nil {
+		t.Fatalf("List in read-only mode: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Errorf("expected 1 fact, got %d", len(facts))
+	}
+}
+
+// TestOpen_LockContention verifies that when the write lock is held a second
+// Open() fails with a descriptive error (bbolt's shared-lock is also blocked
+// by an exclusive lock, so the RO fallback cannot succeed either). The error
+// message must mention the lock so the user knows what to do.
+func TestOpen_LockContention(t *testing.T) {
+	// Reduce the timeout so the test runs in < 250 ms.
+	orig := boltOpenTimeout
+	boltOpenTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { boltOpenTimeout = orig })
+
+	dir := t.TempDir()
+
+	// First open: holds the exclusive write lock.
+	rw, err := Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	defer func() { _ = rw.Close() }()
+
+	// Second open: both write and RO fallback will time out.
+	// We expect an error whose message tells the user the DB is locked.
+	_, err = Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour})
+	if err == nil {
+		t.Fatal("expected an error when write lock is held, got nil")
+	}
+	if !strings.Contains(err.Error(), "locked") {
+		t.Errorf("error should mention 'locked', got: %v", err)
+	}
+}
+
+// TestReadOnlyStore_MutationsReturnErr verifies that Put, Delete, and
+// UpdateFact all return ErrStoreReadOnly when the store is read-only.
+func TestReadOnlyStore_MutationsReturnErr(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed with one fact so buckets exist.
+	rw, err := Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour})
+	if err != nil {
+		t.Fatalf("write open: %v", err)
+	}
+	f := newFact("mut-agent", "original text", nil)
+	_ = rw.Put(context.Background(), "mut-agent", "original text")
+	_ = rw.Close()
+
+	ro, err := Open(StoreConfig{DataDir: dir, DecayHalfLife: 720 * time.Hour, ReadOnly: true})
+	if err != nil {
+		t.Fatalf("read-only open: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+
+	ctx := context.Background()
+
+	if err := ro.Put(ctx, "mut-agent", "new fact"); !errors.Is(err, ErrStoreReadOnly) {
+		t.Errorf("Put: want ErrStoreReadOnly, got %v", err)
+	}
+	if err := ro.Delete("mut-agent", f.ID); !errors.Is(err, ErrStoreReadOnly) {
+		t.Errorf("Delete: want ErrStoreReadOnly, got %v", err)
+	}
+	if err := ro.UpdateFact("mut-agent", f); !errors.Is(err, ErrStoreReadOnly) {
+		t.Errorf("UpdateFact: want ErrStoreReadOnly, got %v", err)
+	}
+}

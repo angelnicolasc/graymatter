@@ -124,9 +124,10 @@ const (
 // ── Main model ────────────────────────────────────────────────────────────────
 
 type tuiModel struct {
-	store   graymatter.AdvancedStore
-	dataDir string
-	graph   *kg.Graph
+	store    graymatter.AdvancedStore
+	dataDir  string
+	graph    *kg.Graph
+	readOnly bool // true when the store is in read-only mode
 
 	// layout
 	activeTab tabID
@@ -358,6 +359,10 @@ func (m *tuiModel) updateMemoryKey(msg tea.KeyMsg) []tea.Cmd {
 			}
 		}
 	case "d":
+		if m.readOnly {
+			m.status = "read-only: cannot delete facts while another process holds the store"
+			return nil
+		}
 		if m.memPane == memPaneFacts {
 			if sel, ok := m.factList.SelectedItem().(factItem); ok {
 				if agSel, ok2 := m.agentList.SelectedItem().(agentItem); ok2 {
@@ -378,6 +383,10 @@ func (m *tuiModel) updateSessionsKey(msg tea.KeyMsg) []tea.Cmd {
 	case "r":
 		return []tea.Cmd{m.loadSessions()}
 	case "k":
+		if m.readOnly {
+			m.status = "read-only: cannot kill sessions while another process holds the store"
+			return nil
+		}
 		if sel, ok := m.sessionList.SelectedItem().(sessionItem); ok {
 			if err := harness.KillSession(sel.s.ID, m.dataDir); err != nil {
 				m.status = "kill: " + err.Error()
@@ -437,7 +446,13 @@ func (m tuiModel) renderHeader() string {
 		statusChip = "  " + styleSubText.Render("· "+m.status)
 	}
 
-	left := lipgloss.JoinHorizontal(lipgloss.Top, logo, " ", tabBar, statusChip)
+	// Read-only badge: shown when the store is locked by another process.
+	roBadge := ""
+	if m.readOnly {
+		roBadge = "  " + styleStatusFail.Render("⊘ read-only")
+	}
+
+	left := lipgloss.JoinHorizontal(lipgloss.Top, logo, " ", tabBar, statusChip, roBadge)
 
 	// Justify left/right across full width.
 	leftW := lipgloss.Width(left)
@@ -480,19 +495,27 @@ func (m tuiModel) renderFooter() string {
 	var groups []string
 	switch m.activeTab {
 	case tabMemory:
+		mutKeys := k("d") + " " + styleDimText.Render("delete") + "  "
+		if m.readOnly {
+			mutKeys = styleStatusFail.Render("d") + " " + styleDimText.Render("(read-only)") + "  "
+		}
 		groups = []string{
 			k("j/k") + " " + styleDimText.Render("nav") + "  " +
 				k("←/→") + " " + styleDimText.Render("pane"),
 			k("enter") + " " + styleDimText.Render("select") + "  " +
-				k("d") + " " + styleDimText.Render("delete") + "  " +
+				mutKeys +
 				k("r") + " " + styleDimText.Render("refresh"),
 			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
 				k("q") + " " + styleDimText.Render("quit"),
 		}
 	case tabSessions:
+		killKey := k("k") + " " + styleDimText.Render("kill") + "  "
+		if m.readOnly {
+			killKey = styleStatusFail.Render("k") + " " + styleDimText.Render("(read-only)") + "  "
+		}
 		groups = []string{
 			k("j/k") + " " + styleDimText.Render("nav"),
-			k("k") + " " + styleDimText.Render("kill") + "  " +
+			killKey +
 				k("r") + " " + styleDimText.Render("refresh"),
 			k("1-4") + " " + styleDimText.Render("tabs") + "  " +
 				k("q") + " " + styleDimText.Render("quit"),
@@ -606,7 +629,9 @@ func max(a, b int) int {
 // ── Command wiring ─────────────────────────────────────────────────────────────
 
 func tuiCmd() *cobra.Command {
-	return &cobra.Command{
+	var forceReadOnly bool
+
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Observability dashboard for GrayMatter",
 		Long: `Interactive 4-view terminal UI for GrayMatter.
@@ -615,10 +640,14 @@ Views (switch with 1-4 or tab/shift+tab):
   1. Memory   — browse agents, facts, and full fact detail
   2. Sessions — view and kill managed agent sessions
   3. Graph    — browse knowledge graph nodes and edges
-  4. Stats    — observability dashboard (KPIs, agent activity, weight distribution, 30d sparkline)`,
+  4. Stats    — observability dashboard (KPIs, agent activity, weight distribution, 30d sparkline)
+
+If another process (e.g. opencode) holds the store write-lock, the TUI opens
+automatically in read-only mode. Use --read-only to force this from the start.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := graymatter.DefaultConfig()
 			cfg.DataDir = dataDir
+			cfg.ReadOnly = forceReadOnly
 
 			mem, err := graymatter.NewWithConfig(cfg)
 			if err != nil {
@@ -651,6 +680,7 @@ Views (switch with 1-4 or tab/shift+tab):
 				store:       store,
 				dataDir:     dataDir,
 				graph:       graph,
+				readOnly:    store.IsReadOnly(),
 				agentList:   newList("Agents"),
 				factList:    newList("Facts"),
 				sessionList: newList("Sessions"),
@@ -664,4 +694,8 @@ Views (switch with 1-4 or tab/shift+tab):
 			return err
 		},
 	}
+
+	cmd.Flags().BoolVar(&forceReadOnly, "read-only", false,
+		"open store in read-only mode (skips all mutating operations)")
+	return cmd
 }
