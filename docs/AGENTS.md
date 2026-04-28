@@ -2,7 +2,7 @@
 
 > Operational guide for AI agents (Claude Code, Cursor, OpenCode, Codex, Antigravity, custom MCP clients, Go callers) using GrayMatter as long-term memory.
 >
-> See [`GRAYMATTER_PLAYBOOK.md`](../GRAYMATTER_PLAYBOOK.md) for **why** GrayMatter exists. This doc is **how** to use it.
+
 
 ---
 
