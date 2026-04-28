@@ -164,18 +164,27 @@ func TestRecall_UpdatesAccessMetadata(t *testing.T) {
 		t.Fatalf("Recall: %v", err)
 	}
 
-	// Wait briefly for the background UpdateFact goroutine to complete.
-	time.Sleep(50 * time.Millisecond)
+	// Recall updates access metadata in a background goroutine. Poll with a
+	// deadline rather than relying on a fixed sleep — under -race on slow CI
+	// runners a fixed wait becomes flaky.
+	var after []Fact
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		after, _ = s.List("meta-agent")
+		if len(after) > 0 && after[0].AccessCount > initialCount && after[0].AccessedAt.After(initialAccess) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
-	after, _ := s.List("meta-agent")
 	if len(after) == 0 {
 		t.Fatal("fact disappeared after recall")
 	}
 	if after[0].AccessCount <= initialCount {
-		t.Errorf("AccessCount not incremented: before=%d after=%d", initialCount, after[0].AccessCount)
+		t.Errorf("AccessCount not incremented within 2s: before=%d after=%d", initialCount, after[0].AccessCount)
 	}
 	if !after[0].AccessedAt.After(initialAccess) {
-		t.Errorf("AccessedAt not advanced: before=%v after=%v", initialAccess, after[0].AccessedAt)
+		t.Errorf("AccessedAt not advanced within 2s: before=%v after=%v", initialAccess, after[0].AccessedAt)
 	}
 }
 
