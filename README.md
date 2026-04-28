@@ -172,6 +172,11 @@ settings). Five tools become available:
 | `checkpoint_resume` | Restore last checkpoint |
 | `memory_reflect` | Add / update / forget / link memories (agent self-edit) |
 
+> Agents using these tools should read **[docs/AGENTS.md](docs/AGENTS.md)** —
+> when to store vs. checkpoint, query patterns, anti-patterns, and the exact
+> per-tool parameter names (heads-up: `memory_reflect` uses `agent`, the
+> other four use `agent_id`).
+
 ### Any other MCP-compatible client
 
 GrayMatter speaks plain MCP. If your client isn't on the table above,

@@ -10,6 +10,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.5.2] – 2026-04-28
+
+### Added
+
+**Agent onboarding kit — `docs/AGENTS.md`**
+- New ~650-line operational guide covering when and how to use GrayMatter from Claude Code, Cursor, OpenCode, Codex, Antigravity, and any MCP-compatible host.
+- Authoritative MCP tool reference table (exact param names per tool — resolves the `agent` vs `agent_id` inconsistency between `memory_reflect` and the other four tools, see `cmd/graymatter/internal/mcp/server.go:144`).
+- Replaces fabricated retrieval-weight numbers with a correct RRF (Reciprocal Rank Fusion) explanation, cross-referenced to `pkg/memory/recall.go:14`.
+- Adds CLI parity table, library API pointer (`examples/agent/main.go`), multi-process bbolt lock guidance, and a knowledge-graph `link`-action caveat (only works when the host wires `SetKGLinker`).
+- Cross-references `GRAYMATTER_PLAYBOOK.md` (strategy / why) ↔ `docs/AGENTS.md` (operations / how).
+
+**README link**
+- New blockquote in the `MCP clients (drop-in)` section pointing readers at `docs/AGENTS.md` for per-tool parameter names and usage patterns.
+
+### Credits
+
+- Original draft contributed by **MikeCase** (`MikeCase/graymatter-agent-patterns`, issue #6). Edited and extended for accuracy against the current codebase.
+
+---
+
 ## [0.5.0] – 2026-04-18
 
 ### Added
