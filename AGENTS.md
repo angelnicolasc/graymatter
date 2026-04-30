@@ -23,16 +23,43 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 - **When the user corrects you** or a fact becomes stale → `memory_reflect` with `action="update"` and `target=<old fact text>`.
 - **At the start of a session** that may resume a long task → `checkpoint_resume`. **Before stopping** mid-task → `checkpoint_save`.
 
+## First call
+
+The very first thing to do when you open a session is pull what you already know:
+
+```jsonc
+{ "tool": "memory_search", "args": {
+    "agent_id": "<project>-<your-role>",
+    "query":    "<the task the user just asked you to do>",
+    "top_k":    8
+}}
+```
+
+Inject the returned facts into your working context before composing your reply.
+
 ## Identity
 
 Pick a stable `agent_id` of the form `<project>-<role>` (e.g. `graymatter-backend`, `okuna-frontend`). Don't invent a new ID per session — that defeats persistence.
 
-For project-wide rules (conventions everyone in the repo should follow), use the reserved namespace `__shared__` as your `agent_id`.
+## Shared facts (`__shared__`)
+
+Project-wide rules — conventions every agent in this repo should respect — go in the reserved namespace `__shared__`. Pass it as `agent_id` exactly like any other ID:
+
+```jsonc
+{ "tool": "memory_add", "args": {
+    "agent_id": "__shared__",
+    "text":     "Project convention: all timestamps stored as UTC ISO-8601"
+}}
+```
+
+To get both your agent-specific facts and shared facts in one go, issue two `memory_search` calls (one with your own `agent_id`, one with `__shared__`) and merge the results.
 
 ## Don't store
 
-- Conversation logs, transient state, current-file pointers (use `checkpoint_save` for those)
-- Secrets, credentials, API keys
+- **Conversation logs** ("user said X, I said Y") — store the *conclusion*, not the dialogue
+- **Transient state** (current file, line numbers, ephemeral debug values) — that's what `checkpoint_save` is for
+- **Over-specific facts** ("fixed bug at line 47 on 2026-04-15") — generalise to the lesson ("auth.js: JWT validation fails when clock skew > 5 min")
+- **Secrets, credentials, API keys** — never
 - Things already in code, README, or this file
 
 ## Working in this codebase
