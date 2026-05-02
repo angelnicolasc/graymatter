@@ -191,7 +191,7 @@ The old fact is dropped to weight 0; consolidation prunes it on the next pass.
     "action": "forget",
     "agent":  "backend-agent",
     "text":   "",  // placeholder (required by API)
-    "text":   "Workaround for Node 14 bug (project now on Node 18)"
+    "target":   "Workaround for Node 14 bug (project now on Node 18)"
 }}
 ```
 
