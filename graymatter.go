@@ -98,6 +98,7 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 		OnConsolidateError:      cfg.OnConsolidateError,
 		OnVectorIndexError:      cfg.OnVectorIndexError,
 		VectorReconcileInterval: cfg.VectorReconcileInterval,
+		ReadOnly:                cfg.ReadOnly,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graymatter: open store: %w", err)
@@ -310,6 +311,9 @@ type AdvancedStore interface {
 	// DB exposes the raw bbolt handle for the session/checkpoint subsystems.
 	// New callers should prefer higher-level methods; this is an escape hatch.
 	DB() *bolt.DB
+	// IsReadOnly reports whether the store was opened in read-only mode.
+	// Mutating methods (Put, Delete, UpdateFact) return ErrStoreReadOnly when true.
+	IsReadOnly() bool
 }
 
 // Advanced returns a narrow handle for advanced operations needed by the CLI,

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -20,7 +21,15 @@ var (
 	bucketMeta          = []byte("meta")
 	bucketAgents        = []byte("agents")
 	bucketPendingVector = []byte("pending_vector")
+
+	// ErrStoreReadOnly is returned by mutating methods when the store was opened
+	// in read-only mode (e.g. another process holds the write lock).
+	ErrStoreReadOnly = errors.New("store is read-only")
 )
+
+// boltOpenTimeout is the maximum time bolt.Open waits to acquire the file lock.
+// Overridable in tests to speed up lock-contention scenarios.
+var boltOpenTimeout = 2 * time.Second
 
 // SharedAgentID is the reserved agent ID for the shared memory namespace.
 // Facts stored here are readable by all agents via RecallShared and RecallAll.
@@ -60,6 +69,11 @@ type StoreConfig struct {
 	// (Open() still runs one drain at startup).
 	VectorReconcileInterval time.Duration
 
+	// ReadOnly opens the store in read-only mode from the start, skipping all
+	// mutating operations. When false (default), Open() automatically falls back
+	// to read-only if the write lock is held by another process.
+	ReadOnly bool
+
 	// OnRecall, if non-nil, is called after each Recall with timing and count.
 	OnRecall func(agentID, query string, resultCount int, duration time.Duration)
 
@@ -91,10 +105,11 @@ type EntityExtractorAccessor interface {
 // structured storage with a pluggable VectorStore for similarity search.
 // All public methods are safe for concurrent use.
 type Store struct {
-	db      *bolt.DB
-	vectors VectorStore
+	db       *bolt.DB
+	vectors  VectorStore
 	embedder embedding.Provider
 	cfg      StoreConfig
+	readOnly bool
 
 	mu sync.RWMutex
 
@@ -119,22 +134,24 @@ func Open(cfg StoreConfig) (*Store, error) {
 	}
 
 	dbPath := filepath.Join(cfg.DataDir, "gray.db")
-	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: 5 * time.Second})
+	db, readOnly, err := openBoltDB(dbPath, cfg.ReadOnly)
 	if err != nil {
-		return nil, fmt.Errorf("open bbolt: %w", err)
+		return nil, err
 	}
 
-	// Ensure top-level buckets exist.
-	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents, bucketPendingVector} {
-			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
-				return err
+	if !readOnly {
+		// Ensure top-level buckets exist.
+		if err := db.Update(func(tx *bolt.Tx) error {
+			for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents, bucketPendingVector} {
+				if _, err := tx.CreateBucketIfNotExists(name); err != nil {
+					return err
+				}
 			}
+			return nil
+		}); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("init buckets: %w", err)
 		}
-		return nil
-	}); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("init buckets: %w", err)
 	}
 
 	// Use the caller-supplied vector backend, or default to chromem-go.
@@ -154,6 +171,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 		vectors:        vectors,
 		embedder:       cfg.Embedder,
 		cfg:            cfg,
+		readOnly:       readOnly,
 		shutdownCtx:    ctx,
 		shutdownCancel: cancel,
 		sema:           make(chan struct{}, cfg.MaxAsyncConsolidations),
@@ -162,25 +180,60 @@ func Open(cfg StoreConfig) (*Store, error) {
 	// Hydrate known agent IDs so collections are ready.
 	_ = s.loadAgents()
 
-	// Validate embedding dimensions against the stored value; warn on mismatch.
-	if cfg.Embedder != nil {
-		s.checkEmbedDimensions(cfg.Embedder)
-	}
+	if !readOnly {
+		// Validate embedding dimensions against the stored value; warn on mismatch.
+		if cfg.Embedder != nil {
+			s.checkEmbedDimensions(cfg.Embedder)
+		}
 
-	// Drain any vector writes that did not complete on the previous run
-	// (crash between bbolt commit and vector upsert, or transient failures).
-	s.reconcileVectors()
+		// Drain any vector writes that did not complete on the previous run
+		// (crash between bbolt commit and vector upsert, or transient failures).
+		s.reconcileVectors()
 
-	// Background reconcile loop: retries pending vectors on a cadence so the
-	// inconsistency window collapses to at most VectorReconcileInterval rather
-	// than "until next process restart". Disabled when the interval is 0.
-	if cfg.VectorReconcileInterval > 0 {
-		s.wg.Add(1)
-		go s.vectorReconcileLoop(cfg.VectorReconcileInterval)
+		// Background reconcile loop: retries pending vectors on a cadence so the
+		// inconsistency window collapses to at most VectorReconcileInterval rather
+		// than "until next process restart". Disabled when the interval is 0.
+		if cfg.VectorReconcileInterval > 0 {
+			s.wg.Add(1)
+			go s.vectorReconcileLoop(cfg.VectorReconcileInterval)
+		}
 	}
 
 	return s, nil
 }
+
+// openBoltDB opens the bbolt database at path. If forceRO is true it opens
+// directly in read-only mode. Otherwise it attempts a normal write open; on
+// lock timeout it falls back to read-only and returns isReadOnly=true. If both
+// modes fail a descriptive error is returned.
+func openBoltDB(path string, forceRO bool) (db *bolt.DB, isReadOnly bool, err error) {
+	if forceRO {
+		db, err = bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true, Timeout: boltOpenTimeout})
+		if err != nil {
+			return nil, false, fmt.Errorf("open bbolt read-only: %w", err)
+		}
+		return db, true, nil
+	}
+
+	db, err = bolt.Open(path, 0o600, &bolt.Options{Timeout: boltOpenTimeout})
+	if err == nil {
+		return db, false, nil
+	}
+	if !errors.Is(err, bolt.ErrTimeout) {
+		return nil, false, fmt.Errorf("open bbolt: %w", err)
+	}
+
+	// Write lock held by another process; fall back to read-only.
+	db, err = bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true, Timeout: boltOpenTimeout})
+	if err != nil {
+		return nil, false, fmt.Errorf(
+			"gray.db is locked by another process and could not be opened read-only either: %w", err)
+	}
+	return db, true, nil
+}
+
+// IsReadOnly reports whether the store was opened in read-only mode.
+func (s *Store) IsReadOnly() bool { return s.readOnly }
 
 // Put stores a new observation for agentID.
 //
@@ -196,6 +249,9 @@ func Open(cfg StoreConfig) (*Store, error) {
 // This closes the crash window between the bbolt write and the vector write:
 // after a crash, reconcileVectors() at Open() drains the pending bucket.
 func (s *Store) Put(ctx context.Context, agentID, text string) error {
+	if s.readOnly {
+		return ErrStoreReadOnly
+	}
 	start := time.Now()
 
 	var emb []float32
@@ -258,6 +314,9 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 
 // Delete removes a fact by ID for agentID.
 func (s *Store) Delete(agentID, factID string) error {
+	if s.readOnly {
+		return ErrStoreReadOnly
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
 		if b == nil {
@@ -334,6 +393,9 @@ func (s *Store) Stats(agentID string) (MemoryStats, error) {
 
 // UpdateFact persists a modified fact (used by consolidation + decay).
 func (s *Store) UpdateFact(agentID string, f Fact) error {
+	if s.readOnly {
+		return ErrStoreReadOnly
+	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
 		if b == nil {
