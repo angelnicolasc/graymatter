@@ -140,10 +140,9 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	if !ok || agentID == "" {
 		return toolError("agent is required")
 	}
-	text, ok := getString(args, "text")
-	if !ok || text == "" {
-		return toolError("text is required")
-	}
+	// text and target are validated per-action below: forget works with
+	// either one, so neither can be globally required (see PR #10).
+	text, _ := getString(args, "text")
 	target, _ := getString(args, "target")
 
 	store := s.mem.Advanced()
@@ -156,6 +155,9 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 
 	switch action {
 	case "add":
+		if text == "" {
+			return toolError("text (the fact to add) is required for add")
+		}
 		if err := s.mem.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add failed: %v", err))
 		}
@@ -164,6 +166,9 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	case "update":
 		if target == "" {
 			return toolError("target (fact to supersede) is required for update")
+		}
+		if text == "" {
+			return toolError("text (the corrected fact) is required for update")
 		}
 		facts, err := store.List(agentID)
 		if err != nil {
@@ -186,15 +191,21 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
 
 	case "forget":
-		if target == "" {
-			return toolError("target (fact to forget) is required for forget")
+		// The fact to forget may arrive in target or text — both are
+		// documented as equivalent; target wins when both are set.
+		victim := target
+		if victim == "" {
+			victim = text
+		}
+		if victim == "" {
+			return toolError("the fact to forget is required: pass it in target (or text)")
 		}
 		facts, err := store.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
 		for _, f := range facts {
-			if f.Text == target {
+			if f.Text == victim {
 				oldText = f.Text
 				f.Weight = 0
 				_ = store.UpdateFact(agentID, f)
@@ -202,13 +213,16 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 			}
 		}
 		if oldText == "" {
-			return toolError(fmt.Sprintf("target fact not found: %q", target))
+			return toolError(fmt.Sprintf("target fact not found: %q", victim))
 		}
 		resultMsg = fmt.Sprintf("Fact suppressed for agent %q.", agentID)
 
 	case "link":
 		if target == "" {
 			return toolError("target (node ID) is required for link")
+		}
+		if text == "" {
+			return toolError("text (the source node ID) is required for link")
 		}
 		if s.kgLinker == nil {
 			return toolError("knowledge graph not available in this server instance")

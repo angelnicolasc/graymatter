@@ -162,10 +162,10 @@ The most powerful tool. Use it to maintain memory quality over time.
 
 | Action | Param meaning of `text` | Param meaning of `target` |
 |--------|-------------------------|---------------------------|
-| `add` | The new fact | (unused) |
-| `update` | The corrected fact | The old fact text to supersede |
-| `forget` | The fact to remove | (or, equivalently, pass via `target`) |
-| `link` | Description of the edge | Target node ID in the knowledge graph |
+| `add` | The new fact (required) | (unused) |
+| `update` | The corrected fact (required) | The old fact text to supersede (required) |
+| `forget` | The fact to remove (alternative to `target`) | The fact to remove (wins when both are set) |
+| `link` | Source node ID (required) | Target node ID in the knowledge graph (required) |
 
 **Update workflow:**
 ```jsonc
@@ -187,6 +187,8 @@ The old fact is dropped to weight 0; consolidation prunes it on the next pass.
 
 **Forget workflow:**
 ```jsonc
+// Pass the fact in text — or in target; both are accepted.
+// If both are set, target wins.
 { "tool": "memory_reflect", "args": {
     "action": "forget",
     "agent":  "backend-agent",

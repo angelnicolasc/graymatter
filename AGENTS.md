@@ -10,7 +10,7 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 |------|----------------|----------|
 | `memory_search` | `agent_id`, `query` | `top_k` (default `8`) |
 | `memory_add` | `agent_id`, `text` | — |
-| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`), **`agent`**, `text` | `target` |
+| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`), **`agent`** | `text`, `target` (which one is required depends on `action` — for `forget`, either works) |
 | `checkpoint_save` | `agent_id` | `state` (JSON-encoded string) |
 | `checkpoint_resume` | `agent_id` | — |
 
