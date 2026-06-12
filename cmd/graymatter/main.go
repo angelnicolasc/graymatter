@@ -30,6 +30,7 @@ func main() {
 
 	rootCmd.AddCommand(
 		initCmd(),
+		doctorCmd(),
 		rememberCmd(),
 		recallCmd(),
 		checkpointCmd(),

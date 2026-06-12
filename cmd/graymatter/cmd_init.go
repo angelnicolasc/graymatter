@@ -11,12 +11,13 @@ import (
 
 func initCmd() *cobra.Command {
 	var (
-		skipCodex       bool
-		skipOpencode    bool
-		skipClaudeCode  bool
-		skipCursor      bool
-		withAntigravity bool
-		only            string
+		skipCodex        bool
+		skipOpencode     bool
+		skipClaudeCode   bool
+		skipCursor       bool
+		withAntigravity  bool
+		skipInstructions bool
+		only             string
 	)
 
 	cmd := &cobra.Command{
@@ -118,12 +119,35 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 				}
 			}
 
+			// Agent instruction files: wiring the MCP server only makes the
+			// tools available — the model also needs to be told to use them
+			// (issue #3). Upsert the memory block into CLAUDE.md / AGENTS.md.
+			if !skipInstructions {
+				if !quiet {
+					fmt.Println("\nAgent instructions (tells the model to actually use the tools):")
+				}
+				for _, res := range writeInstructionFiles(".") {
+					if res.warn != "" {
+						warnings = append(warnings, res.warn)
+						continue
+					}
+					if !quiet {
+						glyph, note := "✓", ""
+						if !res.changed {
+							glyph, note = "·", " (already present)"
+						}
+						fmt.Printf("  %s %s%s\n", glyph, res.path, note)
+					}
+				}
+			}
+
 			if !quiet {
 				for _, w := range warnings {
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
 				}
 				fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
 				fmt.Printf("\nNext steps:\n")
+				fmt.Printf("  graymatter doctor   — verify the whole setup end to end\n")
 				fmt.Printf("  graymatter remember \"my-agent\" \"user prefers bullet points\"\n")
 				fmt.Printf("  graymatter recall  \"my-agent\" \"how should I format this?\"\n")
 			}
@@ -149,7 +173,8 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 	cmd.Flags().BoolVar(&skipCodex, "skip-codex", false, "do not touch ~/.codex/config.toml")
 	cmd.Flags().BoolVar(&skipOpencode, "skip-opencode", false, "do not touch opencode.jsonc")
 	cmd.Flags().BoolVar(&withAntigravity, "with-antigravity", false, "also wire mcp_config.json for Antigravity")
-	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags): claudecode,cursor,codex,opencode,antigravity")
+	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
+	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags, not --skip-instructions): claudecode,cursor,codex,opencode,antigravity")
 	return cmd
 }
 

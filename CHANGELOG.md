@@ -8,6 +8,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+**`graymatter doctor` — end-to-end setup diagnosis (issue #3)**
+- New command checks the full chain that makes agent memory work: binary on `PATH`, data dir writable, store health + lock state (single-writer detection with actionable hints), MCP wiring per client config, and agent-instruction files.
+- `--json` for scripting; exit code 1 only on hard failures.
+
+**`graymatter init` writes agent instructions (issue #3)**
+- `init` now upserts a managed memory block into `CLAUDE.md` and `AGENTS.md` (markers `graymatter:instructions:begin/end`), so the model is actually told to call the memory tools — an MCP connection alone only makes tools *available*.
+- Idempotent: re-runs replace only the managed block; user content above/below is never touched. Opt out with `--skip-instructions`.
+- README gained a troubleshooting section covering the two failure modes this closes ("MCP connected but nothing stored", orphaned manual `mcp serve`).
+
+### Fixed
+
+**`memory_reflect` forget action matches its documentation (PR #10)**
+- The docs promised `text` and `target` were equivalent for `forget`, but the handler required `target` and the schema marked `text` globally required — the documented text-only call failed. `text`/`target` are now validated per action; `forget` accepts either (`target` wins when both are set), and no empty-`text` placeholder is needed.
+- Regression tests cover every documented call shape.
+
+**TUI lock handling (PR #7)**
+- Clear "gray.db is locked by another process" error instead of a raw bbolt timeout; automatic read-only fallback where the OS lock allows it; `--read-only` flag; `⊘ read-only` header badge with `d`/`k` disabled; `ErrStoreReadOnly` sentinel at the store level.
+
+### Credits
+
+- **MikeCase** — reported the `memory_reflect` forget/`target` mismatch with a precise repro (PR #10) and the original TUI lock report (issue #4).
+- **Ferroman** — pushed for `init` updating `CLAUDE.md` so agents learn about the memory driver (issue #3).
+- **live-sound** — original "How should it work?" report that became the doctor command (issue #3).
+
 ---
 
 ## [0.5.2] – 2026-04-28

@@ -145,6 +145,11 @@ One command auto-wires GrayMatter into every supported client at once.
 Existing entries from other MCP servers are **merged, not overwritten** —
 safe to run in any repo.
 
+`init` also drops a managed **memory block into `CLAUDE.md` and
+`AGENTS.md`** so the model is actually told to call the tools (skip with
+`--skip-instructions`). Your own content in those files is preserved; only
+the marked block is managed.
+
 | Client | Config file auto-wired | Scope |
 |--------|------------------------|-------|
 | Claude Code | `.mcp.json` | project |
@@ -210,6 +215,29 @@ JSON into the editor's global config — `~/.cursor/mcp.json` for Cursor,
 `graymatter` must be on `PATH`. The `init` command handles this
 automatically on Windows via the User `PATH` registry; on macOS / Linux
 the recommended install path `/usr/local/bin` is already on `PATH`.
+
+### Troubleshooting — "MCP is connected but nothing gets stored"
+
+Run the built-in diagnosis first:
+
+```bash
+graymatter doctor        # human-readable
+graymatter doctor --json # scriptable
+```
+
+It checks the full chain: binary on `PATH` → data dir writable → store
+health and lock state → MCP wiring per client → agent instructions present.
+
+The two most common failure modes it catches:
+
+1. **No instructions.** An MCP connection only makes tools *available* —
+   nothing tells the model to call them. If `CLAUDE.md` / `AGENTS.md`
+   don't mention the memory tools, the agent will happily chat for an hour
+   and never write a fact. Fix: `graymatter init` (writes the block for you).
+2. **Orphaned manual server.** MCP clients spawn `graymatter mcp serve`
+   themselves. If you also started one manually in a terminal, it holds
+   the single-writer bbolt lock and the client's own instance can't open
+   the store. Fix: kill the manual process.
 
 ---
 
