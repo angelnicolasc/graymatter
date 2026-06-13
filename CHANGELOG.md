@@ -8,6 +8,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.6.0] – 2026-06-13
+
 ### Added
 
 **Daemon mode — concurrent store access (issue #8, closes #4 and #9)**
