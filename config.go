@@ -109,6 +109,13 @@ type Config struct {
 	// back to read-only if the write lock is held by another process (e.g.
 	// opencode running in the same directory).
 	ReadOnly bool
+
+	// StrictWrite disables the automatic read-only fallback: if the write
+	// lock cannot be acquired, Open fails immediately instead of degrading.
+	// The store daemon sets this — a store owner that silently came up
+	// read-only would break every connected client. StrictWrite wins over
+	// ReadOnly when both are set.
+	StrictWrite bool
 }
 
 // DefaultConfig returns a Config with all defaults applied from environment

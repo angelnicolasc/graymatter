@@ -176,10 +176,8 @@ func (m tuiModel) loadDashboard() tea.Cmd {
 		// Token usage is a cheap bucket scan (≤ agents × models × days rows).
 		// Never block the dashboard on it — if the bucket is missing or the
 		// query fails, the panel degrades to an empty-state card.
-		if db := store.DB(); db != nil {
-			if ts, err := harness.LoadTokenUsageSummary(db, 30); err == nil {
-				d.Tokens = ts
-			}
+		if ts, err := store.TokenSummary(30); err == nil {
+			d.Tokens = ts
 		}
 
 		return dashboardLoadedMsg{d}

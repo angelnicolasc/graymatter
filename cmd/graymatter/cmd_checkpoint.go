@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 )
 
@@ -29,18 +28,13 @@ func checkpointListCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
-			mem, err := openMem()
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
+			defer func() { _ = store.Close() }()
 
-			store := mem.Advanced()
-			if store == nil {
-				return fmt.Errorf("store not initialised")
-			}
-
-			checkpoints, err := session.List(store.DB(), agentID)
+			checkpoints, err := store.CheckpointList(agentID)
 			if err != nil {
 				return err
 			}
@@ -77,22 +71,17 @@ func checkpointResumeCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
-			mem, err := openMem()
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
-
-			store := mem.Advanced()
-			if store == nil {
-				return fmt.Errorf("store not initialised")
-			}
+			defer func() { _ = store.Close() }()
 
 			var cp *session.Checkpoint
 			if len(args) == 2 {
-				cp, err = session.Load(store.DB(), agentID, args[1])
+				cp, err = store.CheckpointLoad(agentID, args[1])
 			} else {
-				cp, err = session.Resume(store.DB(), agentID)
+				cp, err = store.CheckpointResume(agentID)
 			}
 			if err != nil {
 				return err
@@ -112,22 +101,17 @@ func checkpointSaveCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
-			mem, err := openMem()
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
-
-			store := mem.Advanced()
-			if store == nil {
-				return fmt.Errorf("store not initialised")
-			}
+			defer func() { _ = store.Close() }()
 
 			cp := session.Checkpoint{
 				AgentID:  agentID,
 				Metadata: map[string]string{"source": "cli"},
 			}
-			saved, err := session.Save(store.DB(), cp)
+			saved, err := store.CheckpointSave(cp)
 			if err != nil {
 				return err
 			}
@@ -135,10 +119,4 @@ func checkpointSaveCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-func openMem() (*graymatter.Memory, error) {
-	cfg := graymatter.DefaultConfig()
-	cfg.DataDir = dataDir
-	return graymatter.NewWithConfig(cfg)
 }

@@ -85,7 +85,7 @@ func TestCheckStore(t *testing.T) {
 		if c.Status != "warn" {
 			t.Fatalf("status = %s, want warn (%s)", c.Status, c.Detail)
 		}
-		if !strings.Contains(c.Detail, "in use by another process") {
+		if !strings.Contains(c.Detail, "non-daemon process") {
 			t.Errorf("detail %q should explain the single-writer lock", c.Detail)
 		}
 	})

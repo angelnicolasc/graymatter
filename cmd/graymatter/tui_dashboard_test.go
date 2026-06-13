@@ -27,7 +27,7 @@ func TestDashboardRender_Empty(t *testing.T) {
 		t.Fatal("nil advanced store")
 	}
 
-	m := tuiModel{store: store, width: 120, height: 32}
+	m := tuiModel{store: &directStore{mem: mem, store: store}, width: 120, height: 32}
 	// Execute the loader synchronously and dispatch the message.
 	msg := m.loadDashboard()()
 	loaded, ok := msg.(dashboardLoadedMsg)
@@ -83,7 +83,7 @@ func TestDashboardRender_WithFacts(t *testing.T) {
 		}
 	}
 
-	m := tuiModel{store: store, width: 140, height: 36}
+	m := tuiModel{store: &directStore{mem: mem, store: store}, width: 140, height: 36}
 	msg := m.loadDashboard()()
 	loaded, ok := msg.(dashboardLoadedMsg)
 	if !ok {
@@ -149,7 +149,7 @@ func TestDashboardRender_WithTokens(t *testing.T) {
 		t.Fatalf("record usage: %v", err)
 	}
 
-	m := tuiModel{store: store, width: 140, height: 36}
+	m := tuiModel{store: &directStore{mem: mem, store: store}, width: 140, height: 36}
 	msg := m.loadDashboard()()
 	loaded, ok := msg.(dashboardLoadedMsg)
 	if !ok {

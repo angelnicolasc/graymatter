@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	graymatter "github.com/angelnicolasc/graymatter"
 )
 
 func recallCmd() *cobra.Command {
@@ -26,34 +24,29 @@ func recallCmd() *cobra.Command {
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID, query := args[0], args[1]
-			cfg := graymatter.DefaultConfig()
-			cfg.DataDir = dataDir
-			if topK > 0 {
-				cfg.TopK = topK
-			}
-
-			mem, err := graymatter.NewWithConfig(cfg)
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
+			defer func() { _ = store.Close() }()
 
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()
 			}
 
+			// topK <= 0 means "store default" on every path.
 			var facts []string
 			var scope string
 			switch {
 			case all:
-				facts, err = mem.RecallAll(ctx, agentID, query)
+				facts, err = store.RecallAll(ctx, agentID, query, topK)
 				scope = "all"
 			case shared:
-				facts, err = mem.RecallShared(ctx, query)
+				facts, err = store.RecallShared(ctx, query, topK)
 				scope = "shared"
 			default:
-				facts, err = mem.Recall(ctx, agentID, query)
+				facts, err = store.Recall(ctx, agentID, query, topK)
 				scope = agentID
 			}
 			if err != nil {

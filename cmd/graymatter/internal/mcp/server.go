@@ -14,6 +14,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -21,12 +22,31 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 const (
 	serverName    = "graymatter"
 	serverVersion = "0.1.0"
 )
+
+// Backend is the persistence surface the MCP handlers need. Two
+// implementations exist: the daemon client (default — lets several MCP
+// hosts and the TUI share one store, issue #8) and DirectBackend
+// (in-process, for --no-daemon and tests).
+type Backend interface {
+	Remember(ctx context.Context, agentID, text string) error
+	// Recall with topK<=0 uses the store's configured default.
+	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	List(agentID string) ([]memory.Fact, error)
+	UpdateFact(agentID string, f memory.Fact) error
+	CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error)
+	CheckpointResume(agentID string) (*session.Checkpoint, error)
+	AuditWrite(e audit.Entry) error
+	KGLink(from, to, relation string) error
+}
 
 // KGLinker is a narrow interface for creating knowledge-graph edges.
 // Implemented by *kg.GraphAdapter in production.
@@ -37,14 +57,13 @@ type KGLinker interface {
 
 // Server wraps mcp-go with GrayMatter memory handlers.
 type Server struct {
-	mem      *graymatter.Memory
-	mcpSrv   *server.MCPServer
-	kgLinker KGLinker // optional; enables memory_reflect "link" action
+	backend Backend
+	mcpSrv  *server.MCPServer
 }
 
-// New creates a configured MCP server backed by mem.
-func New(mem *graymatter.Memory) *Server {
-	s := &Server{mem: mem}
+// New creates a configured MCP server on top of backend.
+func New(backend Backend) *Server {
+	s := &Server{backend: backend}
 	s.mcpSrv = server.NewMCPServer(serverName, serverVersion,
 		server.WithToolCapabilities(true),
 	)
@@ -52,9 +71,80 @@ func New(mem *graymatter.Memory) *Server {
 	return s
 }
 
-// SetKGLinker wires an optional knowledge-graph linker so that the
-// memory_reflect tool can create graph edges. Call after New().
-func (s *Server) SetKGLinker(l KGLinker) { s.kgLinker = l }
+// DirectBackend implements Backend against an in-process Memory. The KG
+// linker is optional; without it the link action reports unavailability.
+type DirectBackend struct {
+	mem      *graymatter.Memory
+	kgLinker KGLinker
+}
+
+// NewDirectBackend wraps mem (and an optional kg linker) as a Backend.
+func NewDirectBackend(mem *graymatter.Memory, kgLinker KGLinker) *DirectBackend {
+	return &DirectBackend{mem: mem, kgLinker: kgLinker}
+}
+
+func (b *DirectBackend) Remember(ctx context.Context, agentID, text string) error {
+	return b.mem.Remember(ctx, agentID, text)
+}
+
+func (b *DirectBackend) Recall(ctx context.Context, agentID, query string, topK int) ([]string, error) {
+	if topK <= 0 {
+		return b.mem.Recall(ctx, agentID, query)
+	}
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	return store.Recall(ctx, agentID, query, topK)
+}
+
+func (b *DirectBackend) List(agentID string) ([]memory.Fact, error) {
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	return store.List(agentID)
+}
+
+func (b *DirectBackend) UpdateFact(agentID string, f memory.Fact) error {
+	store := b.mem.Advanced()
+	if store == nil {
+		return errors.New("memory store not initialised")
+	}
+	return store.UpdateFact(agentID, f)
+}
+
+func (b *DirectBackend) CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error) {
+	store := b.mem.Advanced()
+	if store == nil {
+		return session.Checkpoint{}, errors.New("memory store not initialised")
+	}
+	return session.Save(store.DB(), cp)
+}
+
+func (b *DirectBackend) CheckpointResume(agentID string) (*session.Checkpoint, error) {
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	return session.Resume(store.DB(), agentID)
+}
+
+func (b *DirectBackend) AuditWrite(e audit.Entry) error {
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil
+	}
+	audit.Write(store.DB(), e)
+	return nil
+}
+
+func (b *DirectBackend) KGLink(from, to, relation string) error {
+	if b.kgLinker == nil {
+		return errors.New("knowledge graph not available in this server instance")
+	}
+	return b.kgLinker.LinkNodes(from, to, relation)
+}
 
 // ServeStdio starts the MCP server over stdin/stdout (used by Claude Code).
 // Blocks until the client disconnects.

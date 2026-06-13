@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,8 +8,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 )
 
 func sessionsCmd() *cobra.Command {
@@ -33,7 +30,13 @@ func sessionsListCmd() *cobra.Command {
 		Short: "List all sessions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			sessions, err := harness.ListSessions(dataDir)
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = store.Close() }()
+
+			sessions, err := store.SessionsList()
 			if err != nil {
 				return fmt.Errorf("list sessions: %w", err)
 			}
@@ -71,10 +74,31 @@ func sessionsLogsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			if err := harness.StreamLogs(sessionID, dataDir, cmd.OutOrStdout()); err != nil {
+			store, err := openStore()
+			if err != nil {
 				return err
 			}
-			return nil
+			defer func() { _ = store.Close() }()
+
+			sessions, err := store.SessionsList()
+			if err != nil {
+				return fmt.Errorf("list sessions: %w", err)
+			}
+			for _, s := range sessions {
+				if s.ID != sessionID {
+					continue
+				}
+				if s.LogFile == "" {
+					return fmt.Errorf("session %q was not started in background mode (no log file)", sessionID)
+				}
+				data, err := os.ReadFile(s.LogFile)
+				if err != nil {
+					return fmt.Errorf("read log file %q: %w", s.LogFile, err)
+				}
+				_, err = cmd.OutOrStdout().Write(data)
+				return err
+			}
+			return fmt.Errorf("session %q not found", sessionID)
 		},
 	}
 }
@@ -87,16 +111,21 @@ func sessionsKillCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			sessionID := args[0]
 
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = store.Close() }()
+
 			// Resolve "latest" to a concrete ID.
 			if sessionID == "latest" {
-				rc, err := harness.Resume(context.Background(), "latest", dataDir)
+				sessionID, err = store.SessionResolve("", "latest")
 				if err != nil {
 					return fmt.Errorf("resolve latest: %w", err)
 				}
-				sessionID = rc.ResumeID
 			}
 
-			if err := harness.KillSession(sessionID, dataDir); err != nil {
+			if err := store.SessionKill(sessionID); err != nil {
 				return err
 			}
 			fmt.Printf("Session %s signalled.\n", sessionID)

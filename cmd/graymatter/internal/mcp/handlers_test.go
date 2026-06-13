@@ -10,8 +10,9 @@ import (
 	graymatter "github.com/angelnicolasc/graymatter"
 )
 
-// newTestServer returns an MCP Server backed by a real Memory in a temp dir.
-func newTestServer(t *testing.T) *Server {
+// newTestServer returns an MCP Server backed by a real Memory in a temp dir,
+// through the DirectBackend (the same code path --no-daemon uses).
+func newTestServer(t *testing.T) (*Server, *graymatter.Memory) {
 	t.Helper()
 	cfg := graymatter.DefaultConfig()
 	cfg.DataDir = t.TempDir()
@@ -20,7 +21,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("NewWithConfig: %v", err)
 	}
 	t.Cleanup(func() { _ = mem.Close() })
-	return New(mem)
+	return New(NewDirectBackend(mem, nil)), mem
 }
 
 func reflectReq(args map[string]any) mcp.CallToolRequest {
@@ -40,9 +41,9 @@ func resultText(t *testing.T, res *mcp.CallToolResult) string {
 }
 
 // factWeight returns the weight of the fact with the given text, or -1 if absent.
-func factWeight(t *testing.T, s *Server, agentID, text string) float64 {
+func factWeight(t *testing.T, mem *graymatter.Memory, agentID, text string) float64 {
 	t.Helper()
-	facts, err := s.mem.Advanced().List(agentID)
+	facts, err := mem.Advanced().List(agentID)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -55,11 +56,11 @@ func factWeight(t *testing.T, s *Server, agentID, text string) float64 {
 }
 
 func TestMemoryReflect_ForgetViaText(t *testing.T) {
-	s := newTestServer(t)
+	s, mem := newTestServer(t)
 	ctx := context.Background()
 	const fact = "Workaround for Node 14 bug (project now on Node 18)"
 
-	if err := s.mem.Remember(ctx, "a1", fact); err != nil {
+	if err := mem.Remember(ctx, "a1", fact); err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
 
@@ -76,17 +77,17 @@ func TestMemoryReflect_ForgetViaText(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget via text should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, s, "a1", fact); w != 0 {
+	if w := factWeight(t, mem, "a1", fact); w != 0 {
 		t.Errorf("fact weight after forget = %v, want 0", w)
 	}
 }
 
 func TestMemoryReflect_ForgetViaTarget(t *testing.T) {
-	s := newTestServer(t)
+	s, mem := newTestServer(t)
 	ctx := context.Background()
 	const fact = "stale fact"
 
-	if err := s.mem.Remember(ctx, "a1", fact); err != nil {
+	if err := mem.Remember(ctx, "a1", fact); err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
 
@@ -101,19 +102,19 @@ func TestMemoryReflect_ForgetViaTarget(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget via target should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, s, "a1", fact); w != 0 {
+	if w := factWeight(t, mem, "a1", fact); w != 0 {
 		t.Errorf("fact weight after forget = %v, want 0", w)
 	}
 }
 
 func TestMemoryReflect_ForgetTargetWinsOverText(t *testing.T) {
-	s := newTestServer(t)
+	s, mem := newTestServer(t)
 	ctx := context.Background()
 
-	if err := s.mem.Remember(ctx, "a1", "fact A"); err != nil {
+	if err := mem.Remember(ctx, "a1", "fact A"); err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
-	if err := s.mem.Remember(ctx, "a1", "fact B"); err != nil {
+	if err := mem.Remember(ctx, "a1", "fact B"); err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
 
@@ -129,16 +130,16 @@ func TestMemoryReflect_ForgetTargetWinsOverText(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, s, "a1", "fact B"); w != 0 {
+	if w := factWeight(t, mem, "a1", "fact B"); w != 0 {
 		t.Errorf("target fact B weight = %v, want 0 (target must win)", w)
 	}
-	if w := factWeight(t, s, "a1", "fact A"); w == 0 {
+	if w := factWeight(t, mem, "a1", "fact A"); w == 0 {
 		t.Errorf("text fact A was forgotten, but target should have won")
 	}
 }
 
 func TestMemoryReflect_Validation(t *testing.T) {
-	s := newTestServer(t)
+	s, _ := newTestServer(t)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -200,12 +201,12 @@ func TestMemoryReflect_Validation(t *testing.T) {
 }
 
 func TestMemoryReflect_UpdateSupersedes(t *testing.T) {
-	s := newTestServer(t)
+	s, mem := newTestServer(t)
 	ctx := context.Background()
 	const oldFact = "API base URL is https://api.v1.example.com"
 	const newFact = "API base URL is https://api.v2.example.com"
 
-	if err := s.mem.Remember(ctx, "a1", oldFact); err != nil {
+	if err := mem.Remember(ctx, "a1", oldFact); err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
 
@@ -221,10 +222,10 @@ func TestMemoryReflect_UpdateSupersedes(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("update should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, s, "a1", oldFact); w != 0 {
+	if w := factWeight(t, mem, "a1", oldFact); w != 0 {
 		t.Errorf("old fact weight = %v, want 0", w)
 	}
-	if w := factWeight(t, s, "a1", newFact); w <= 0 {
+	if w := factWeight(t, mem, "a1", newFact); w <= 0 {
 		t.Errorf("new fact weight = %v, want > 0", w)
 	}
 }

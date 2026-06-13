@@ -51,6 +51,14 @@ Examples:
 			}
 
 			// --- Foreground or background child: run the agent ---
+			// Route persistence through the shared store (daemon by default)
+			// so a run never fights the bbolt lock with a TUI or MCP server.
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = store.Close() }()
+
 			cfg := harness.RunConfig{
 				AgentFile:  agentFile,
 				Inputs:     inputMap,
@@ -59,6 +67,7 @@ Examples:
 				ResumeID:   resumeID,
 				Stdout:     cmd.OutOrStdout(),
 				Stderr:     cmd.ErrOrStderr(),
+				Store:      store,
 			}
 			result, err := harness.Run(context.Background(), cfg)
 			if err != nil {

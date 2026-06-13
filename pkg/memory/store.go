@@ -74,6 +74,13 @@ type StoreConfig struct {
 	// to read-only if the write lock is held by another process.
 	ReadOnly bool
 
+	// StrictWrite disables the automatic read-only fallback: if the write lock
+	// cannot be acquired, Open fails immediately with the lock-holder error
+	// instead of degrading. The daemon uses this — a store owner that silently
+	// came up read-only would break every connected client. Mutually exclusive
+	// with ReadOnly (StrictWrite wins).
+	StrictWrite bool
+
 	// OnRecall, if non-nil, is called after each Recall with timing and count.
 	OnRecall func(agentID, query string, resultCount int, duration time.Duration)
 
@@ -134,7 +141,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 	}
 
 	dbPath := filepath.Join(cfg.DataDir, "gray.db")
-	db, readOnly, err := openBoltDB(dbPath, cfg.ReadOnly)
+	db, readOnly, err := openBoltDB(dbPath, cfg.ReadOnly, cfg.StrictWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +211,12 @@ func Open(cfg StoreConfig) (*Store, error) {
 
 // openBoltDB opens the bbolt database at path. If forceRO is true it opens
 // directly in read-only mode. Otherwise it attempts a normal write open; on
-// lock timeout it falls back to read-only and returns isReadOnly=true. If both
-// modes fail a descriptive error is returned.
-func openBoltDB(path string, forceRO bool) (db *bolt.DB, isReadOnly bool, err error) {
-	if forceRO {
+// lock timeout it falls back to read-only and returns isReadOnly=true —
+// unless strictWrite is set, in which case the lock timeout is surfaced
+// immediately (daemon mode must never come up degraded). If both modes fail
+// a descriptive error is returned.
+func openBoltDB(path string, forceRO, strictWrite bool) (db *bolt.DB, isReadOnly bool, err error) {
+	if forceRO && !strictWrite {
 		db, err = bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true, Timeout: boltOpenTimeout})
 		if err != nil {
 			return nil, false, fmt.Errorf("open bbolt read-only: %w", err)
@@ -221,6 +230,10 @@ func openBoltDB(path string, forceRO bool) (db *bolt.DB, isReadOnly bool, err er
 	}
 	if !errors.Is(err, bolt.ErrTimeout) {
 		return nil, false, fmt.Errorf("open bbolt: %w", err)
+	}
+	if strictWrite {
+		return nil, false, fmt.Errorf(
+			"gray.db is locked by another process (strict-write open refused to degrade): %w", err)
 	}
 
 	// Write lock held by another process; fall back to read-only.

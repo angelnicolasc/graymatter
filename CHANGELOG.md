@@ -10,6 +10,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+**Daemon mode — concurrent store access (issue #8, closes #4 and #9)**
+- bbolt is single-writer: until now a second `graymatter` process (TUI + MCP server, two agents' MCP servers, `run` + TUI, opencode + TUI) targeting the same `--dir` timed out on the lock. Daemon mode fixes this structurally.
+- One process owns the store and serves it over a local endpoint (Unix domain socket on POSIX, TCP loopback on Windows); every other process — TUI, MCP server, one-shot CLI commands, the `run` harness — connects as a thin client. Transport is `net/rpc` + JSON (`pkg/memory/rpc`), **stdlib only, zero new dependencies** — the single-binary/zero-infra story is intact (stripped binary ≈ 18 MB).
+- **Launch-on-connect**: clients spawn the daemon on first use and it idle-exits after 2 min with no clients, so one-shot commands stay snappy and nothing lingers. No manual `serve` step.
+- **No silent degradation**: the daemon opens the store strict-write (`StrictWrite`) — if it can't own the lock it fails loudly rather than coming up read-only under its clients. The spawn race is resolved by the bbolt lock itself: only the winner writes the discovery file; losers exit and every client converges on the winner via dial-retry.
+- **Local-only auth**: the daemon mints a 256-bit token per run, written to a `0600` discovery file; clients present it as a connection preamble (constant-time compared). On Windows loopback this is the access control; on Unix the socket is also `0600`.
+- New `graymatter daemon run|status|stop`. New global `--no-daemon` (and `GRAYMATTER_NO_DAEMON=1`) for in-process debugging/air-gapped inspection.
+- `graymatter doctor` is daemon-aware: it reports store health *through* the daemon when one is running, and only flags a lock when a non-daemon process holds it.
+- Integration tests cover spawn-on-connect, four concurrent clients writing through one daemon (the #4/#9 scenario), idle-exit, and graceful stop.
+
 **`graymatter doctor` — end-to-end setup diagnosis (issue #3)**
 - New command checks the full chain that makes agent memory work: binary on `PATH`, data dir writable, store health + lock state (single-writer detection with actionable hints), MCP wiring per client config, and agent-instruction files.
 - `--json` for scripting; exit code 1 only on hard failures.
