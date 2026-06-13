@@ -239,13 +239,15 @@ func TestActiveConns_TracksClients(t *testing.T) {
 	_ = c1.Close()
 	waitFor(t, func() bool { return srv.ActiveConns() == 1 }, "one active conn after close")
 
+	// Disconnect must refresh the idle clock. Sleep a beat so the post-close
+	// touch lands at a strictly later instant even on a coarse clock, then
+	// poll: the server decrements ActiveConns *before* it calls touch(), so
+	// "0 conns" alone doesn't prove the touch has run yet.
 	before := srv.LastActivity()
+	time.Sleep(2 * time.Millisecond)
 	_ = c2.Close()
 	waitFor(t, func() bool { return srv.ActiveConns() == 0 }, "zero active conns")
-	if !srv.LastActivity().After(before) && srv.LastActivity() != before {
-		// Disconnect must refresh the idle clock (>= is fine on coarse clocks).
-		t.Error("LastActivity did not advance on disconnect")
-	}
+	waitFor(t, func() bool { return srv.LastActivity().After(before) }, "idle clock refreshed on disconnect")
 }
 
 func TestDial_NoDaemonReturnsErrClosed(t *testing.T) {

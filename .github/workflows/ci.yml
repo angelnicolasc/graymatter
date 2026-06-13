@@ -38,7 +38,7 @@ jobs:
       - name: Test CLI module with coverage
         working-directory: cmd/graymatter
         shell: bash
-        run: go test -race -count=1 -timeout=120s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/... ./internal/kg/... ./internal/server/... ./internal/plugin/...
+        run: go test -race -count=1 -timeout=300s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/... ./internal/kg/... ./internal/server/... ./internal/plugin/... ./internal/mcp/... ./internal/daemon/...
 
       - name: Coverage gate — core library (≥70%)
         shell: bash
