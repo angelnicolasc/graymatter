@@ -170,7 +170,12 @@ func (s *Server) authenticate(conn net.Conn) bool {
 //
 // Serve blocks; run it in its own goroutine.
 func (s *Server) Serve(listener net.Listener) error {
+	// Publish the listener under connsMu so a concurrent Stop (which closes
+	// it to unblock Accept) cannot race the assignment.
+	s.connsMu.Lock()
 	s.listener = listener
+	s.connsMu.Unlock()
+
 	rpcSrv := rpc.NewServer()
 	if err := rpcSrv.RegisterName(ServiceName, s); err != nil {
 		return fmt.Errorf("rpc.RegisterName: %w", err)
@@ -228,10 +233,10 @@ func (s *Server) Serve(listener net.Listener) error {
 func (s *Server) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stop)
+		s.connsMu.Lock()
 		if s.listener != nil {
 			_ = s.listener.Close()
 		}
-		s.connsMu.Lock()
 		for c := range s.conns {
 			_ = c.Close()
 		}
