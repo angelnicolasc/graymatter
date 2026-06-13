@@ -11,9 +11,10 @@ import (
 var version = "dev"
 
 var (
-	dataDir string
-	quiet   bool
-	jsonOut bool
+	dataDir  string
+	quiet    bool
+	jsonOut  bool
+	noDaemon bool
 )
 
 var rootCmd = &cobra.Command{
@@ -27,10 +28,13 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "dir", ".graymatter", "data directory")
 	rootCmd.PersistentFlags().BoolVar(&quiet, "quiet", false, "suppress non-essential output")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "output in JSON format")
+	rootCmd.PersistentFlags().BoolVar(&noDaemon, "no-daemon", false,
+		"open the store in-process instead of through the daemon (debugging; fights the single-writer lock)")
 
 	rootCmd.AddCommand(
 		initCmd(),
 		doctorCmd(),
+		daemonCmd(),
 		rememberCmd(),
 		recallCmd(),
 		checkpointCmd(),

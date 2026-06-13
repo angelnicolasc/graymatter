@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	graymatter "github.com/angelnicolasc/graymatter"
 )
 
 func rememberCmd() *cobra.Command {
@@ -22,14 +20,11 @@ func rememberCmd() *cobra.Command {
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID, text := args[0], args[1]
-			cfg := graymatter.DefaultConfig()
-			cfg.DataDir = dataDir
-
-			mem, err := graymatter.NewWithConfig(cfg)
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
+			defer func() { _ = store.Close() }()
 
 			ctx := cmd.Context()
 			if ctx == nil {
@@ -37,7 +32,7 @@ func rememberCmd() *cobra.Command {
 			}
 
 			if shared {
-				if err := mem.RememberShared(ctx, text); err != nil {
+				if err := store.PutShared(ctx, text); err != nil {
 					return err
 				}
 				if jsonOut {
@@ -49,7 +44,7 @@ func rememberCmd() *cobra.Command {
 				return nil
 			}
 
-			if err := mem.Remember(ctx, agentID, text); err != nil {
+			if err := store.Remember(ctx, agentID, text); err != nil {
 				return err
 			}
 

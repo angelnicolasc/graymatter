@@ -65,7 +65,7 @@ To get both your agent-specific facts and shared facts in one go, issue two `mem
 ## Working in this codebase
 
 - Go module. Build: `go build ./...`. Tests: `go test ./...`. The CI matrix runs Ubuntu / macOS / Windows × Go 1.22 / 1.23.
-- bbolt is single-writer — running two `graymatter` processes against the same `--dir` will fight over the lock. Tracked in [issue #8](https://github.com/angelnicolasc/graymatter/issues/8); structural fix in v0.6.0.
+- bbolt is single-writer, but daemon mode handles that: a store daemon owns the lock and every `graymatter` process connects to it as a client, so concurrent TUI/MCP/CLI access works. Clients auto-start the daemon and it idle-exits when unused. `--no-daemon` opts out (and reintroduces the lock contention). Resolved [issue #8](https://github.com/angelnicolasc/graymatter/issues/8).
 
 ## More
 

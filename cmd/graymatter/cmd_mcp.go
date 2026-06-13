@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	graymatter "github.com/angelnicolasc/graymatter"
 	gmcp "github.com/angelnicolasc/graymatter/cmd/graymatter/internal/mcp"
 )
 
@@ -40,16 +39,13 @@ Claude Code setup — add to your project's .mcp.json:
     }
   }`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := graymatter.DefaultConfig()
-			cfg.DataDir = dataDir
-
-			mem, err := graymatter.NewWithConfig(cfg)
+			store, err := openStore()
 			if err != nil {
 				return fmt.Errorf("open memory: %w", err)
 			}
-			defer mem.Close()
+			defer func() { _ = store.Close() }()
 
-			srv := gmcp.New(mem)
+			srv := gmcp.New(store)
 
 			if httpAddr != "" {
 				return srv.ServeHTTP(httpAddr)

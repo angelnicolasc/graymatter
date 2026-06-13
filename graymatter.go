@@ -99,6 +99,7 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 		OnVectorIndexError:      cfg.OnVectorIndexError,
 		VectorReconcileInterval: cfg.VectorReconcileInterval,
 		ReadOnly:                cfg.ReadOnly,
+		StrictWrite:             cfg.StrictWrite,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graymatter: open store: %w", err)

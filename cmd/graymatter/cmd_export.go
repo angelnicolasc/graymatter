@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/export"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -25,19 +24,11 @@ func exportCmd() *cobra.Command {
   graymatter export --format json
   graymatter export --format markdown --agent sales-closer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := graymatter.DefaultConfig()
-			cfg.DataDir = dataDir
-
-			mem, err := graymatter.NewWithConfig(cfg)
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
-
-			store := mem.Advanced()
-			if store == nil {
-				return fmt.Errorf("store not initialised")
-			}
+			defer func() { _ = store.Close() }()
 
 			exporter, err := export.New(export.Format(format))
 			if err != nil {

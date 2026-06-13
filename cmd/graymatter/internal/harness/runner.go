@@ -17,7 +17,6 @@ import (
 	"github.com/oklog/ulid/v2"
 	bolt "go.etcd.io/bbolt"
 
-	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 )
 
@@ -67,6 +66,11 @@ type RunConfig struct {
 	// APIKey overrides ANTHROPIC_API_KEY. If empty, env var is used.
 	APIKey string
 
+	// Store, when non-nil, is the persistence backend the run uses (the
+	// daemon client in production). When nil, Run opens an in-process store
+	// at DataDir itself — the path tests and --no-daemon take.
+	Store Store
+
 	// llmDoer replaces the real Anthropic API call. Injected by tests only.
 	// Production code leaves this nil.
 	llmDoer func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
@@ -109,26 +113,18 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		return nil, fmt.Errorf("parse agent file: %w", err)
 	}
 
-	// Open memory + bbolt store.
-	gmCfg := graymatter.DefaultConfig()
-	gmCfg.DataDir = cfg.DataDir
-	if cfg.APIKey != "" {
-		gmCfg.AnthropicAPIKey = cfg.APIKey
+	// Obtain a Store. In production the caller injects the daemon client so
+	// the run never fights the bbolt lock; tests and --no-daemon fall back to
+	// an in-process open here.
+	store := cfg.Store
+	if store == nil {
+		ls, err := OpenLocalStore(cfg.DataDir, cfg.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = ls.Close() }()
+		store = ls
 	}
-	gm, err := graymatter.NewWithConfig(gmCfg)
-	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
-	}
-	defer func() { _ = gm.Close() }()
-
-	db := gm.Advanced().DB()
-
-	// Ensure harness_sessions bucket exists.
-	if err := initHarnessBucket(db); err != nil {
-		return nil, fmt.Errorf("init harness bucket: %w", err)
-	}
-	// Ensure token_usage bucket exists (best-effort; accounting never breaks a run).
-	_ = initTokenUsageBucket(db)
 
 	// Allocate a new session ID for this run.
 	sessionID := ulid.Make().String()
@@ -136,7 +132,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	// Load prior checkpoint message history when resuming.
 	var priorMessages []session.Message
 	if cfg.ResumeID != "" {
-		cp, cpErr := session.Resume(db, def.Name)
+		cp, cpErr := store.CheckpointResume(def.Name)
 		if cpErr == nil && cp != nil {
 			priorMessages = cp.Messages
 			fmt.Fprintf(cfg.Stderr, "Resuming from checkpoint %s...\n", cp.ID)
@@ -152,12 +148,12 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		Status:    "running",
 		Inputs:    cfg.Inputs,
 	}
-	if err := saveHarnessSession(db, hs); err != nil {
+	if err := store.SessionSave(hs); err != nil {
 		return nil, fmt.Errorf("save harness session: %w", err)
 	}
 
 	// Recall relevant memory and inject into system prompt.
-	memFacts, _ := gm.Recall(ctx, def.Name, def.Task)
+	memFacts, _ := store.RecallDefault(ctx, def.Name, def.Task)
 	systemContent := def.SystemPrompt
 	if len(memFacts) > 0 {
 		systemContent += "\n\n## Memory\n" + strings.Join(memFacts, "\n")
@@ -185,7 +181,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	for attempt := 1; attempt <= cfg.MaxRetries; attempt++ {
 		hs.Attempts = attempt
-		_ = saveHarnessSession(db, hs) // best-effort progress update
+		_ = store.SessionSave(hs) // best-effort progress update
 
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(def.Model),
@@ -219,7 +215,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		}
 
 		// Record token usage (best-effort; accounting never breaks a run).
-		_ = RecordTokenUsage(db, def.Name, def.Model,
+		_ = store.TokenRecord(def.Name, def.Model,
 			uint64(msg.Usage.InputTokens),
 			uint64(msg.Usage.OutputTokens),
 			uint64(msg.Usage.CacheReadInputTokens),
@@ -234,10 +230,10 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 		// Store observation in memory (best-effort).
 		if finalReply != "" {
-			_ = gm.Remember(ctx, def.Name, finalReply)
+			_ = store.Remember(ctx, def.Name, finalReply)
 		}
 
-		// Checkpoint: persist full message history to bbolt.
+		// Checkpoint: persist full message history.
 		cp := session.Checkpoint{
 			AgentID: def.Name,
 			State: map[string]any{
@@ -248,7 +244,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 			Messages: sessionMessages,
 			Metadata: map[string]string{"harness_session_id": sessionID},
 		}
-		saved, saveErr := session.Save(db, cp)
+		saved, saveErr := store.CheckpointSave(cp)
 		if saveErr == nil {
 			hs.LastCPID = saved.ID
 		}
@@ -258,7 +254,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		hs.FinishedAt = &now
 		hs.Status = "done"
 		hs.Attempts = attempt
-		_ = saveHarnessSession(db, hs)
+		_ = store.SessionSave(hs)
 
 		fmt.Fprintln(cfg.Stdout, finalReply)
 
@@ -275,7 +271,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	hs.FinishedAt = &now
 	hs.Status = "failed"
 	hs.ErrorMsg = lastErr.Error()
-	_ = saveHarnessSession(db, hs)
+	_ = store.SessionSave(hs)
 	writeFailedRun(cfg.DataDir, sessionID, hs, lastErr)
 
 	return nil, fmt.Errorf("run %q failed after %d attempt(s): %w", def.Name, cfg.MaxRetries, lastErr)

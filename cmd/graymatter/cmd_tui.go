@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
@@ -124,10 +123,9 @@ const (
 // ── Main model ────────────────────────────────────────────────────────────────
 
 type tuiModel struct {
-	store    graymatter.AdvancedStore
+	store    cliStore
 	dataDir  string
-	graph    *kg.Graph
-	readOnly bool // true when the store is in read-only mode
+	readOnly bool // true when the store is in read-only mode (--no-daemon only)
 
 	// layout
 	activeTab tabID
@@ -196,7 +194,7 @@ func (m tuiModel) loadFacts(agentID string) tea.Cmd {
 
 func (m tuiModel) loadSessions() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := harness.ListSessionsDB(m.store.DB())
+		sessions, err := m.store.SessionsList()
 		if err != nil {
 			return sessionsLoadedMsg{} // non-fatal
 		}
@@ -209,11 +207,8 @@ func (m tuiModel) loadSessions() tea.Cmd {
 }
 
 func (m tuiModel) loadNodes() tea.Cmd {
-	if m.graph == nil {
-		return nil
-	}
 	return func() tea.Msg {
-		nodes, err := m.graph.AllNodes()
+		nodes, err := m.store.KGNodes()
 		if err != nil {
 			return nodesLoadedMsg{}
 		}
@@ -388,7 +383,7 @@ func (m *tuiModel) updateSessionsKey(msg tea.KeyMsg) []tea.Cmd {
 			return nil
 		}
 		if sel, ok := m.sessionList.SelectedItem().(sessionItem); ok {
-			if err := harness.KillSession(sel.s.ID, m.dataDir); err != nil {
+			if err := m.store.SessionKill(sel.s.ID); err != nil {
 				m.status = "kill: " + err.Error()
 			} else {
 				m.status = "Killed " + sel.s.ID[:8]
@@ -561,9 +556,9 @@ func (m tuiModel) renderSessions(h int) string {
 // ── Graph tab ─────────────────────────────────────────────────────────────────
 
 func (m tuiModel) renderGraph(h int) string {
-	if m.graph == nil {
+	if len(m.nodeList.Items()) == 0 {
 		return styleBorderInactive.Width(m.width - 4).Height(h - 2).
-			Render(styleDimText.Render("\n  Knowledge graph not initialised.\n  Run `graymatter init` and store some memories first."))
+			Render(styleDimText.Render("\n  Knowledge graph empty.\n  Run `graymatter init` and store some memories first."))
 	}
 	leftW := m.width * 2 / 5
 	leftPane := styleBorderInactive.Width(leftW - 2).Height(h - 2).Render(m.nodeList.View())
@@ -642,31 +637,21 @@ Views (switch with 1-4 or tab/shift+tab):
   3. Graph    — browse knowledge graph nodes and edges
   4. Stats    — observability dashboard (KPIs, agent activity, weight distribution, 30d sparkline)
 
-If another process (e.g. opencode) holds the store write-lock, the TUI opens
-automatically in read-only mode. Use --read-only to force this from the start.`,
+By default the TUI connects to the store daemon, so it runs fine alongside an
+MCP server, opencode, or another TUI. --read-only applies only with --no-daemon
+(direct in-process open), where it forces a non-mutating open.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := graymatter.DefaultConfig()
-			cfg.DataDir = dataDir
-			cfg.ReadOnly = forceReadOnly
+			// --read-only only makes sense for the direct (--no-daemon) path;
+			// through the daemon every client is a full read/write peer.
+			if forceReadOnly {
+				noDaemon = true
+			}
 
-			mem, err := graymatter.NewWithConfig(cfg)
+			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
-
-			store := mem.Advanced()
-			if store == nil {
-				return fmt.Errorf("store not initialised")
-			}
-
-			// Optional: open KG graph if db is available.
-			var graph *kg.Graph
-			if db := store.DB(); db != nil {
-				if g, err := kg.Open(db); err == nil {
-					graph = g
-				}
-			}
+			defer func() { _ = store.Close() }()
 
 			newList := func(title string) list.Model {
 				l := list.New(nil, list.NewDefaultDelegate(), 40, 20)
@@ -679,7 +664,6 @@ automatically in read-only mode. Use --read-only to force this from the start.`,
 			m := tuiModel{
 				store:       store,
 				dataDir:     dataDir,
-				graph:       graph,
 				readOnly:    store.IsReadOnly(),
 				agentList:   newList("Agents"),
 				factList:    newList("Facts"),
@@ -696,6 +680,6 @@ automatically in read-only mode. Use --read-only to force this from the start.`,
 	}
 
 	cmd.Flags().BoolVar(&forceReadOnly, "read-only", false,
-		"open store in read-only mode (skips all mutating operations)")
+		"with --no-daemon: open the store read-only (skips all mutating operations)")
 	return cmd
 }

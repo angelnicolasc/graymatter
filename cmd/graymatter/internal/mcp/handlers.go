@@ -8,12 +8,10 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	bolt "go.etcd.io/bbolt"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 )
-
-var bucketAudit = []byte("kg_audit")
 
 func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
@@ -25,14 +23,14 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	if !ok || query == "" {
 		return toolError("query is required")
 	}
-	topK := getInt(args, "top_k", s.mem.Config().TopK)
+	topK := getInt(args, "top_k", 0) // 0 = store default
 
-	facts, err := s.mem.Recall(ctx, agentID, query)
+	facts, err := s.backend.Recall(ctx, agentID, query, topK)
 	if err != nil {
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
 
-	if topK < len(facts) {
+	if topK > 0 && topK < len(facts) {
 		facts = facts[:topK]
 	}
 
@@ -59,7 +57,7 @@ func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (
 		return toolError("text is required")
 	}
 
-	if err := s.mem.Remember(ctx, agentID, text); err != nil {
+	if err := s.backend.Remember(ctx, agentID, text); err != nil {
 		return toolError(fmt.Sprintf("remember error: %v", err))
 	}
 
@@ -80,18 +78,13 @@ func (s *Server) handleCheckpointSave(ctx context.Context, req mcp.CallToolReque
 		}
 	}
 
-	store := s.mem.Advanced()
-	if store == nil {
-		return toolError("memory store not initialised")
-	}
-
 	cp := session.Checkpoint{
 		AgentID:   agentID,
 		CreatedAt: time.Now().UTC(),
 		State:     state,
 		Metadata:  map[string]string{"source": "mcp"},
 	}
-	saved, err := session.Save(store.DB(), cp)
+	saved, err := s.backend.CheckpointSave(cp)
 	if err != nil {
 		return toolError(fmt.Sprintf("checkpoint save error: %v", err))
 	}
@@ -106,12 +99,7 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		return toolError("agent_id is required")
 	}
 
-	store := s.mem.Advanced()
-	if store == nil {
-		return toolError("memory store not initialised")
-	}
-
-	cp, err := session.Resume(store.DB(), agentID)
+	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
 		return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
 	}
@@ -145,11 +133,6 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	text, _ := getString(args, "text")
 	target, _ := getString(args, "target")
 
-	store := s.mem.Advanced()
-	if store == nil {
-		return toolError("memory store not initialised")
-	}
-
 	var oldText string
 	var resultMsg string
 
@@ -158,7 +141,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the fact to add) is required for add")
 		}
-		if err := s.mem.Remember(ctx, agentID, text); err != nil {
+		if err := s.backend.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add failed: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Added fact for agent %q.", agentID)
@@ -170,7 +153,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the corrected fact) is required for update")
 		}
-		facts, err := store.List(agentID)
+		facts, err := s.backend.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
@@ -178,14 +161,14 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 			if f.Text == target {
 				oldText = f.Text
 				f.Weight = 0
-				_ = store.UpdateFact(agentID, f)
+				_ = s.backend.UpdateFact(agentID, f)
 				break
 			}
 		}
 		if oldText == "" {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
-		if err := s.mem.Remember(ctx, agentID, text); err != nil {
+		if err := s.backend.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add updated fact: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
@@ -200,7 +183,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if victim == "" {
 			return toolError("the fact to forget is required: pass it in target (or text)")
 		}
-		facts, err := store.List(agentID)
+		facts, err := s.backend.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
@@ -208,7 +191,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 			if f.Text == victim {
 				oldText = f.Text
 				f.Weight = 0
-				_ = store.UpdateFact(agentID, f)
+				_ = s.backend.UpdateFact(agentID, f)
 				break
 			}
 		}
@@ -224,12 +207,9 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the source node ID) is required for link")
 		}
-		if s.kgLinker == nil {
-			return toolError("knowledge graph not available in this server instance")
-		}
 		fromID := strings.ToLower(strings.TrimSpace(text))
 		toID := strings.ToLower(strings.TrimSpace(target))
-		if err := s.kgLinker.LinkNodes(fromID, toID, "agent_link"); err != nil {
+		if err := s.backend.KGLink(fromID, toID, "agent_link"); err != nil {
 			return toolError(fmt.Sprintf("link nodes: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Linked %q → %q.", fromID, toID)
@@ -238,7 +218,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		return toolError(fmt.Sprintf("unknown action %q", action))
 	}
 
-	writeAuditEntry(store.DB(), auditEntry{
+	_ = s.backend.AuditWrite(audit.Entry{
 		Timestamp: time.Now().UTC(),
 		Action:    action,
 		Agent:     agentID,
@@ -248,28 +228,4 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	})
 
 	return toolText(resultMsg)
-}
-
-type auditEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	Action    string    `json:"action"`
-	Agent     string    `json:"agent"`
-	OldText   string    `json:"old_text,omitempty"`
-	NewText   string    `json:"new_text"`
-	Source    string    `json:"source"`
-}
-
-func writeAuditEntry(db *bolt.DB, entry auditEntry) {
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-	key := []byte(entry.Timestamp.Format(time.RFC3339Nano) + "_" + entry.Action + "_" + entry.Agent)
-	_ = db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucketAudit)
-		if err != nil {
-			return err
-		}
-		return b.Put(key, data)
-	})
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -151,14 +152,41 @@ func checkStore(dir string) checkResult {
 		return c
 	}
 
-	// Read-only probe: side-effect free, and lock contention tells us
-	// another process is actively holding the store.
+	// Preferred path: ask the daemon, which owns the store in normal
+	// operation. This is also what proves the daemon is healthy end to end.
+	if dc, err := daemon.ConnectNoSpawn(dir); err == nil {
+		defer func() { _ = dc.Close() }()
+		agents, err := dc.ListAgents()
+		if err != nil {
+			c.Status, c.Detail = "fail", fmt.Sprintf("daemon up but listing agents failed: %v", err)
+			return c
+		}
+		facts := 0
+		for _, a := range agents {
+			if st, err := dc.Stats(a); err == nil {
+				facts += st.FactCount
+			}
+		}
+		pending, _ := dc.PendingVectorCount()
+		c.Status = "ok"
+		c.Detail = fmt.Sprintf("served by daemon — %d fact(s) across %d agent(s)", facts, len(agents))
+		if pending > 0 {
+			c.Status = "warn"
+			c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
+			c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
+		}
+		return c
+	}
+
+	// No daemon: read-only probe. Lock contention here means some non-daemon
+	// process (e.g. a Go program embedding the library, or a stale daemon)
+	// holds the write lock.
 	store, err := memory.Open(memory.StoreConfig{DataDir: dir, ReadOnly: true})
 	if err != nil {
 		if strings.Contains(err.Error(), "locked") || strings.Contains(err.Error(), "timeout") {
 			c.Status = "warn"
-			c.Detail = "gray.db is in use by another process (bbolt is single-writer)"
-			c.Hint = "this is normal while an MCP client or the TUI is running; if you started `graymatter mcp serve` manually in a terminal, kill it — MCP clients spawn their own instance" + lsofHint(dbPath)
+			c.Detail = "gray.db is held by a non-daemon process (bbolt is single-writer)"
+			c.Hint = "another program is holding the store directly — a Go app embedding the library, or `graymatter ... --no-daemon`; close it and clients will start their own daemon" + lsofHint(dbPath)
 			return c
 		}
 		c.Status, c.Detail = "fail", fmt.Sprintf("store failed to open: %v", err)
@@ -179,7 +207,7 @@ func checkStore(dir string) checkResult {
 	}
 	pending := store.PendingVectorCount()
 	c.Status = "ok"
-	c.Detail = fmt.Sprintf("%d fact(s) across %d agent(s)", facts, len(agents))
+	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read)", facts, len(agents))
 	if pending > 0 {
 		c.Status = "warn"
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)

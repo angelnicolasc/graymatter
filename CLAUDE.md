@@ -9,7 +9,7 @@ GrayMatter — a single-binary Go memory system for AI agents. Library + CLI + M
 ## Two facts that change how you work here
 
 1. **You have memory tools available** via this repo's own MCP server. See [`AGENTS.md`](AGENTS.md) for the per-tool param reference (notably: `memory_reflect` takes `agent`, the other four take `agent_id` — don't mix them up).
-2. **bbolt is single-writer**. If `graymatter tui`, `graymatter serve`, an MCP client child, or a test all run simultaneously against the same `--dir`, they fight over the lock. The structural fix is tracked in [issue #8](https://github.com/angelnicolasc/graymatter/issues/8) and lands in v0.6.0 (daemon mode).
+2. **bbolt is single-writer — daemon mode solves it.** A daemon owns the store and every other process (TUI, MCP server, CLI, `run`) connects as a client over a local socket/named pipe, so concurrent access just works. Clients spawn the daemon on first use and it idle-exits when unused. Use `--no-daemon` to bypass it for in-process debugging (then the old single-writer lock applies, and a second process will contend). See `cmd/graymatter/internal/daemon/` and `pkg/memory/rpc/`. This was [issue #8](https://github.com/angelnicolasc/graymatter/issues/8) (closes #4, #9).
 
 ## Codebase basics
 

@@ -37,6 +37,8 @@ func ListSessionsDB(db *bolt.DB) ([]HarnessSession, error) {
 
 // KillSession sends a termination signal to the background process recorded
 // in the HarnessSession for sessionID, then marks its status as "killed".
+// It opens its own write handle on the store; processes that already hold
+// one (the daemon) must use KillSessionDB instead.
 //
 // Returns an error if:
 //   - the session does not exist
@@ -49,7 +51,11 @@ func KillSession(sessionID, dataDir string) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	return KillSessionDB(db, sessionID)
+}
 
+// KillSessionDB is KillSession against an already-open db handle.
+func KillSessionDB(db *bolt.DB, sessionID string) error {
 	if err := initHarnessBucket(db); err != nil {
 		return fmt.Errorf("init harness bucket: %w", err)
 	}
@@ -74,6 +80,21 @@ func KillSession(sessionID, dataDir string) error {
 	hs.Status = "killed"
 	hs.FinishedAt = &now
 	return saveHarnessSession(db, *hs)
+}
+
+// SaveSessionDB persists a HarnessSession record against an already-open db
+// handle, creating the harness bucket if needed. Used by the daemon host
+// service; in-process callers go through Run's own bookkeeping.
+func SaveSessionDB(db *bolt.DB, hs HarnessSession) error {
+	if err := initHarnessBucket(db); err != nil {
+		return fmt.Errorf("init harness bucket: %w", err)
+	}
+	return saveHarnessSession(db, hs)
+}
+
+// ResolveSessionIDDB is ResolveSessionID against an already-open db handle.
+func ResolveSessionIDDB(db *bolt.DB, agentID, sessionID string) (string, error) {
+	return resolveSessionID(db, agentID, sessionID)
 }
 
 // Resume looks up the HarnessSession for sessionID (or "latest" for the most
