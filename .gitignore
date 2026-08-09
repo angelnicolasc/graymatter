@@ -5,3 +5,4 @@ dist/
 *.db
 /vectors/
 *.md.local
+go.work.sum

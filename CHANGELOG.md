@@ -8,6 +8,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+**`graymatter init -i` — interactive setup wizard**
+- New `-i`/`--interactive` flag: prompts for which agents to wire instead of auto-detecting everything.
+- Per-agent instructionFile mapping: each known agent declares which instruction file it reads (`CLAUDE.md`, `AGENTS.md`, or none), so only the relevant files are written — an OpenCode-only user finally gets just `AGENTS.md` without `CLAUDE.md`.
+- Dedup: when multiple selected agents share the same instruction file (e.g., Cursor + OpenCode both read `AGENTS.md`), it's written only once.
+- 16 tests covering all agent combinations, input parsing edge cases, dedup, and idempotency.
+- New `knownAgents` table (`cmd_init_interactive.go`) as a single source of truth for agent → {writer, instructionFile} mapping.
+
 ---
 
 ## [0.6.0] – 2026-06-13

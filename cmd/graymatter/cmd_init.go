@@ -11,6 +11,7 @@ import (
 
 func initCmd() *cobra.Command {
 	var (
+		interactive      bool
 		skipCodex        bool
 		skipOpencode     bool
 		skipClaudeCode   bool
@@ -33,6 +34,9 @@ GrayMatter is a general-purpose MCP server. The clients listed below are
 just the ones we auto-wire; any MCP-compatible client works over stdio
 (` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http :8080`" + `).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if interactive {
+				return runInteractiveWizard(dataDir, ".", quiet)
+			}
 			dir := dataDir
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return fmt.Errorf("create data dir: %w", err)
@@ -168,6 +172,7 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 		},
 	}
 
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "interactive setup wizard (prompts for which agents to wire)")
 	cmd.Flags().BoolVar(&skipClaudeCode, "skip-claudecode", false, "do not touch .mcp.json")
 	cmd.Flags().BoolVar(&skipCursor, "skip-cursor", false, "do not touch .cursor/mcp.json")
 	cmd.Flags().BoolVar(&skipCodex, "skip-codex", false, "do not touch ~/.codex/config.toml")
