@@ -6,9 +6,43 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
+
+// TestCheckStore_FlagsLongIdleProject covers the state issue #14 was actually
+// about: a project that is wired correctly, reports green everywhere, and has
+// never stored a single fact. A fresh install looks identical, so the check has
+// to key off how long the project has been sitting there.
+func TestCheckStore_FlagsLongIdleProject(t *testing.T) {
+	dir := t.TempDir()
+	memoryMD := filepath.Join(dir, "MEMORY.md")
+	if err := os.WriteFile(memoryMD, []byte("# GrayMatter Memory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Just initialised and empty: nothing to complain about yet.
+	if got := checkStore(dir); got.Status != "info" {
+		t.Errorf("fresh project: status = %q, want info (%s)", got.Status, got.Detail)
+	}
+
+	// Two days on, still empty. That is the failure users kept reporting.
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(memoryMD, old, old); err != nil {
+		t.Fatal(err)
+	}
+	got := checkStore(dir)
+	if got.Status != "warn" {
+		t.Fatalf("idle project: status = %q, want warn (%s)", got.Status, got.Detail)
+	}
+	if got.Hint == "" {
+		t.Error("idle warning must carry an actionable hint, that is the whole point")
+	}
+	if !strings.Contains(got.Detail, "no facts") {
+		t.Errorf("detail should say nothing was stored, got %q", got.Detail)
+	}
+}
 
 func TestCheckDataDir(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
