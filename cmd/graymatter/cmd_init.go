@@ -12,6 +12,7 @@ import (
 func initCmd() *cobra.Command {
 	var (
 		interactive      bool
+		global           bool
 		skipCodex        bool
 		skipOpencode     bool
 		skipClaudeCode   bool
@@ -145,6 +146,28 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 				}
 			}
 
+			// --global also writes the block into the home-scoped instruction
+			// files, so agents pick up memory in projects that never ran init
+			// (issue #17).
+			if global {
+				if !quiet {
+					fmt.Println("\nGlobal agent instructions (apply in every project):")
+				}
+				for _, res := range writeGlobalInstructionFiles() {
+					if res.warn != "" {
+						warnings = append(warnings, res.warn)
+						continue
+					}
+					if !quiet {
+						glyph, note := "✓", ""
+						if !res.changed {
+							glyph, note = "·", " (already present)"
+						}
+						fmt.Printf("  %s %s%s\n", glyph, res.path, note)
+					}
+				}
+			}
+
 			if !quiet {
 				for _, w := range warnings {
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
@@ -179,6 +202,7 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 	cmd.Flags().BoolVar(&skipOpencode, "skip-opencode", false, "do not touch opencode.jsonc")
 	cmd.Flags().BoolVar(&withAntigravity, "with-antigravity", false, "also wire mcp_config.json for Antigravity")
 	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
+	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
 	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags, not --skip-instructions): claudecode,cursor,codex,opencode,antigravity")
 	return cmd
 }
