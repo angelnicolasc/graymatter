@@ -46,13 +46,17 @@ Keep them separate. CLI dependencies (bubbletea, cobra, etc.) must not appear in
 ## Running tests
 
 ```bash
-# Core library — no network, no LLM, no Docker
-go test -count=1 -timeout=120s ./pkg/memory/...
+# Core library and the public API surface — no network, no LLM, no Docker
+go test -count=1 -timeout=120s ./...
 
-# CLI and server packages
+# CLI, TUI, server and the command entrypoint
 cd cmd/graymatter
-go test -count=1 -timeout=120s ./internal/...
+go test -count=1 -timeout=300s ./...
 ```
+
+Use `./...` rather than naming packages. Both commands used to enumerate
+subtrees, which quietly excluded the root package and `cmd/graymatter` itself,
+so tests living there passed locally and were never run by anyone else.
 
 All tests use `t.TempDir()` with injected stubs. No real embedding model is required — tests that need one use a fixed-vector stub or keyword mode.
 
@@ -80,6 +84,16 @@ go test -fuzz=FuzzTokenize -fuzztime=30s ./pkg/memory/...
 - **Context everywhere.** Any function that does I/O must accept `context.Context` as its first parameter.
 - **No `init()` side effects** that affect behavior — only for package-level var initialization.
 - Standard formatting: `gofmt` / `goimports`. The CI runs `go vet ./...`; keep it clean.
+- **A status surface must check the thing it reports on.** If code answers "is
+  this healthy / ready / set up", it has to reach the dependency it is speaking
+  for, and it needs a test proving it goes red when that dependency is gone.
+  This one is written down because we got it wrong four times in the same
+  release: `doctor` reported "everything looks good" for a project that had
+  never stored a fact, `/healthz` answered ok with no store and again with a
+  dead daemon, and the TUI dashboard drew zeros as though they were data. All
+  four were indistinguishable from working, which is worse than an outage: a
+  crash gets reported, a confident wrong answer gets believed. Applies equally
+  to CI, which reported green for packages it was not running.
 
 ---
 
@@ -89,8 +103,8 @@ go test -fuzz=FuzzTokenize -fuzztime=30s ./pkg/memory/...
 2. Add or update tests. The CI will enforce coverage.
 3. Run the full test suite locally:
    ```bash
-   go test -count=1 -timeout=120s ./pkg/... && \
-   cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
+   go test -count=1 -timeout=120s ./... && \
+   cd cmd/graymatter && go test -count=1 -timeout=300s ./...
    ```
 4. Open the PR against `main`. Keep the title concise (`fix:`, `feat:`, `test:`, `docs:`, `refactor:`).
 

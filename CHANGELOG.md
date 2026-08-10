@@ -8,6 +8,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+**Setup tells you to restart your client**
+- MCP clients launch their servers at startup, so the memory tools do not exist in the session that ran `init`. Nothing said so where it mattered: `init` sent you straight to `doctor` and `remember`, and the one mention lived in a README subsection about flags. A correct install therefore looked broken, which is very likely part of what fed the reports in #14.
+- `init` now leads its next steps with the restart, both the plain and interactive paths through one shared helper, and `doctor` carries the hint while the store is still empty. It disappears once a single fact exists, so it cannot become noise.
+
+### Changed
+
+**Docs address the agent doing the install, not just the human reading**
+- New "Hand it to your agent" section at the top of the README: a prompt to paste, then a numbered setup procedure written in the second person for the agent to execute.
+- `CLAUDE.md` rewritten around the three situations an agent can be in (installing GrayMatter for a user, working in a project that uses it, contributing to it) instead of build and branching instructions, which duplicated `CONTRIBUTING.md`.
+- `CONTRIBUTING.md`: test commands use `./...` rather than enumerating subtrees, matching the CI fix, since the old form silently skipped the root package and `cmd/graymatter`. Adds the convention that a status surface must check the thing it reports on and needs a test proving it goes red when that dependency is gone.
+
 ---
 
 ## [0.7.0] – 2026-08-10

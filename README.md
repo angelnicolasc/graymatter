@@ -41,6 +41,61 @@ facts, _ := mem.Recall(ctx, "agent", "how should I format this response?")
 
 ---
 
+## Hand it to your agent
+
+GrayMatter is meant to be installed by the agent that will use it. Paste this
+to Claude Code, Cursor, Codex, OpenCode, Antigravity, or anything else with
+shell access:
+
+> Set up GrayMatter in this project: https://github.com/angelnicolasc/graymatter
+> Follow the "Agent setup procedure" in its README, and tell me when I need to
+> restart you.
+
+### Agent setup procedure
+
+If you are an agent and a user asked you to set GrayMatter up, run these in
+order and report what each one printed.
+
+**1. Install the binary.** With Go available:
+
+```bash
+go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
+```
+
+Otherwise take the archive for the user's platform from [Install](#install)
+below and put `graymatter` on `PATH`.
+
+**2. Wire the project.**
+
+```bash
+graymatter init            # this project
+graymatter init --global   # and every other project on this machine
+```
+
+This writes MCP config for every supported client plus the memory block into
+`CLAUDE.md` / `AGENTS.md`. Entries from other MCP servers are merged, never
+overwritten, so it is safe in a repo that already has some.
+
+**3. Verify.**
+
+```bash
+graymatter doctor
+```
+
+Every line must be `✓` or `·`. If it warns, fix that before continuing; the
+hints are actionable.
+
+**4. Ask the user to restart you.** This step is not optional. MCP servers are
+launched by the client when it starts, so the five memory tools do not exist in
+the session that just ran `init`. A correct install looks broken until the
+restart, and this is the single most common reason people think GrayMatter is
+not working.
+
+**5. After the restart**, call `memory_search` once to confirm the tools are
+loaded, then follow [`AGENTS.md`](AGENTS.md) for when to use which.
+
+---
+
 ## Why
 
 Every AI agent is **stateless by default**. Each run re-injects the full

@@ -1,32 +1,42 @@
 # CLAUDE.md
 
-> Project-specific instructions for Claude Code working in this repo.
+> Read this first if someone pointed you at GrayMatter. Three situations, three
+> different answers.
 
-## What this repo is
+GrayMatter is a single-binary Go memory system for AI agents. Library + CLI +
+MCP server + TUI. Facts persist to bbolt with optional vector embeddings, for
+roughly a 97% cut in context tokens versus re-injecting full history.
 
-GrayMatter — a single-binary Go memory system for AI agents. Library + CLI + MCP server + TUI. Persists facts to bbolt with optional vector embeddings; ~97% reduction in context tokens versus full-history injection.
+## A user asked you to set GrayMatter up
 
-## Two facts that change how you work here
+Do not read the source for this. Follow **Agent setup procedure** in the
+[README](README.md#agent-setup-procedure): install the binary, `graymatter
+init`, `graymatter doctor`, then tell the user to restart you.
 
-1. **You have memory tools available** via this repo's own MCP server. See [`AGENTS.md`](AGENTS.md) for the per-tool param reference (notably: `memory_reflect` takes `agent`, the other four take `agent_id` — don't mix them up).
-2. **bbolt is single-writer — daemon mode solves it.** A daemon owns the store and every other process (TUI, MCP server, CLI, `run`) connects as a client over a local socket/named pipe, so concurrent access just works. Clients spawn the daemon on first use and it idle-exits when unused. Use `--no-daemon` to bypass it for in-process debugging (then the old single-writer lock applies, and a second process will contend). See `cmd/graymatter/internal/daemon/` and `pkg/memory/rpc/`. This was [issue #8](https://github.com/angelnicolasc/graymatter/issues/8) (closes #4, #9).
+That last step is the one that gets skipped. MCP servers are launched by the
+client at startup, so the memory tools will not exist in the session that ran
+`init`, no matter how green `doctor` looks.
 
-## Codebase basics
+## You are working in a project that already uses GrayMatter
 
-- **Build**: `go build ./...`
-- **Test**: `go test ./...` (use `-race` if you have CGO; CI runs the race matrix)
-- **Lint**: standard `go vet ./...`; format with `gofmt -s -w .`
-- **Module split**: root module = core library; `cmd/graymatter/` = CLI + TUI binary (separate `go.mod` to keep TUI deps out of library consumers)
-- **Public API surface**: see [`docs/api-stability.md`](docs/api-stability.md) — `graymatter.Memory` is stable; internal packages are not
+[`AGENTS.md`](AGENTS.md) is the operating manual: which tool to call, when, and
+with which parameter names. The full version is [`docs/AGENTS.md`](docs/AGENTS.md).
 
-## Conventions
+The one thing that reliably trips agents up: `memory_reflect` takes `agent`,
+while the other four tools take `agent_id`. Mixing them up fails validation.
 
-- Branches off `main`. PRs are opened when external review is wanted; otherwise direct commits to `main` are fine.
-- CHANGELOG follows Keep a Changelog format with `### Added / Changed / Fixed / Internal / Credits` sections.
+## You are contributing to GrayMatter itself
 
-## Where deep docs live
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers setup, tests, coverage gates and
+code conventions. Two things the tree does not make obvious:
 
-- [`AGENTS.md`](AGENTS.md) — agent operator brief (this file points to it for the MCP tools)
-- [`docs/AGENTS.md`](docs/AGENTS.md) — full memory-system manual (RRF mechanics, anti-patterns, CLI parity, etc.)
-- [`GRAYMATTER_PLAYBOOK.md`](GRAYMATTER_PLAYBOOK.md) — the strategic *why* (gap analysis, ecosystem positioning)
-- [`docs/api-stability.md`](docs/api-stability.md), [`docs/benchmarks.md`](docs/benchmarks.md), [`docs/plugin-protocol.md`](docs/plugin-protocol.md) — specialised references
+- **bbolt is single-writer, and daemon mode is what makes concurrent access
+  work.** One process owns the store and every other one (TUI, MCP server, CLI,
+  `run`, the REST server) connects as a client over a local socket or named
+  pipe. Clients spawn the daemon on first use and it idle-exits when unused.
+  `--no-daemon` opts out and brings the lock contention back. See
+  `cmd/graymatter/internal/daemon/` and `pkg/memory/rpc/`.
+- **The module is split.** The root is the library; `cmd/graymatter/` is the CLI
+  and TUI with its own `go.mod`, so library consumers do not inherit TUI
+  dependencies. [`docs/api-stability.md`](docs/api-stability.md) says what is
+  stable: `graymatter.Memory` is, internal packages are not.
