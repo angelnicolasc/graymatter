@@ -8,6 +8,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] – 2026-08-10
+
+A release about surfaces that reported something they had not checked: an
+`init` writing files nobody reads, and a `doctor` calling a project healthy on
+the strength of a marker rather than the briefing behind it. All three defects
+trace to the same cause — the table that knows which agent reads which file
+existed in three copies, and only one of them was kept current.
+
+### Changed
+
+Two CLI contracts move. Neither is covered by the compatibility promise in
+[docs/api-stability.md](docs/api-stability.md) — `cmd/` carries no stability
+guarantee — but both are observable from a script, so they are called out here
+rather than left inside the fixes below.
+
+- **`init --only <agent>` and `--skip-<agent>` write fewer files.** Only the
+  instruction file each selected agent actually reads. A provisioning script
+  that assumed `--only opencode` left a `CLAUDE.md` behind will no longer find
+  one. Plain `graymatter init` is unchanged, byte for byte.
+- **`init --only <unknown-id>` now exits 1** instead of 0. It used to wire
+  nothing, write both instruction files, and report success.
+
+`doctor` exit codes are unchanged in every state — healthy, outdated block,
+nothing wired, global-only. Automation gating on them is unaffected; only the
+text it prints is different.
+
 ### Fixed
 
 **`init` writes only the instruction files the agents you wire actually read (issue #13)**
@@ -24,6 +52,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Instruction coverage is resolved per wired agent. A project relying on `init --global` was told nothing tells the model to use the memory tools, by the same check whose hint recommends `--global`. Crediting the global block to everyone would have been worse: it reaches Claude Code and OpenCode, not Cursor or Codex.
 - A project still carrying the pre-0.7.0 briefing — the one that gated the search on "when prior context might matter" — reported "Everything looks good", because the check accepted any file containing the marker or the word "graymatter". It now compares the block against the text we ship, with line endings normalised so a CRLF checkout is not mistaken for drift. A briefing you wrote yourself is recognised and never called stale.
 - `graymatter init` migrates a stale block in place, as before: markers are unchanged and anything outside them is untouched.
+
+### Docs
+
+**`CONTRIBUTING.md` states the Go version we actually need, and the `-race` gap**
+- Setup said Go 1.22+. The workspace declares `go 1.23.0`, so 1.22 either pulls 1.23 down or, with `GOTOOLCHAIN=local`, refuses to build at all. It also listed "no CGO" among the requirements, which reads as a constraint on your machine; it is how the release artifact is built (`CGO_ENABLED=0` in `.goreleaser.yml`).
+- The documented test commands did not pass `-race`, which CI runs on every package — following the file to the letter got you a green local run and a red pull request. The `-race` commands are now written down beside them, with the C-compiler requirement that comes with the detector.
+
+**README**
+- Dropped the Go Report Card badge. The service was sunset and its endpoint now serves a badge reading "retired" for every repository, at HTTP 200 — so no link checker catches it.
 
 ---
 
