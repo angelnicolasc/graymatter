@@ -8,6 +8,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+**`init` writes only the instruction files the agents you wire actually read (issue #13)**
+- `graymatter init --only opencode` created a `CLAUDE.md` alongside the `AGENTS.md` it needed, and every other value had the same problem pointing the other way: `--only claudecode` wrote an `AGENTS.md`, `--only cursor` and `--only codex` wrote a `CLAUDE.md`. Claude Code reads `CLAUDE.md` and does not read `AGENTS.md`, so the extra file is not harmless redundancy — it is a file nobody reads, checked into the repo.
+- The interactive wizard already had the per-agent mapping; the flag path kept its own list of writers and wrote both files regardless. `knownAgents` is now the one table `init`, the wizard and `doctor` all read.
+- `--only` rejects an unrecognised id instead of silently wiring nothing. That was cosmetic while both files were written unconditionally; now that the files follow the selection, a typo would produce a run that writes nothing and still exits 0.
+- Plain `graymatter init` is unchanged, byte for byte. `--skip-claudecode` no longer writes a `CLAUDE.md` nobody asked for.
+
+**The block writer stops damaging files it updates**
+- It always spliced LF. With `core.autocrlf=true` a checkout hands the file back as CRLF, so the managed block came back LF and the rest stayed CRLF, leaving the file with both — and because the change comparison then never matched, every `init` rewrote the file and dirtied the tree. The block now follows the file's dominant line ending, by majority, so one pasted CRLF line in an LF file does not drag the block across.
+- It replaced only the first marker pair, so a duplicate could keep the old text while the file still satisfied anything that read the first pair and stopped. All managed blocks are now collapsed into one. An orphaned begin marker is left alone rather than paired with a later block's terminator, which would delete every line in between.
+
+**`doctor` checks the block that is there, and who it reaches (issues #14, #17)**
+- Instruction coverage is resolved per wired agent. A project relying on `init --global` was told nothing tells the model to use the memory tools, by the same check whose hint recommends `--global`. Crediting the global block to everyone would have been worse: it reaches Claude Code and OpenCode, not Cursor or Codex.
+- A project still carrying the pre-0.7.0 briefing — the one that gated the search on "when prior context might matter" — reported "Everything looks good", because the check accepted any file containing the marker or the word "graymatter". It now compares the block against the text we ship, with line endings normalised so a CRLF checkout is not mistaken for drift. A briefing you wrote yourself is recognised and never called stale.
+- `graymatter init` migrates a stale block in place, as before: markers are unchanged and anything outside them is untouched.
+
 ---
 
 ## [0.7.1] – 2026-08-10
