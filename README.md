@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/coverage-73.5%25-brightgreen" alt="Coverage 73.5%">
+  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.1"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/coverage-74.1%25-brightgreen" alt="Coverage 74.1%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://goreportcard.com/badge/github.com/angelnicolasc/graymatter" alt="Go Report Card">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
@@ -158,22 +158,22 @@ The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 
 ```bash
 # Linux (x86_64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.0/graymatter_0.7.0_linux_amd64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.1/graymatter_0.7.1_linux_amd64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Linux (ARM64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.0/graymatter_0.7.0_linux_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.1/graymatter_0.7.1_linux_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.0/graymatter_0.7.0_darwin_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.7.1/graymatter_0.7.1_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.7.0/graymatter_0.7.0_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.7.1/graymatter_0.7.1_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
@@ -546,7 +546,7 @@ cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
 
 **Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` — each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
 
-**Core library coverage: 73.5%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
+**Core library coverage: 74.1%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
 
 Token-reduction benchmark (also zero deps):
 
@@ -660,7 +660,7 @@ packaged as a library you import in three lines.
 - [x] `OnRecall` / `OnPut` / `Logger` hooks for APM integration
 - [x] Embedding dimension guard — warns on provider switch instead of silent corruption
 - [x] go.work workspace — core library imports zero TUI/CLI dependencies
-- [x] Three-platform CI (Linux, macOS, Windows) + 73.5% coverage gate
+- [x] Three-platform CI (Linux, macOS, Windows) + ≥70% coverage gate
 - [x] Fuzz testing: `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore`
 - [x] Daemon mode — concurrent store access; TUI/MCP/CLI connect to one store owner over a local socket (net/rpc, stdlib-only), launch-on-connect + idle-exit, token auth
 - [x] `graymatter doctor` — end-to-end setup diagnosis; `init` writes the agent memory block into CLAUDE.md / AGENTS.md
@@ -674,4 +674,4 @@ packaged as a library you import in three lines.
 
 ---
 
-*GrayMatter — v0.7.0 — August 2026*
+*GrayMatter — v0.7.1 — August 2026*

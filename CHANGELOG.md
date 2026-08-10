@@ -8,6 +8,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.7.1] – 2026-08-10
+
+Follow-up to 0.7.0. Every item here is a surface that reported something it had
+not checked: a price looked up under the wrong key, a dashboard drawing zeros it
+could not read, a setup step that never mentioned the one action that makes it
+work.
+
 ### Fixed
 
 **Token cost stops reporting the wrong price with confidence**
