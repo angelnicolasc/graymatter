@@ -18,8 +18,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - New `knownAgents` table (`cmd_init_interactive.go`) as a single source of truth for agent → {writer, instructionFile} mapping.
 
 **`graymatter init --global` (issue #17)**
-- Writes the managed memory block into `~/.claude/CLAUDE.md` and `~/.config/opencode/AGENTS.md`, the home-scoped files agents read no matter which project they are working in. Global installs no longer need `init` run in every repo just to get the instructions.
+- Writes the managed memory block into `~/.claude/CLAUDE.md` and `~/.config/opencode/AGENTS.md`, the home-scoped files agents read no matter which project they are working in. Global installs no longer need `init` run in every repo just to get the instructions. Works with `-i` too.
+- `XDG_CONFIG_HOME` is honoured for the OpenCode path. OpenCode resolves its global config through it, so hardcoding `~/.config` would have written where nothing reads. The directory is `~/.config/opencode` on every platform, Windows included; OpenCode does not use `%APPDATA%`.
 - Same marker-based upsert as the project files, so it stays idempotent and leaves your own global instructions untouched.
+- The block guards on the tools actually being present, since a global install reaches projects that never wired GrayMatter. It is a capability check, not a judgement call, so it cannot become the hedge that made the old block ignorable.
+- Deliberately not a `SKILL.md`. OpenCode loads skills lazily, advertising only name and description and leaving the body to the model's discretion, which puts the same "the model decides whether to bother" failure one level up. Instructions that must run before the first reply belong in a file that is always loaded.
 
 ### Fixed
 

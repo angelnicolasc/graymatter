@@ -39,9 +39,15 @@ const (
 const blockTmpl = `
 ## Memory (GrayMatter)
 
-You have persistent memory in this project through the ~graymatter~ MCP tools.
-Wiring the MCP server only makes those tools available; nothing calls them for
-you. That is your job, every session.
+You have persistent memory through the ~graymatter~ MCP tools. Wiring the MCP
+server only makes them available; nothing calls them for you. That is your job,
+every session.
+
+This block can be installed globally, so it may reach a project that has no
+GrayMatter wired. If ~memory_search~ is not in your toolbelt for this session,
+skip the rest of this section. That is a check on what tools exist, not a
+judgement call about whether memory seems useful: if the tools are there,
+everything below applies.
 
 ### Your identity
 
@@ -175,10 +181,31 @@ func globalInstructionPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	opencodeDir, err := opencodeConfigDir()
+	if err != nil {
+		return nil, err
+	}
 	return []string{
 		filepath.Join(home, ".claude", "CLAUDE.md"),
-		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
+		filepath.Join(opencodeDir, "AGENTS.md"),
 	}, nil
+}
+
+// opencodeConfigDir resolves OpenCode's global config directory.
+//
+// It is ~/.config/opencode on every platform, Windows included: OpenCode does
+// not use %APPDATA%. XDG_CONFIG_HOME takes precedence when set, which OpenCode
+// supports but does not document on the rules page (anomalyco/opencode#6669) —
+// hardcoding ~/.config would silently write where nothing reads.
+func opencodeConfigDir() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "opencode"), nil
+	}
+	home, err := resolveHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "opencode"), nil
 }
 
 // writeGlobalInstructionFiles upserts the memory block into every path returned
@@ -197,6 +224,30 @@ func writeGlobalInstructionFiles() []writeResult {
 		out = append(out, res)
 	}
 	return out
+}
+
+// installGlobalInstructions writes the block into the home-scoped files and
+// prints what happened, returning any warnings for the caller to surface.
+// Shared by the plain --global path and the wizard so the two cannot drift.
+func installGlobalInstructions(quiet bool) []string {
+	var warnings []string
+	if !quiet {
+		fmt.Println("\nGlobal agent instructions (apply in every project):")
+	}
+	for _, res := range writeGlobalInstructionFiles() {
+		if res.warn != "" {
+			warnings = append(warnings, res.warn)
+			continue
+		}
+		if !quiet {
+			glyph, note := "✓", ""
+			if !res.changed {
+				glyph, note = "·", " (already present)"
+			}
+			fmt.Printf("  %s %s%s\n", glyph, res.path, note)
+		}
+	}
+	return warnings
 }
 
 // hasInstructionsBlock reports whether path contains the managed block (or at

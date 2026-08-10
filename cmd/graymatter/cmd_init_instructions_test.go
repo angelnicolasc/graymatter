@@ -131,6 +131,12 @@ func TestInstructionsBlock_IsProcedural(t *testing.T) {
 		"root directory",                   // agent_id is derivable, not invented
 		"checkpoint_resume",
 		"checkpoint_save",
+		// --global puts this block in projects that may not have GrayMatter
+		// wired, so it has to guard on the tools existing. The guard is a
+		// capability check on purpose: phrased as judgement it would recreate
+		// the very hedge that made the old block ignorable.
+		"not in your toolbelt",
+		"not a\njudgement call",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("block no longer contains %q", want)
@@ -159,6 +165,42 @@ func TestInstructionsBlock_IsProcedural(t *testing.T) {
 		if r > 127 && !strings.ContainsRune(allowed, r) {
 			t.Errorf("unexpected non-ASCII rune %q in generated block body", r)
 		}
+	}
+}
+
+// TestGlobalInstructionPaths_HonoursXDG pins where --global writes. OpenCode
+// resolves its global config through XDG_CONFIG_HOME when that is set, so
+// hardcoding ~/.config would put the block somewhere nothing reads and make
+// --global look like it worked while doing nothing.
+func TestGlobalInstructionPaths_HonoursXDG(t *testing.T) {
+	home := t.TempDir()
+	testHomeOverride = home
+	t.Cleanup(func() { testHomeOverride = "" })
+
+	// Unset: ~/.config/opencode on every platform, Windows included.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	paths, err := globalInstructionPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".config", "opencode", "AGENTS.md"); paths[1] != want {
+		t.Errorf("default opencode path = %q, want %q", paths[1], want)
+	}
+
+	// Set: it wins.
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	paths, err = globalInstructionPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(xdg, "opencode", "AGENTS.md"); paths[1] != want {
+		t.Errorf("XDG opencode path = %q, want %q", paths[1], want)
+	}
+
+	// Claude Code's own path is home-based and unaffected by XDG.
+	if want := filepath.Join(home, ".claude", "CLAUDE.md"); paths[0] != want {
+		t.Errorf("claude path = %q, want %q", paths[0], want)
 	}
 }
 

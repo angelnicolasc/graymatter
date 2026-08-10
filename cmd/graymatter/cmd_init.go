@@ -36,7 +36,17 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 (` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http :8080`" + `).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if interactive {
-				return runInteractiveWizard(dataDir, ".", quiet)
+				if err := runInteractiveWizard(dataDir, ".", quiet); err != nil {
+					return err
+				}
+				// --global is orthogonal to which clients the wizard wired, so
+				// it applies to both paths rather than only the flag-driven one.
+				if global {
+					for _, w := range installGlobalInstructions(quiet) {
+						fmt.Fprintf(os.Stderr, "\n%s\n", w)
+					}
+				}
+				return nil
 			}
 			dir := dataDir
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -150,22 +160,7 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 			// files, so agents pick up memory in projects that never ran init
 			// (issue #17).
 			if global {
-				if !quiet {
-					fmt.Println("\nGlobal agent instructions (apply in every project):")
-				}
-				for _, res := range writeGlobalInstructionFiles() {
-					if res.warn != "" {
-						warnings = append(warnings, res.warn)
-						continue
-					}
-					if !quiet {
-						glyph, note := "✓", ""
-						if !res.changed {
-							glyph, note = "·", " (already present)"
-						}
-						fmt.Printf("  %s %s%s\n", glyph, res.path, note)
-					}
-				}
+				warnings = append(warnings, installGlobalInstructions(quiet)...)
 			}
 
 			if !quiet {
