@@ -128,13 +128,25 @@ func upsertInstructionsBlock(path string) (writeResult, error) {
 		next = block
 	default:
 		content := string(data)
-		begin := strings.Index(content, instrBeginMarker)
-		end := strings.Index(content, instrEndMarker)
-		if begin >= 0 && end > begin {
-			// Replace the managed block, keep everything around it.
-			next = content[:begin] + strings.TrimSuffix(block, "\n") + content[end+len(instrEndMarker):]
+		// Match the file's existing line endings before splicing. Writing LF
+		// into a CRLF file left it with both, and once the block itself had
+		// picked up CRLF — which is what a checkout with core.autocrlf=true
+		// produces — the equality check below never held again: every run
+		// rewrote the file, reported a change, and dirtied the tree.
+		if usesCRLF(content) {
+			block = toCRLF(block)
+		}
+		le := lineEnding(content)
+
+		// Every managed block goes, and one canonical block comes back where
+		// the first one was. Replacing only the first pair left a duplicate
+		// behind still carrying the old text, which a check that reads the
+		// first pair then happily reports as healthy.
+		stripped, at := stripManagedBlocks(content)
+		if at >= 0 {
+			next = stripped[:at] + strings.TrimSuffix(block, le) + stripped[at:]
 		} else {
-			next = strings.TrimRight(content, "\n") + "\n\n" + block
+			next = strings.TrimRight(stripped, "\r\n") + le + le + block
 		}
 	}
 
@@ -152,11 +164,98 @@ func upsertInstructionsBlock(path string) (writeResult, error) {
 	return res, nil
 }
 
-// writeInstructionFiles upserts the memory block into CLAUDE.md and AGENTS.md
-// in projectDir. Returns one result per file, in a stable order.
-func writeInstructionFiles(projectDir string) []writeResult {
+// usesCRLF reports whether the file's dominant line ending is CRLF.
+//
+// Majority, not presence: one pasted CRLF line in an otherwise LF file must not
+// drag the whole block over to CRLF. A file that is already mixed keeps what it
+// has — the block follows the majority and the surrounding lines are left
+// alone, which is what makes the result stable instead of trading one rewrite
+// for another.
+func usesCRLF(content string) bool {
+	crlf := strings.Count(content, "\r\n")
+	lines := strings.Count(content, "\n")
+	return crlf*2 > lines
+}
+
+func lineEnding(content string) string {
+	if usesCRLF(content) {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func toCRLF(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+}
+
+// managedBlockSpans returns the [start,end) byte ranges of every managed block
+// in content, in order.
+//
+// Pairing is non-greedy: a begin marker with another begin marker before the
+// next end marker is orphaned — hand-mangled, half-pasted, whatever — and is
+// skipped rather than paired with some later block's terminator. Pairing it
+// would swallow everything in between, which is user content that was never
+// inside a block.
+//
+// One scanner backs both the writer and the check in doctor, so the two cannot
+// disagree about what counts as a block.
+func managedBlockSpans(content string) [][2]int {
+	var spans [][2]int
+	for off := 0; off < len(content); {
+		rel := strings.Index(content[off:], instrBeginMarker)
+		if rel < 0 {
+			break
+		}
+		begin := off + rel
+		after := begin + len(instrBeginMarker)
+
+		endRel := strings.Index(content[after:], instrEndMarker)
+		if endRel < 0 {
+			break // unterminated: nothing to pair here or after it
+		}
+		end := after + endRel + len(instrEndMarker)
+
+		if nextRel := strings.Index(content[after:], instrBeginMarker); nextRel >= 0 && after+nextRel < end {
+			off = after // this begin is orphaned; try the next one
+			continue
+		}
+		spans = append(spans, [2]int{begin, end})
+		off = end
+	}
+	return spans
+}
+
+// stripManagedBlocks removes every managed block from content and reports where
+// the first one started in the result, or -1 when there was none.
+func stripManagedBlocks(content string) (stripped string, insertAt int) {
+	spans := managedBlockSpans(content)
+	if len(spans) == 0 {
+		return content, -1
+	}
+	var b strings.Builder
+	prev := 0
+	insertAt = -1
+	for _, s := range spans {
+		b.WriteString(content[prev:s[0]])
+		if insertAt < 0 {
+			insertAt = b.Len()
+		}
+		prev = s[1]
+	}
+	b.WriteString(content[prev:])
+	return b.String(), insertAt
+}
+
+// writeInstructionFiles upserts the memory block into the given instruction
+// files under projectDir. Returns one result per file, in the given order.
+//
+// The file list is the caller's to decide. Writing CLAUDE.md and AGENTS.md
+// unconditionally is what put a CLAUDE.md in every OpenCode-only project: which
+// files are needed depends on which agents are being wired, and only the caller
+// knows that.
+func writeInstructionFiles(projectDir string, names []string) []writeResult {
 	var out []writeResult
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range names {
 		res, err := upsertInstructionsBlock(filepath.Join(projectDir, name))
 		if err != nil {
 			res.warn = fmt.Sprintf("could not update %s: %v", name, err)
@@ -176,19 +275,27 @@ func writeInstructionFiles(projectDir string) []writeResult {
 // lands ahead of project content rather than replacing it. Both are plain
 // markdown, so the same marker-based upsert applies and a user's own global
 // instructions are left untouched.
+//
+// The paths come from knownAgents rather than being listed again here, so
+// adding an agent with a global file is one edit and doctor learns about it at
+// the same time.
 func globalInstructionPaths() ([]string, error) {
-	home, err := resolveHome()
-	if err != nil {
-		return nil, err
+	var out []string
+	seen := map[string]bool{}
+	for _, a := range knownAgents(".") {
+		if a.globalInstruction == nil {
+			continue
+		}
+		p, err := a.globalInstruction()
+		if err != nil {
+			return nil, err
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
 	}
-	opencodeDir, err := opencodeConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	return []string{
-		filepath.Join(home, ".claude", "CLAUDE.md"),
-		filepath.Join(opencodeDir, "AGENTS.md"),
-	}, nil
+	return out, nil
 }
 
 // opencodeConfigDir resolves OpenCode's global config directory.
@@ -268,15 +375,56 @@ func printNextSteps() {
 	fmt.Printf("       graymatter recall  \"my-agent\" \"how should I format this?\"\n")
 }
 
-// hasInstructionsBlock reports whether path contains the managed block (or at
-// least mentions graymatter, for users who wrote their own briefing).
-// Used by `graymatter doctor`.
-func hasInstructionsBlock(path string) bool {
+// normalizeEndings makes block comparisons independent of how a file was
+// checked out or saved. Without it a CRLF file would compare unequal to the
+// canonical block forever, and every check below would be a false alarm.
+func normalizeEndings(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
+
+// blockStatus is what doctor needs to know about one instruction file.
+type blockStatus int
+
+const (
+	blockAbsent  blockStatus = iota // no graymatter briefing at all
+	blockCustom                     // mentions graymatter, but not our managed block
+	blockStale                      // our markers, but not the text we ship today
+	blockCurrent                    // our markers, current text
+)
+
+// inspectBlock classifies the managed block in path.
+//
+// The stale case is the one worth having. The briefing shipped before v0.7.0
+// described the five tools and told the model to search "when prior context
+// might matter" — a condition it can resolve to false every single time, which
+// is the whole of issue #14. Its markers are byte-identical to today's, so a
+// check that looks for a marker, or for the word "graymatter", reports it as
+// healthy. Comparing the text is what separates "a briefing is present" from
+// "the briefing that works is present", and it keeps working for the next
+// revision without anyone remembering to bump a version.
+//
+// Every block in the file is checked, not just the first: a duplicate that
+// still carries the old text is exactly the copy worth catching.
+func inspectBlock(path string) blockStatus {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return blockAbsent
 	}
-	content := strings.ToLower(string(data))
-	return strings.Contains(content, strings.ToLower(instrBeginMarker)) ||
-		strings.Contains(content, "graymatter")
+	content := normalizeEndings(string(data))
+	want := normalizeEndings(strings.TrimSuffix(instructionsBlock(), "\n"))
+
+	spans := managedBlockSpans(content)
+	for _, s := range spans {
+		if content[s[0]:s[1]] != want {
+			return blockStale
+		}
+	}
+	if len(spans) > 0 {
+		return blockCurrent
+	}
+
+	// No managed block. A briefing someone wrote themselves still counts as
+	// instructions — it is theirs, so it is never "stale".
+	if strings.Contains(strings.ToLower(content), "graymatter") {
+		return blockCustom
+	}
+	return blockAbsent
 }

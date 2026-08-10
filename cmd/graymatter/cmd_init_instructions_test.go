@@ -266,33 +266,172 @@ func TestWriteGlobalInstructionFiles_PreservesUserContent(t *testing.T) {
 	}
 }
 
-func TestHasInstructionsBlock(t *testing.T) {
+func TestInspectBlock(t *testing.T) {
 	dir := t.TempDir()
+	write := func(name, body string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// The pre-v0.7.0 briefing, markers and all. This is the file the users in
+	// issue #14 were left with, and the reason "is there a block" was never a
+	// good enough question.
+	staleBody := instrBeginMarker + `
+## Memory (GrayMatter)
+
+- ` + "`memory_search`" + ` — call at the start of a task when prior context might matter.
+` + instrEndMarker + "\n"
 
 	managed := filepath.Join(dir, "CLAUDE.md")
 	if _, err := upsertInstructionsBlock(managed); err != nil {
 		t.Fatal(err)
 	}
-	if !hasInstructionsBlock(managed) {
-		t.Error("managed file should be detected")
-	}
-
-	custom := filepath.Join(dir, "AGENTS.md")
-	if err := os.WriteFile(custom, []byte("Use the GrayMatter MCP tools.\n"), 0o644); err != nil {
+	current, err := os.ReadFile(managed)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasInstructionsBlock(custom) {
-		t.Error("hand-written graymatter mention should be detected")
+
+	cases := []struct {
+		name string
+		path string
+		want blockStatus
+	}{
+		{"managed block we just wrote", managed, blockCurrent},
+		{"pre-0.7 block", write("STALE.md", staleBody), blockStale},
+		{"hand-written mention", write("AGENTS.md", "Use the GrayMatter MCP tools.\n"), blockCustom},
+		{"unrelated file", write("OTHER.md", "nothing to see\n"), blockAbsent},
+		{"missing file", filepath.Join(dir, "MISSING.md"), blockAbsent},
+
+		// A CRLF checkout must not read as stale, or every Windows user gets a
+		// warning they cannot clear.
+		{"current block in a CRLF file", write("CRLF.md",
+			strings.ReplaceAll(string(current), "\n", "\r\n")), blockCurrent},
+
+		// One current block plus one stale copy is a stale file: the model is
+		// still being fed the old text.
+		{"current block next to a stale one", write("BOTH.md",
+			string(current)+"\n"+staleBody), blockStale},
 	}
 
-	unrelated := filepath.Join(dir, "OTHER.md")
-	if err := os.WriteFile(unrelated, []byte("nothing to see\n"), 0o644); err != nil {
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := inspectBlock(c.path); got != c.want {
+				t.Errorf("inspectBlock = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestUpsertInstructions_PreservesLineEndings covers what a Windows checkout
+// does to this file. With core.autocrlf=true the block comes back from git as
+// CRLF; splicing LF into it left the file with both, and because the whole-file
+// comparison then never matched, every init rewrote it and reported a change.
+func TestUpsertInstructions_PreservesLineEndings(t *testing.T) {
+	crCount := func(s string) int { return strings.Count(s, "\r") }
+
+	t.Run("crlf file stays crlf", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "CLAUDE.md")
+		if err := os.WriteFile(path, []byte("# Project\r\nnotes\r\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := upsertInstructionsBlock(path); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(path)
+		got := string(data)
+		if lf := strings.Count(got, "\n"); crCount(got) != lf {
+			t.Errorf("mixed endings: %d CR vs %d LF", crCount(got), lf)
+		}
+
+		// The second run has to be a no-op, or git sees a dirty tree after
+		// every init.
+		res, err := upsertInstructionsBlock(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.changed {
+			t.Error("second upsert rewrote a file it had just written")
+		}
+	})
+
+	t.Run("lf file with a stray crlf stays lf", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "CLAUDE.md")
+		if err := os.WriteFile(path, []byte("# Project\na\nb\r\nc\nd\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := upsertInstructionsBlock(path); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(path)
+		// One pasted line must not convert the block. The single pre-existing
+		// CR is the only one that should survive.
+		if n := crCount(string(data)); n != 1 {
+			t.Errorf("got %d CR, want the 1 that was already there", n)
+		}
+	})
+}
+
+// TestUpsertInstructions_CollapsesDuplicateBlocks: replacing only the first
+// marker pair left later copies untouched, so a file could carry a current
+// block and a stale one at the same time and still look fine to anything that
+// read the first pair and stopped.
+func TestUpsertInstructions_CollapsesDuplicateBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	stale := instrBeginMarker + "\nold briefing\n" + instrEndMarker
+	body := "# Project\n\nkeep me\n\n" + stale + "\n\nmiddle\n\n" + stale + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if hasInstructionsBlock(unrelated) {
-		t.Error("unrelated file should not be detected")
+
+	if _, err := upsertInstructionsBlock(path); err != nil {
+		t.Fatal(err)
 	}
-	if hasInstructionsBlock(filepath.Join(dir, "MISSING.md")) {
-		t.Error("missing file should not be detected")
+	got := string(mustRead(t, path))
+
+	if n := strings.Count(got, instrBeginMarker); n != 1 {
+		t.Errorf("got %d blocks, want 1", n)
 	}
+	if strings.Contains(got, "old briefing") {
+		t.Error("a stale copy survived the upsert")
+	}
+	for _, keep := range []string{"keep me", "middle"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("lost user content %q", keep)
+		}
+	}
+}
+
+// TestUpsertInstructions_LeavesOrphanMarkerAlone: a begin marker with no
+// terminator of its own is not a block this tool wrote. Pairing it with the
+// next block's end marker would delete every line in between.
+func TestUpsertInstructions_LeavesOrphanMarkerAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	body := "# Project\n" + instrBeginMarker + "\nhand-written note\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := upsertInstructionsBlock(path); err != nil {
+		t.Fatal(err)
+	}
+	got := string(mustRead(t, path))
+	if !strings.Contains(got, "hand-written note") {
+		t.Error("orphan marker swallowed the user's content")
+	}
+	if !strings.Contains(got, instrEndMarker) {
+		t.Error("no managed block was written")
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
