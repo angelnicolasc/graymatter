@@ -3,11 +3,15 @@
 // processes (Python scripts, shell agents, etc.) interact with the same bbolt
 // store that the CLI uses.
 //
+// The store arrives as a constructor argument (see Store). This package never
+// opens bbolt, so it reaches the same store every other command does, through
+// the daemon when one owns it.
+//
 // Routes:
 //
 //	POST   /remember           body: {"agent":"<id>","text":"<text>"}
 //	GET    /recall?agent=<id>&q=<query>[&k=<int>]
-//	POST   /consolidate        body: {"agent":"<id>"}  (requires ANTHROPIC_API_KEY env var)
+//	POST   /consolidate        body: {"agent":"<id>"}
 //	GET    /facts?agent=<id>[&limit=<int>]
 //	DELETE /forget             body: {"agent":"<id>","query":"<query>"}
 //	GET    /healthz
@@ -19,11 +23,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
-	"github.com/angelnicolasc/graymatter/pkg/embedding"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -36,40 +38,48 @@ const (
 	shutdownGrace = 5 * time.Second
 )
 
+// Store is the persistence surface the handlers need.
+//
+// The server takes this rather than opening bbolt itself. bbolt is single
+// writer and the daemon owns the lock in normal operation (issue #8), so a
+// second opener simply fails: the server used to come up anyway with a nil
+// store and 503 every data route while /healthz still reported ok. The caller
+// passes in whatever `openStore` returns, daemon client or direct store, and
+// the server stays out of the lock business entirely (issue #19).
+//
+// The caller owns the store's lifecycle. Shutdown does not close it.
+type Store interface {
+	Remember(ctx context.Context, agentID, text string) error
+	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	List(agentID string) ([]memory.Fact, error)
+	Delete(agentID, factID string) error
+	Consolidate(ctx context.Context, agentID string) error
+
+	// Ready reports whether the store answers right now. It backs /healthz,
+	// which otherwise has no way to tell "serving" apart from "serving
+	// nothing but errors".
+	Ready() error
+}
+
 // Server wraps an HTTP server backed by a GrayMatter memory store.
-// The store is opened once at construction time and shared across all
-// requests; call Shutdown to close it.
 type Server struct {
 	httpSrv *http.Server
-	store   *memory.Store // nil if Open failed; handlers return 503 in that case
+	store   Store
 	metrics *serverMetrics
-	dataDir string
 	addr    string
 	logger  *slog.Logger
 }
 
-// New creates a Server that opens the memory store at dataDir and will listen
-// on addr (e.g. ":8080"). The store is opened once and reused for all requests.
-func New(addr, dataDir string, logger *slog.Logger) *Server {
+// New creates a Server bound to store that will listen on addr (e.g. ":8080").
+func New(addr string, store Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
-	}
-
-	emb := embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword})
-	store, err := memory.Open(memory.StoreConfig{
-		DataDir:  dataDir,
-		Embedder: emb,
-	})
-	if err != nil {
-		logger.Error("graymatter server: failed to open store", "error", err)
-		// store remains nil; storeReady() will reject all data requests with 503.
 	}
 
 	m := newServerMetrics("graymatter_server")
 	s := &Server{
 		store:   store,
 		metrics: m,
-		dataDir: dataDir,
 		addr:    addr,
 		logger:  logger,
 	}
@@ -109,31 +119,31 @@ func (s *Server) Serve(l net.Listener) error {
 	return s.httpSrv.Serve(l)
 }
 
-// Shutdown gracefully stops the HTTP server and closes the underlying store.
+// Shutdown gracefully stops the HTTP server. The store belongs to the caller
+// that constructed it, so closing it is the caller's job.
 func (s *Server) Shutdown(ctx context.Context) error {
 	shutCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
 	defer cancel()
-	httpErr := s.httpSrv.Shutdown(shutCtx)
-	if s.store != nil {
-		if storeErr := s.store.Close(); storeErr != nil && httpErr == nil {
-			return storeErr
-		}
-	}
-	return httpErr
-}
-
-// storeReady returns false and writes a 503 if the store failed to open.
-func (s *Server) storeReady(w http.ResponseWriter) bool {
-	if s.store == nil {
-		writeError(w, http.StatusServiceUnavailable, "store unavailable")
-		return false
-	}
-	return true
+	return s.httpSrv.Shutdown(shutCtx)
 }
 
 // --- handlers ---
 
+// handleHealthz reports readiness, not just liveness.
+//
+// This endpoint used to answer ok unconditionally, which is how a server that
+// 503'd every data route still looked healthy to anything watching it (issue
+// #19). A GrayMatter server that cannot reach its store has nothing to offer,
+// so the store is the one dependency worth probing here.
+//
+// The reason for a failure goes to the log, not the response: a probe is often
+// reachable from further away than the service itself.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.Ready(); err != nil {
+		s.logger.Error("healthz: store not ready", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "store unavailable")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -151,10 +161,7 @@ func (s *Server) handleRemember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent and text are required")
 		return
 	}
-	if !s.storeReady(w) {
-		return
-	}
-	if err := s.store.Put(r.Context(), req.Agent, req.Text); err != nil {
+	if err := s.store.Remember(r.Context(), req.Agent, req.Text); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -174,9 +181,6 @@ func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
 		if v, err := strconv.Atoi(ks); err == nil && v > 0 {
 			topK = v
 		}
-	}
-	if !s.storeReady(w) {
-		return
 	}
 	results, err := s.store.Recall(r.Context(), agent, query, topK)
 	if err != nil {
@@ -200,16 +204,14 @@ func (s *Server) handleConsolidate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is required")
 		return
 	}
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		writeError(w, http.StatusServiceUnavailable, "ANTHROPIC_API_KEY not set; consolidate requires LLM access")
-		return
-	}
-	if !s.storeReady(w) {
-		return
-	}
-	cfg := &restConsolidateCfg{apiKey: apiKey}
-	if err := s.store.Consolidate(r.Context(), req.Agent, cfg); err != nil {
+	// No API-key gate here. Consolidation is mostly decay and pruning, which
+	// need no LLM; summarisation is one conditional step that runs when the
+	// store owner has a provider configured and the agent is over threshold.
+	// Gating on this process's environment was wrong in both directions once
+	// the work moved behind the daemon: it rejected requests the daemon could
+	// have served, and admitted ones where the daemon had no key anyway.
+	// Whoever owns the store owns the policy.
+	if err := s.store.Consolidate(r.Context(), req.Agent); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -227,9 +229,6 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 		if v, err := strconv.Atoi(ls); err == nil && v > 0 {
 			limit = v
 		}
-	}
-	if !s.storeReady(w) {
-		return
 	}
 	facts, err := s.store.List(agent)
 	if err != nil {
@@ -269,9 +268,6 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent and query are required")
 		return
 	}
-	if !s.storeReady(w) {
-		return
-	}
 	// Recall 1 result to find the best match, then delete its fact ID.
 	results, err := s.store.Recall(r.Context(), req.Agent, req.Query, 1)
 	if err != nil {
@@ -301,17 +297,6 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "not_found"})
 }
-
-// restConsolidateCfg is a minimal ConsolidateConfig used by the REST layer.
-type restConsolidateCfg struct {
-	apiKey string
-}
-
-func (c *restConsolidateCfg) GetAnthropicAPIKey() string     { return c.apiKey }
-func (c *restConsolidateCfg) GetConsolidateLLM() string      { return "anthropic" }
-func (c *restConsolidateCfg) GetConsolidateModel() string    { return "claude-haiku-4-5-20251001" }
-func (c *restConsolidateCfg) GetConsolidateThreshold() int   { return 20 }
-func (c *restConsolidateCfg) GetDecayHalfLife() time.Duration { return 168 * time.Hour } // 1 week
 
 // --- HTTP utilities ---
 
