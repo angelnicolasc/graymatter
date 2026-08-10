@@ -4,31 +4,82 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/angelnicolasc/graymatter/pkg/embedding"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
+
+// testStore adapts *memory.Store to the Store interface the server takes.
+//
+// In production the implementations are the daemon client and the CLI's direct
+// store, both of which live in package main, so the adapter exists only to
+// exercise the handlers here. Whether the server reaches the store through the
+// daemon is covered where the daemon lives, not in this package.
+type testStore struct{ *memory.Store }
+
+func (t testStore) Remember(ctx context.Context, agentID, text string) error {
+	return t.Put(ctx, agentID, text)
+}
+
+func (t testStore) Consolidate(ctx context.Context, agentID string) error {
+	return t.Store.Consolidate(ctx, agentID, testConsolidateCfg{})
+}
+
+func (t testStore) Ready() error {
+	_, err := t.ListAgents()
+	return err
+}
+
+// unreadyStore stands in for a store whose owner has gone away.
+type unreadyStore struct {
+	Store
+	err error
+}
+
+func (u unreadyStore) Ready() error { return u.err }
+
+type testConsolidateCfg struct{}
+
+func (testConsolidateCfg) GetAnthropicAPIKey() string      { return os.Getenv("ANTHROPIC_API_KEY") }
+func (testConsolidateCfg) GetConsolidateLLM() string       { return "anthropic" }
+func (testConsolidateCfg) GetConsolidateModel() string     { return "claude-haiku-4-5-20251001" }
+func (testConsolidateCfg) GetConsolidateThreshold() int    { return 20 }
+func (testConsolidateCfg) GetDecayHalfLife() time.Duration { return 168 * time.Hour }
 
 // startTestServer starts the REST server on a random free port and returns
 // the base URL + a cleanup function that shuts it down.
-// The server is shut down via t.Cleanup so the store is closed before
-// TempDir removal (important on Windows where bbolt holds a file lock).
+//
+// Cleanups run last-registered-first, so the order here matters: TempDir is
+// claimed first and removed last, the store closes before that, and the server
+// stops before the store. bbolt holds a file lock on Windows, so closing after
+// removal would fail.
 func startTestServer(t *testing.T) (baseURL string, cleanup func()) {
 	t.Helper()
 
-	// Create data dir manually so we control cleanup ordering:
-	// shutdown must happen before the directory is removed.
 	dataDir := t.TempDir()
+
+	emb := embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword})
+	st, err := memory.Open(memory.StoreConfig{DataDir: dataDir, Embedder: emb})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 
-	srv := New(ln.Addr().String(), dataDir, nil)
+	srv := New(ln.Addr().String(), testStore{st}, nil)
 	go func() { _ = srv.Serve(ln) }()
 
 	stop := func() { _ = srv.Shutdown(context.Background()) }
@@ -62,6 +113,30 @@ func doJSON(t *testing.T, method, url string, body any) (statusCode int, respBod
 	data, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, data
 }
+
+// TestHealthz_ReportsStoreLoss is the readiness half of issue #19. The endpoint
+// used to answer ok unconditionally, so a server that had lost its store still
+// looked healthy to anything monitoring it.
+func TestHealthz_ReportsStoreLoss(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := New(ln.Addr().String(), unreadyStore{err: errStoreGone}, nil)
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+
+	status, body := doJSON(t, http.MethodGet, "http://"+ln.Addr().String()+"/healthz", nil)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503; body: %s", status, body)
+	}
+	// The probe must not leak the underlying failure to whoever can reach it.
+	if strings.Contains(string(body), errStoreGone.Error()) {
+		t.Errorf("healthz body leaked the internal error: %s", body)
+	}
+}
+
+var errStoreGone = errors.New("connection is shut down")
 
 func TestHealthz(t *testing.T) {
 	base, stop := startTestServer(t)
@@ -232,18 +307,39 @@ func TestForget(t *testing.T) {
 	}
 }
 
-func TestConsolidate_NoAPIKey(t *testing.T) {
+// TestConsolidate_WorksWithoutAPIKey pins that consolidation is not refused for
+// want of an LLM. Decay and pruning are the bulk of the work and need no
+// provider; summarisation is a conditional step inside the store. The endpoint
+// used to reject the request outright based on this process's environment,
+// which became meaningless once the work moved behind the daemon.
+func TestConsolidate_WorksWithoutAPIKey(t *testing.T) {
 	base, stop := startTestServer(t)
 	defer stop()
 
-	// Without ANTHROPIC_API_KEY set the server should return 503.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	status, body := doJSON(t, http.MethodPost, base+"/consolidate", map[string]string{
+	// Store something so consolidation has real work to do.
+	status, body := doJSON(t, http.MethodPost, base+"/remember", map[string]string{
+		"agent": "eve", "text": "a fact worth decaying",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("remember: got %d; body: %s", status, body)
+	}
+
+	status, body = doJSON(t, http.MethodPost, base+"/consolidate", map[string]string{
 		"agent": "eve",
 	})
-	if status != http.StatusServiceUnavailable {
-		t.Errorf("expected 503 without API key, got %d; body: %s", status, body)
+	if status != http.StatusOK {
+		t.Fatalf("consolidate without an API key: got %d, want 200; body: %s", status, body)
+	}
+
+	// The fact must survive: consolidation decays and prunes, it does not wipe.
+	status, body = doJSON(t, http.MethodGet, base+"/facts?agent=eve", nil)
+	if status != http.StatusOK {
+		t.Fatalf("facts: got %d; body: %s", status, body)
+	}
+	if !strings.Contains(string(body), "a fact worth decaying") {
+		t.Errorf("consolidation lost the fact: %s", body)
 	}
 }
 

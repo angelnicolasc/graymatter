@@ -34,6 +34,9 @@ type cliStore interface {
 	Stats(agentID string) (memory.MemoryStats, error)
 	Delete(agentID, factID string) error
 	UpdateFact(agentID string, f memory.Fact) error
+	// Consolidate runs with the store owner's own policy: through the daemon
+	// that is the daemon's configuration, and clients cannot override it.
+	Consolidate(ctx context.Context, agentID string) error
 
 	// Host-level surface (checkpoints, sessions, KG, audit, tokens).
 	CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error)
@@ -151,6 +154,9 @@ func (d *directStore) Stats(agentID string) (memory.MemoryStats, error) {
 	return d.store.Stats(agentID)
 }
 func (d *directStore) Delete(agentID, factID string) error { return d.store.Delete(agentID, factID) }
+func (d *directStore) Consolidate(ctx context.Context, agentID string) error {
+	return d.mem.Consolidate(ctx, agentID)
+}
 func (d *directStore) UpdateFact(agentID string, f memory.Fact) error {
 	return d.store.UpdateFact(agentID, f)
 }

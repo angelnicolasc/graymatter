@@ -32,7 +32,21 @@ Routes:
   GET    /healthz`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logger := slog.New(slog.NewTextHandler(cmd.OutOrStderr(), nil))
-			srv := server.New(addr, dataDir, logger)
+
+			// Reach the store the same way every other command does. Opening
+			// bbolt here would lose the race against the daemon that owns it
+			// and leave the API up but serving 503s (issue #19). Failing now
+			// is better than starting a server that cannot answer anything.
+			store, err := openStore()
+			if err != nil {
+				return fmt.Errorf("open store: %w", err)
+			}
+			// Unlike a CLI command, this handle has to survive the daemon being
+			// stopped, crashing, or upgraded underneath it.
+			rs := newReconnectingStore(store)
+			defer func() { _ = rs.Close() }()
+
+			srv := server.New(addr, rs, logger)
 
 			// Graceful shutdown on SIGINT / SIGTERM.
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

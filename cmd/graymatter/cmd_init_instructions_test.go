@@ -208,6 +208,10 @@ func TestWriteGlobalInstructionFiles(t *testing.T) {
 	home := t.TempDir()
 	testHomeOverride = home
 	t.Cleanup(func() { testHomeOverride = "" })
+	// XDG_CONFIG_HOME outranks the home directory for the OpenCode path, and it
+	// is set on some CI runners. Without pinning it this test would assert
+	// against the wrong location and, worse, write into the real config dir.
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	results := writeGlobalInstructionFiles()
 	if len(results) != 2 {
@@ -240,6 +244,7 @@ func TestWriteGlobalInstructionFiles_PreservesUserContent(t *testing.T) {
 	home := t.TempDir()
 	testHomeOverride = home
 	t.Cleanup(func() { testHomeOverride = "" })
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	claude := filepath.Join(home, ".claude", "CLAUDE.md")
 	if err := os.MkdirAll(filepath.Dir(claude), 0o755); err != nil {

@@ -36,6 +36,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Every other check can be green while the agent has never called a single tool, and the summary still read "Everything looks good". That is why this failure produced so few reports: a fresh install and a week of silence looked identical, so people quietly gave up instead of filing anything.
 - A project initialised more than 24 hours ago that still holds no facts is now a warning with an actionable hint. The age is read from `MEMORY.md`, which `init` writes once and nothing else touches.
 
+**REST server reaches the store through the daemon (issue #19)**
+- `graymatter server` was the only command still opening bbolt directly. Clients spawn the daemon on first use and it lingers afterwards, so that is the normal state of the system rather than an edge case: every data route answered 503 while `/healthz` still reported ok. The server now takes a store handle, the same one every other command uses, and never touches the lock.
+- It fails to start when the store cannot be opened, rather than coming up and serving nothing but errors.
+- `/healthz` reports readiness. It round-trips to the store and answers 503 when that fails, with the reason going to the log rather than to whoever can reach the probe.
+- The handle reconnects. A CLI command's store lives for milliseconds; the server holds one for as long as it runs, so `daemon stop`, a crash or an upgrade would otherwise leave it returning 500 forever. A dead connection is re-dialled once per call, and because that re-dial spawns a daemon when none is running, the usual outcome is a served request. Only connection loss is retried: an error that reached the daemon is reported, never replayed.
+- `/consolidate` runs with the store owner's policy instead of a config the REST layer assembled itself, which also drops a hardcoded model id. Its `ANTHROPIC_API_KEY` gate is gone: consolidation is mostly decay and pruning, which need no LLM, and once the work moved behind the daemon that check was reading the wrong process's environment. It rejected requests the daemon could have served and admitted ones where the daemon had no key. The endpoint now returns 200 and does its real work with no provider configured.
+
+### Internal
+
+**CI runs the root and CLI entrypoint packages**
+- Both coverage steps enumerate packages by hand, and neither list included the root package or `cmd/graymatter`. The public API surface and the whole CLI entrypoint (`init`, `doctor`, the TUI, the store handles) had never been executed by CI on any platform, so tests living there were reported green by a workflow that never ran them.
+- Both now run under `-race` as their own steps, deliberately outside the coverage profiles so the existing gates keep measuring what they always measured.
+
 **MCP tools no longer advertise themselves as destructive**
 - All five tools inherited mcp-go's defaults (`readOnlyHint: false`, `destructiveHint: true`, `openWorldHint: true`), so `memory_search` and `checkpoint_resume`, both pure reads, were announced to clients as destructive open-world calls. Clients use those hints to choose between auto-approving a call and prompting for it.
 - Each tool now declares what it actually does, and a test pins the annotations so a dependency bump cannot quietly reset them.
