@@ -10,6 +10,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+**Token cost stops reporting the wrong price with confidence**
+- Model lookup was a map range over `strings.Contains`, so a short key shadowed any newer model whose ID extends it: Haiku 4.5 resolved to the Haiku 4 row and under-reported cost 4x, Opus 4.8 resolved to Opus 4 and over-reported 3x. Both returned a hit, so the panel's "partial" flag never fired. The result was a confident, incorrect number on the one panel whose job is reporting money, and because Go map iteration is unordered it could differ between runs.
+- Lookup now takes the longest matching key, deterministically, and the table carries the current generation. Cache rates follow the published multipliers (read 0.1x input, 5-minute write 1.25x) rather than being transcribed per row, and a test pins that relationship so a mistyped rate fails rather than ships.
+- Models with no row still contribute zero and still flag the total as partial. A missing model is the safe failure; a stale one is not.
+
+**The TUI survives a daemon restart, and stops drawing zeros it cannot read**
+- Every handle from `openStore` now reconnects, so the TUI, the REST server and anything else long-lived keep working across `graymatter daemon stop`, a crash or an upgrade. Short-lived commands never noticed; a dashboard left open did, permanently.
+- An error no longer replaces the whole UI with "Error: … Press q to quit." Nothing ever cleared that state, so one momentary failure ended the session even after the store recovered. Errors now show in the header, the rest of the UI stays usable, `r` still retries, and the next successful load clears it.
+- The Stats panel reported "store unreachable" as a dashboard full of zeros, which is indistinguishable from a project that has stored nothing. It now says what happened and points at `graymatter doctor`. An empty project still renders as empty, so the warning cannot become background noise.
+- Sessions, knowledge-graph and per-agent fact counts stop swallowing read failures. An empty store does not error on any of those paths, so anything that reaches them is a real failure and is reported as one.
+
 **Setup tells you to restart your client**
 - MCP clients launch their servers at startup, so the memory tools do not exist in the session that ran `init`. Nothing said so where it mattered: `init` sent you straight to `doctor` and `remember`, and the one mention lived in a README subsection about flags. A correct install therefore looked broken, which is very likely part of what fed the reports in #14.
 - `init` now leads its next steps with the restart, both the plain and interactive paths through one shared helper, and `doctor` carries the hint while the store is still empty. It disappears once a single fact exists, so it cannot become noise.
