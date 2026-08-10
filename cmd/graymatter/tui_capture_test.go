@@ -113,10 +113,6 @@ func loadAll(t *testing.T, m tuiModel, agent string) tuiModel {
 
 func writeCapture(t *testing.T, name, content string) {
 	t.Helper()
-	if captureDir == "" {
-		t.Log(content)
-		return
-	}
 	if err := os.MkdirAll(captureDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -131,7 +127,15 @@ func writeCapture(t *testing.T, name, content string) {
 // so the dumps can be converted to an image. lipgloss disables colour outside a
 // TTY, which is why the profile is set explicitly rather than relying on env.
 func TestCapture(t *testing.T) {
+	if captureDir == "" {
+		t.Skip("set GM_CAPTURE_DIR to regenerate the dashboard screenshots")
+	}
+	// SetColorProfile is package-level state in lipgloss, so forcing colour here
+	// would otherwise leak into every test that runs after this one in the same
+	// package and make their rendered output depend on test order.
+	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
 	store := seedForCapture(t)
 	base := loadAll(t, newCaptureTUI(t, store), "graymatter-backend")
