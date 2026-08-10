@@ -19,27 +19,34 @@ import (
 // never mutated while being rendered.
 
 type agentAgg struct {
-	ID          string
-	Facts       int
-	Recalls     int     // Σ AccessCount across the agent's facts
-	AvgWeight   float64 // mean weight, used for secondary sort
-	StorageB    int64   // Σ len(Text) + len(Embedding)*4
-	NewestAt    time.Time
-	LastAccess  time.Time
+	ID         string
+	Facts      int
+	Recalls    int     // Σ AccessCount across the agent's facts
+	AvgWeight  float64 // mean weight, used for secondary sort
+	StorageB   int64   // Σ len(Text) + len(Embedding)*4
+	NewestAt   time.Time
+	LastAccess time.Time
 }
 
 type dashboardData struct {
 	Loaded bool
 
+	// Err records that the store could not be read. Without it every figure
+	// below defaults to zero, and a dashboard of zeros is indistinguishable
+	// from a store that genuinely holds nothing. Reporting "no facts" for a
+	// connection that is simply gone is the failure this panel is meant to
+	// help diagnose, so it must never be the answer it gives.
+	Err error
+
 	// Global rollups.
-	AgentsN    int
-	FactsN     int
-	RecallsN   int
-	StorageB   int64   // bytes
-	HealthPct  float64 // fraction of facts with Weight > 0.5, in [0,1]
-	AvgWeight  float64 // corpus-wide average weight
-	OldestAt   time.Time
-	NewestAt   time.Time
+	AgentsN   int
+	FactsN    int
+	RecallsN  int
+	StorageB  int64   // bytes
+	HealthPct float64 // fraction of facts with Weight > 0.5, in [0,1]
+	AvgWeight float64 // corpus-wide average weight
+	OldestAt  time.Time
+	NewestAt  time.Time
 
 	// Per-agent, sorted by fact count desc.
 	Agents []agentAgg
@@ -83,6 +90,7 @@ func (m tuiModel) loadDashboard() tea.Cmd {
 
 		agents, err := store.ListAgents()
 		if err != nil {
+			d.Err = err
 			return dashboardLoadedMsg{d}
 		}
 		d.AgentsN = len(agents)
@@ -97,7 +105,13 @@ func (m tuiModel) loadDashboard() tea.Cmd {
 
 		for _, a := range agents {
 			facts, err := store.List(a)
-			if err != nil || len(facts) == 0 {
+			if err != nil {
+				// One agent failing to read is not "that agent has no facts".
+				// Report it rather than quietly dropping it from the totals.
+				d.Err = err
+				return dashboardLoadedMsg{d}
+			}
+			if len(facts) == 0 {
 				continue
 			}
 			agg := agentAgg{ID: a, Facts: len(facts)}
@@ -200,6 +214,22 @@ func (m tuiModel) renderDashboard(h int) string {
 
 	d := m.dashboard
 
+	// Say the store could not be read rather than drawing a dashboard of
+	// zeros, which reads as "your memory is empty" and sends people looking
+	// for the wrong problem.
+	if d.Err != nil {
+		body := strings.Join([]string{
+			"",
+			"  " + styleStatusFail.Render("⚠  Store unreachable"),
+			"",
+			"  " + styleDimText.Render(d.Err.Error()),
+			"",
+			"  " + styleDimText.Render("These figures cannot be read right now, so none are shown."),
+			"  " + styleDimText.Render("Press r to retry. If it persists, run `graymatter doctor`."),
+		}, "\n")
+		return stylePanel.Width(w).Height(h).Render(body)
+	}
+
 	if !d.Loaded {
 		return stylePanel.Width(w).Height(h).Render(
 			styleDimText.Render("  Loading observability data…"),
@@ -260,11 +290,12 @@ func (m tuiModel) renderDashboard(h int) string {
 // renderKPIRow renders the 4-tile CodeBurn-style KPI strip.
 //
 // Width math (matches Activity panel border for vertical alignment):
-//   each kpiBlock renders as `tileW + 2` cols (border).
-//   row outer = 4*(tileW+2) + 3 gutters = 4*tileW + 11
-//   activity outer = width + 2
-//   ⇒ tileW = (width − 9) / 4 so all four borders share a column with
-//     the borders of the Agents/Activity panels below.
+//
+//	each kpiBlock renders as `tileW + 2` cols (border).
+//	row outer = 4*(tileW+2) + 3 gutters = 4*tileW + 11
+//	activity outer = width + 2
+//	⇒ tileW = (width − 9) / 4 so all four borders share a column with
+//	  the borders of the Agents/Activity panels below.
 func (m tuiModel) renderKPIRow(d dashboardData, width int) string {
 	tileW := (width - 9) / 4
 	if tileW < 14 {
@@ -296,7 +327,7 @@ func (m tuiModel) renderKPIRow(d dashboardData, width int) string {
 
 	health := kpiBlock("HEALTH",
 		fmt.Sprintf("%.0f%%", d.HealthPct*100),
-		"facts · weight > 0.5",
+		"above 0.5 weight",
 		healthColor, tileW)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, facts, " ", cost, " ", recalls, " ", health)
@@ -574,10 +605,10 @@ func (m tuiModel) renderTokenPanel(d dashboardData, width int) string {
 		lipgloss.NewStyle().Foreground(hitColor).Bold(true).Render(
 			fmt.Sprintf("%.0f%%", hitPct)) +
 		"  " + styleDimText.Render(fmt.Sprintf(
-			"%s reads · %s fresh",
-			formatCompact(int(ts.CacheRead)),
-			formatCompact(int(ts.Input)),
-		))
+		"%s reads · %s fresh",
+		formatCompact(int(ts.CacheRead)),
+		formatCompact(int(ts.Input)),
+	))
 
 	rows := []string{hero, hitLine, ""}
 

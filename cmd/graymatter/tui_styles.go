@@ -147,6 +147,29 @@ func panelBoxH(title string, width, outerH int, body string) string {
 
 // kpiBlock renders a single KPI tile: label, value, optional unit.
 // The accent color is applied to the value text.
+// truncateCells shortens s to at most max terminal cells, appending an ellipsis
+// when it cuts. Width is measured in cells rather than bytes or runes so the
+// dashboard's box-drawing and multi-byte glyphs line up.
+func truncateCells(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if lipgloss.Width(string(append(out, r)))+1 > max {
+			break
+		}
+		out = append(out, r)
+	}
+	return string(out) + "…"
+}
+
 func kpiBlock(label, value, unit string, accent lipgloss.Color, width int) string {
 	if width < 10 {
 		width = 10
@@ -155,7 +178,18 @@ func kpiBlock(label, value, unit string, accent lipgloss.Color, width int) strin
 	valueStyle := styleKPIValue.Foreground(accent)
 	var valLine string
 	if unit != "" {
-		valLine = valueStyle.Render(value) + " " + styleKPIUnit.Render(unit)
+		// Clip the unit so value+unit always fits on one line. A tile that
+		// wraps grows taller than its neighbours, and since the row is joined
+		// on the top edge, one wrapped tile leaves the other three's bottom
+		// borders floating a row high. The value itself is never clipped: a
+		// half-printed number is worse than a half-printed caption.
+		inner := width - 4 // border (2) + horizontal padding (2)
+		if room := inner - lipgloss.Width(value) - 1; room > 0 {
+			unit = truncateCells(unit, room)
+			valLine = valueStyle.Render(value) + " " + styleKPIUnit.Render(unit)
+		} else {
+			valLine = valueStyle.Render(value)
+		}
 	} else {
 		valLine = valueStyle.Render(value)
 	}

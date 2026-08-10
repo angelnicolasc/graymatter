@@ -171,7 +171,14 @@ func (m tuiModel) loadAgents() tea.Cmd {
 		}
 		items := make([]agentItem, 0, len(agents))
 		for _, a := range agents {
-			st, _ := m.store.Stats(a)
+			// The agent came from ListAgents, so a failure here is the store
+			// going away rather than a missing agent. Dropping the error left
+			// the agent listed with a count of 0, which reads as "this agent
+			// remembers nothing".
+			st, err := m.store.Stats(a)
+			if err != nil {
+				return errMsg{err}
+			}
 			items = append(items, agentItem{id: a, count: st.FactCount})
 		}
 		return agentsLoadedMsg{items}
@@ -196,7 +203,10 @@ func (m tuiModel) loadSessions() tea.Cmd {
 	return func() tea.Msg {
 		sessions, err := m.store.SessionsList()
 		if err != nil {
-			return sessionsLoadedMsg{} // non-fatal
+			// Was swallowed as "non-fatal", which rendered an empty list: the
+			// same picture a project with no sessions gives. An empty store
+			// does not error here, so reaching this really is a failure.
+			return errMsg{err}
 		}
 		items := make([]sessionItem, len(sessions))
 		for i, s := range sessions {
@@ -210,7 +220,7 @@ func (m tuiModel) loadNodes() tea.Cmd {
 	return func() tea.Msg {
 		nodes, err := m.store.KGNodes()
 		if err != nil {
-			return nodesLoadedMsg{}
+			return errMsg{err}
 		}
 		items := make([]nodeItem, len(nodes))
 		for i, n := range nodes {
@@ -263,6 +273,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateSizes()
 
 	case agentsLoadedMsg:
+		// A load that got through means whatever went wrong before is over.
+		// Without this the error would outlive its cause: nothing else clears
+		// it, so one hiccup used to leave the UI stuck on an error screen for
+		// the rest of the session.
+		m.err = nil
 		items := make([]list.Item, len(msg.agents))
 		for i, a := range msg.agents {
 			items[i] = a
@@ -270,6 +285,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentList.SetItems(items)
 
 	case factsLoadedMsg:
+		m.err = nil
 		items := make([]list.Item, len(msg.facts))
 		for i, f := range msg.facts {
 			items[i] = f
@@ -292,6 +308,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dashboardLoadedMsg:
 		m.dashboard = msg.data
+		if msg.data.Err == nil {
+			m.err = nil
+		}
 
 	case dashboardTickMsg:
 		// Refresh the dashboard periodically and re-arm the ticker.
@@ -403,16 +422,30 @@ func (m *tuiModel) updateStatsKey(msg tea.KeyMsg) []tea.Cmd {
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
+// View renders the dashboard. An error no longer replaces it.
+//
+// The old behaviour swapped the entire UI for "Error: ... Press q to quit." and
+// nothing ever cleared it, so a single transient failure ended the session even
+// though the store recovered a moment later. Errors now ride in the header
+// while the rest of the UI stays usable and `r` keeps working.
 func (m tuiModel) View() string {
-	if m.err != nil {
-		return fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err)
-	}
-
 	header := m.renderHeader()
 	body := m.renderBody()
 	footer := m.renderFooter()
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+// truncateErr keeps an error readable inside the header chip. The full text is
+// not lost: the failing view says what is unavailable, and the daemon logs the
+// underlying cause.
+func truncateErr(err error) string {
+	const max = 48
+	s := err.Error()
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
 }
 
 func (m tuiModel) renderHeader() string {
@@ -437,7 +470,12 @@ func (m tuiModel) renderHeader() string {
 
 	// Optional status chip (e.g. after delete/kill).
 	statusChip := ""
-	if m.status != "" {
+	// An error outranks a status message: it is why the numbers below may be
+	// stale, and hiding it is what made a dead connection look like an empty
+	// store.
+	if m.err != nil {
+		statusChip = "  " + styleStatusFail.Render("⚠ "+truncateErr(m.err))
+	} else if m.status != "" {
 		statusChip = "  " + styleSubText.Render("· "+m.status)
 	}
 
