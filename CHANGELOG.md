@@ -8,6 +8,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.7.0] – 2026-08-10
+
 ### Added
 
 **`graymatter init -i` — interactive setup wizard**
@@ -43,15 +47,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - The handle reconnects. A CLI command's store lives for milliseconds; the server holds one for as long as it runs, so `daemon stop`, a crash or an upgrade would otherwise leave it returning 500 forever. A dead connection is re-dialled once per call, and because that re-dial spawns a daemon when none is running, the usual outcome is a served request. Only connection loss is retried: an error that reached the daemon is reported, never replayed.
 - `/consolidate` runs with the store owner's policy instead of a config the REST layer assembled itself, which also drops a hardcoded model id. Its `ANTHROPIC_API_KEY` gate is gone: consolidation is mostly decay and pruning, which need no LLM, and once the work moved behind the daemon that check was reading the wrong process's environment. It rejected requests the daemon could have served and admitted ones where the daemon had no key. The endpoint now returns 200 and does its real work with no provider configured.
 
+**MCP tools no longer advertise themselves as destructive**
+- All five tools inherited mcp-go's defaults (`readOnlyHint: false`, `destructiveHint: true`, `openWorldHint: true`), so `memory_search` and `checkpoint_resume`, both pure reads, were announced to clients as destructive open-world calls. Clients use those hints to choose between auto-approving a call and prompting for it.
+- Each tool now declares what it actually does, and a test pins the annotations so a dependency bump cannot quietly reset them.
+
 ### Internal
 
 **CI runs the root and CLI entrypoint packages**
 - Both coverage steps enumerate packages by hand, and neither list included the root package or `cmd/graymatter`. The public API surface and the whole CLI entrypoint (`init`, `doctor`, the TUI, the store handles) had never been executed by CI on any platform, so tests living there were reported green by a workflow that never ran them.
 - Both now run under `-race` as their own steps, deliberately outside the coverage profiles so the existing gates keep measuring what they always measured.
 
-**MCP tools no longer advertise themselves as destructive**
-- All five tools inherited mcp-go's defaults (`readOnlyHint: false`, `destructiveHint: true`, `openWorldHint: true`), so `memory_search` and `checkpoint_resume`, both pure reads, were announced to clients as destructive open-world calls. Clients use those hints to choose between auto-approving a call and prompting for it.
-- Each tool now declares what it actually does, and a test pins the annotations so a dependency bump cannot quietly reset them.
+### Credits
+
+- **MikeCase** — built the interactive `init` wizard (PR #16), and the `AGENTS.md` he rewrote by hand and posted in issue #14 is what pointed at the real cause of the activation failure after a wrong first diagnosis.
+- **meyverick** — reported the activation failure (#14) and spotted that `--only opencode` still wrote both instruction files (#13).
+- **jtoronto** — independently confirmed #14, which is what made it clear the reports were not a one-off setup mistake.
+- **wizziLalev** — asked for a global install (#17), which became `init --global`.
 
 ---
 
