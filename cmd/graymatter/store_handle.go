@@ -57,6 +57,11 @@ type cliStore interface {
 	// process holds the write lock). Always false through the daemon.
 	IsReadOnly() bool
 
+	// Ready reports whether the store answers right now, reconnecting first if
+	// the connection died. Long-lived callers use it to tell "serving" apart
+	// from "serving nothing but errors".
+	Ready() error
+
 	Close() error
 }
 
@@ -68,6 +73,10 @@ type daemonStore struct {
 
 func (d daemonStore) IsReadOnly() bool { return false }
 
+// Ready uses the RPC protocol ping, which is the cheapest call that proves the
+// daemon is both reachable and speaking a compatible protocol.
+func (d daemonStore) Ready() error { return d.Ping() }
+
 // compile-time checks: both implementations satisfy cliStore.
 var (
 	_ cliStore = daemonStore{}
@@ -75,15 +84,24 @@ var (
 )
 
 // openStore is the single entry point commands use to reach the store.
+//
+// Daemon handles come wrapped so a daemon restart does not strand whoever is
+// holding one. Short-lived commands never notice; the TUI and the REST server
+// hold a handle for as long as they run, and used to die permanently when the
+// daemon went away.
+//
+// The direct store is deliberately not wrapped: there is no connection to lose
+// in-process, and a "reconnect" would re-open bbolt while the first handle is
+// still live, which the single-writer lock would refuse.
 func openStore() (cliStore, error) {
 	if noDaemon || os.Getenv("GRAYMATTER_NO_DAEMON") == "1" {
 		return openDirectStore()
 	}
-	c, err := daemon.Connect(dataDir)
+	s, err := reopenStore()
 	if err != nil {
 		return nil, err
 	}
-	return daemonStore{Client: c}, nil
+	return newReconnectingStore(s), nil
 }
 
 // --- direct (in-process) implementation --------------------------------------
@@ -156,6 +174,13 @@ func (d *directStore) Stats(agentID string) (memory.MemoryStats, error) {
 func (d *directStore) Delete(agentID, factID string) error { return d.store.Delete(agentID, factID) }
 func (d *directStore) Consolidate(ctx context.Context, agentID string) error {
 	return d.mem.Consolidate(ctx, agentID)
+}
+
+// Ready round-trips to bbolt. In-process there is no connection to lose, but
+// the caller should not have to know which implementation it holds.
+func (d *directStore) Ready() error {
+	_, err := d.store.ListAgents()
+	return err
 }
 func (d *directStore) UpdateFact(agentID string, f memory.Fact) error {
 	return d.store.UpdateFact(agentID, f)

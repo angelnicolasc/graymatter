@@ -41,12 +41,13 @@ Routes:
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)
 			}
-			// Unlike a CLI command, this handle has to survive the daemon being
-			// stopped, crashing, or upgraded underneath it.
-			rs := newReconnectingStore(store)
-			defer func() { _ = rs.Close() }()
+			// openStore already returns a handle that survives the daemon being
+			// stopped, crashing or upgraded underneath it, which is what a
+			// process this long-lived needs. Wrapping again here would only
+			// add a redundant layer.
+			defer func() { _ = store.Close() }()
 
-			srv := server.New(addr, rs, logger)
+			srv := server.New(addr, store, logger)
 
 			// Graceful shutdown on SIGINT / SIGTERM.
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

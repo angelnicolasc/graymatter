@@ -36,6 +36,14 @@ func (f *fakeStore) ListAgents() ([]string, error) {
 	return []string{"a"}, nil
 }
 
+func (f *fakeStore) Ready() error {
+	f.calls.Add(1)
+	if f.dead.Load() {
+		return netrpc.ErrShutdown
+	}
+	return nil
+}
+
 func (f *fakeStore) Close() error {
 	f.closed.Store(true)
 	return nil

@@ -9,13 +9,22 @@ import (
 	netrpc "net/rpc"
 	"sync"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/server"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
-// The REST server consumes exactly this. Asserting it here means a change to
-// either side fails to compile rather than at runtime.
-var _ server.Store = (*reconnectingStore)(nil)
+// The wrapper stands in for a store handle everywhere one is used, so both
+// contracts are asserted here: a change to either fails to compile rather than
+// at runtime.
+var (
+	_ server.Store = (*reconnectingStore)(nil)
+	_ cliStore     = (*reconnectingStore)(nil)
+)
 
 // reconnectingStore keeps a long-lived process usable across daemon restarts.
 //
@@ -38,10 +47,19 @@ func newReconnectingStore(initial cliStore) *reconnectingStore {
 	return &reconnectingStore{cur: initial}
 }
 
-// reopenStore is how a reconnect obtains a fresh handle. Swapped in tests to
-// exercise the redial path without standing up a daemon, following the same
-// hook pattern as resolveExecutable and testHomeOverride.
-var reopenStore = openStore
+// reopenStore returns a fresh, unwrapped daemon handle.
+//
+// It must not go through openStore: that wraps, so a redial would nest another
+// reconnectingStore on every reconnection. Swapped in tests to exercise the
+// redial path without standing up a daemon, following the same hook pattern as
+// resolveExecutable and testHomeOverride.
+var reopenStore = func() (cliStore, error) {
+	c, err := daemon.Connect(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	return daemonStore{Client: c}, nil
+}
 
 func (r *reconnectingStore) snapshot() cliStore {
 	r.mu.Lock()
@@ -96,11 +114,179 @@ func connDead(err error) bool {
 		errors.Is(err, net.ErrClosed)
 }
 
-// --- the surface the REST server consumes ---
+// --- cliStore, every call routed through do ---
+//
+// This is deliberately mechanical. Embedding the wrapped store instead would be
+// shorter and wrong: after a redial the embedded value still points at the dead
+// handle, so any method that was not overridden would keep talking to it.
 
 func (r *reconnectingStore) Remember(ctx context.Context, agentID, text string) error {
 	return r.do(func(s cliStore) error { return s.Remember(ctx, agentID, text) })
 }
+
+func (r *reconnectingStore) PutShared(ctx context.Context, text string) error {
+	return r.do(func(s cliStore) error { return s.PutShared(ctx, text) })
+}
+
+func (r *reconnectingStore) RecallDefault(ctx context.Context, agentID, query string) ([]string, error) {
+	var out []string
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.RecallDefault(ctx, agentID, query)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) RecallShared(ctx context.Context, query string, topK int) ([]string, error) {
+	var out []string
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.RecallShared(ctx, query, topK)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error) {
+	var out []string
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.RecallAll(ctx, agentID, query, topK)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) ListAgents() ([]string, error) {
+	var out []string
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.ListAgents()
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) Stats(agentID string) (memory.MemoryStats, error) {
+	var out memory.MemoryStats
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.Stats(agentID)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) UpdateFact(agentID string, f memory.Fact) error {
+	return r.do(func(s cliStore) error { return s.UpdateFact(agentID, f) })
+}
+
+func (r *reconnectingStore) CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error) {
+	var out session.Checkpoint
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.CheckpointSave(cp)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) CheckpointLoad(agentID, checkpointID string) (*session.Checkpoint, error) {
+	var out *session.Checkpoint
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.CheckpointLoad(agentID, checkpointID)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) CheckpointResume(agentID string) (*session.Checkpoint, error) {
+	var out *session.Checkpoint
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.CheckpointResume(agentID)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) CheckpointList(agentID string) ([]session.Checkpoint, error) {
+	var out []session.Checkpoint
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.CheckpointList(agentID)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) SessionsList() ([]harness.HarnessSession, error) {
+	var out []harness.HarnessSession
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.SessionsList()
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) SessionKill(id string) error {
+	return r.do(func(s cliStore) error { return s.SessionKill(id) })
+}
+
+func (r *reconnectingStore) SessionResolve(agentID, sessionID string) (string, error) {
+	var out string
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.SessionResolve(agentID, sessionID)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) SessionSave(hs harness.HarnessSession) error {
+	return r.do(func(s cliStore) error { return s.SessionSave(hs) })
+}
+
+func (r *reconnectingStore) KGNodes() ([]kg.Node, error) {
+	var out []kg.Node
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.KGNodes()
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) KGLink(from, to, relation string) error {
+	return r.do(func(s cliStore) error { return s.KGLink(from, to, relation) })
+}
+
+func (r *reconnectingStore) AuditWrite(e audit.Entry) error {
+	return r.do(func(s cliStore) error { return s.AuditWrite(e) })
+}
+
+func (r *reconnectingStore) TokenSummary(days int) (harness.TokenUsageSummary, error) {
+	var out harness.TokenUsageSummary
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.TokenSummary(days)
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) TokenRecord(agent, model string, input, output, cacheRead, cacheWrite uint64) error {
+	return r.do(func(s cliStore) error {
+		return s.TokenRecord(agent, model, input, output, cacheRead, cacheWrite)
+	})
+}
+
+// IsReadOnly is always false through the daemon: every client is a full peer.
+// The wrapper only ever holds daemon handles, so this cannot be anything else.
+func (r *reconnectingStore) IsReadOnly() bool { return r.snapshot().IsReadOnly() }
 
 func (r *reconnectingStore) Recall(ctx context.Context, agentID, query string, topK int) ([]string, error) {
 	var out []string
@@ -131,13 +317,12 @@ func (r *reconnectingStore) Consolidate(ctx context.Context, agentID string) err
 }
 
 // Ready reports whether the store answers right now, reconnecting first if the
-// connection died. ListAgents is the cheapest call that proves a real
-// round-trip to whoever owns the store.
+// connection died. It defers to the wrapped store's own probe rather than
+// picking one here: through the daemon that is the protocol ping, which is both
+// cheaper than listing agents and the only check that catches a version
+// mismatch after a reconnect landed on an upgraded daemon.
 func (r *reconnectingStore) Ready() error {
-	return r.do(func(s cliStore) error {
-		_, err := s.ListAgents()
-		return err
-	})
+	return r.do(func(s cliStore) error { return s.Ready() })
 }
 
 func (r *reconnectingStore) Close() error {
