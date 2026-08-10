@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -144,12 +145,51 @@ func checkDataDir(dir string) checkResult {
 	return c
 }
 
+// staleAfter is how long a project may sit initialised with nothing stored
+// before doctor stops calling that normal. Long enough that a genuinely new
+// project stays quiet, short enough that a broken setup surfaces inside a
+// working day.
+const staleAfter = 24 * time.Hour
+
+// projectAge reports how long ago the project was initialised, using MEMORY.md
+// as the anchor: init writes it once and nothing else touches it, unlike the
+// data directory whose mtime moves every time the daemon starts.
+func projectAge(dir string) (time.Duration, bool) {
+	info, err := os.Stat(filepath.Join(dir, "MEMORY.md"))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
+}
+
+// flagIfUnused downgrades an otherwise-healthy store check to a warning when a
+// project has been set up for a while and still holds nothing.
+//
+// This is the gap issue #14 fell through: wiring, instructions and store can
+// all be green while the agent never calls a single tool, and the old summary
+// still read "Everything looks good". A user had no way to tell a fresh install
+// apart from a week of silence, so the failure produced no bug reports, just
+// people quietly giving up.
+func flagIfUnused(c checkResult, dir string, facts int) checkResult {
+	if facts > 0 || (c.Status != "ok" && c.Status != "info") {
+		return c
+	}
+	age, ok := projectAge(dir)
+	if !ok || age < staleAfter {
+		return c
+	}
+	c.Status = "warn"
+	c.Detail = fmt.Sprintf("initialised %d day(s) ago and still holds no facts", int(age.Hours()/24))
+	c.Hint = "the tools are wired but nothing is calling them; confirm CLAUDE.md / AGENTS.md carry the memory block (re-run `graymatter init` to refresh it) and that your agent loads that file, or use `graymatter init --global` to install it for every project"
+	return c
+}
+
 func checkStore(dir string) checkResult {
 	c := checkResult{Name: "store"}
 	dbPath := filepath.Join(dir, "gray.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		c.Status, c.Detail = "info", "no database yet (gray.db is created on first write)"
-		return c
+		return flagIfUnused(c, dir, 0)
 	}
 
 	// Preferred path: ask the daemon, which owns the store in normal
@@ -175,7 +215,7 @@ func checkStore(dir string) checkResult {
 			c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 			c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 		}
-		return c
+		return flagIfUnused(c, dir, facts)
 	}
 
 	// No daemon: read-only probe. Lock contention here means some non-daemon
@@ -213,7 +253,7 @@ func checkStore(dir string) checkResult {
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
-	return c
+	return flagIfUnused(c, dir, facts)
 }
 
 // mcpClientConfigs mirrors the paths used by the init writers

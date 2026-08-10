@@ -159,11 +159,43 @@ func (s *Server) ServeHTTP(addr string) error {
 	return http.ListenAndServe(addr, h)
 }
 
+// Tool annotations. Clients read these hints to decide whether a call needs
+// user approval, so the defaults matter: mcp-go's NewTool marks every tool
+// destructive, non-idempotent and open-world, which makes hosts gate even a
+// plain lookup behind a confirmation prompt — and an agent running unattended
+// then never calls it. Every GrayMatter tool works against the local store, so
+// openWorldHint is false throughout.
+
+// readOnlyTool annotates a tool that only reads. memory_search does bump access
+// counters for recency scoring, but that is internal bookkeeping the caller
+// cannot observe, so it stays read-only from the client's point of view.
+func readOnlyTool() mcp.ToolOption {
+	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
+		ReadOnlyHint:    mcp.ToBoolPtr(true),
+		DestructiveHint: mcp.ToBoolPtr(false),
+		IdempotentHint:  mcp.ToBoolPtr(true),
+		OpenWorldHint:   mcp.ToBoolPtr(false),
+	})
+}
+
+// writeTool annotates a tool that writes. destructive is true only where a call
+// can remove or supersede an existing fact; appending a fact or a checkpoint is
+// additive. Nothing here is idempotent: every call stores a new record.
+func writeTool(destructive bool) mcp.ToolOption {
+	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
+		ReadOnlyHint:    mcp.ToBoolPtr(false),
+		DestructiveHint: mcp.ToBoolPtr(destructive),
+		IdempotentHint:  mcp.ToBoolPtr(false),
+		OpenWorldHint:   mcp.ToBoolPtr(false),
+	})
+}
+
 func (s *Server) registerTools() {
 	// memory_search
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_search",
 			mcp.WithDescription("Search GrayMatter memory for relevant facts."),
+			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent whose memory to search."),
@@ -183,6 +215,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_add",
 			mcp.WithDescription("Store a new fact in GrayMatter memory."),
+			writeTool(false),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent to associate this memory with."),
@@ -199,6 +232,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("checkpoint_save",
 			mcp.WithDescription("Save a checkpoint of current agent state."),
+			writeTool(false),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent to checkpoint."),
@@ -214,6 +248,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("checkpoint_resume",
 			mcp.WithDescription("Restore the latest checkpoint for an agent."),
+			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent whose checkpoint to restore."),
@@ -226,6 +261,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_reflect",
 			mcp.WithDescription("Update your own knowledge graph mid-session. Use when you discover a contradiction, complete a task, or learn a user preference that should persist."),
+			writeTool(true),
 			mcp.WithString("action",
 				mcp.Required(),
 				mcp.Description("One of: add, update, forget, link."),

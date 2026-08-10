@@ -17,6 +17,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - 16 tests covering all agent combinations, input parsing edge cases, dedup, and idempotency.
 - New `knownAgents` table (`cmd_init_interactive.go`) as a single source of truth for agent → {writer, instructionFile} mapping.
 
+**`graymatter init --global` (issue #17)**
+- Writes the managed memory block into `~/.claude/CLAUDE.md` and `~/.config/opencode/AGENTS.md`, the home-scoped files agents read no matter which project they are working in. Global installs no longer need `init` run in every repo just to get the instructions. Works with `-i` too.
+- `XDG_CONFIG_HOME` is honoured for the OpenCode path. OpenCode resolves its global config through it, so hardcoding `~/.config` would have written where nothing reads. The directory is `~/.config/opencode` on every platform, Windows included; OpenCode does not use `%APPDATA%`.
+- Same marker-based upsert as the project files, so it stays idempotent and leaves your own global instructions untouched.
+- The block guards on the tools actually being present, since a global install reaches projects that never wired GrayMatter. It is a capability check, not a judgement call, so it cannot become the hedge that made the old block ignorable.
+- Deliberately not a `SKILL.md`. OpenCode loads skills lazily, advertising only name and description and leaving the body to the model's discretion, which puts the same "the model decides whether to bother" failure one level up. Instructions that must run before the first reply belong in a file that is always loaded.
+
+### Fixed
+
+**Agent instructions now read as a procedure (issue #14)**
+- The generated block described the five tools and told the model to search "when prior context might matter", a condition it can resolve to false every single time. Reported by several users as "init and doctor are green but nothing is ever stored".
+- Rewritten as an unconditional session protocol plus a trigger table, matching the briefing this repo already dogfoods in its own `AGENTS.md`.
+- `agent_id` is now derivable instead of invented: it is the repository root directory name. The old `<project>-<role>` template produced a different id per session, which scattered facts across namespaces and looked exactly like memory being broken.
+- Existing files migrate in place. The markers are unchanged, so re-running `init` replaces the old block rather than stacking a second one.
+
+**`graymatter doctor` notices a project that was set up and never used (issue #14)**
+- Every other check can be green while the agent has never called a single tool, and the summary still read "Everything looks good". That is why this failure produced so few reports: a fresh install and a week of silence looked identical, so people quietly gave up instead of filing anything.
+- A project initialised more than 24 hours ago that still holds no facts is now a warning with an actionable hint. The age is read from `MEMORY.md`, which `init` writes once and nothing else touches.
+
+**MCP tools no longer advertise themselves as destructive**
+- All five tools inherited mcp-go's defaults (`readOnlyHint: false`, `destructiveHint: true`, `openWorldHint: true`), so `memory_search` and `checkpoint_resume`, both pure reads, were announced to clients as destructive open-world calls. Clients use those hints to choose between auto-approving a call and prompting for it.
+- Each tool now declares what it actually does, and a test pins the annotations so a dependency bump cannot quietly reset them.
+
 ---
 
 ## [0.6.0] – 2026-06-13

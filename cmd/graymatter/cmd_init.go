@@ -12,6 +12,7 @@ import (
 func initCmd() *cobra.Command {
 	var (
 		interactive      bool
+		global           bool
 		skipCodex        bool
 		skipOpencode     bool
 		skipClaudeCode   bool
@@ -35,7 +36,17 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 (` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http :8080`" + `).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if interactive {
-				return runInteractiveWizard(dataDir, ".", quiet)
+				if err := runInteractiveWizard(dataDir, ".", quiet); err != nil {
+					return err
+				}
+				// --global is orthogonal to which clients the wizard wired, so
+				// it applies to both paths rather than only the flag-driven one.
+				if global {
+					for _, w := range installGlobalInstructions(quiet) {
+						fmt.Fprintf(os.Stderr, "\n%s\n", w)
+					}
+				}
+				return nil
 			}
 			dir := dataDir
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -145,6 +156,13 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 				}
 			}
 
+			// --global also writes the block into the home-scoped instruction
+			// files, so agents pick up memory in projects that never ran init
+			// (issue #17).
+			if global {
+				warnings = append(warnings, installGlobalInstructions(quiet)...)
+			}
+
 			if !quiet {
 				for _, w := range warnings {
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
@@ -179,6 +197,7 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 	cmd.Flags().BoolVar(&skipOpencode, "skip-opencode", false, "do not touch opencode.jsonc")
 	cmd.Flags().BoolVar(&withAntigravity, "with-antigravity", false, "also wire mcp_config.json for Antigravity")
 	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
+	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
 	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags, not --skip-instructions): claudecode,cursor,codex,opencode,antigravity")
 	return cmd
 }
