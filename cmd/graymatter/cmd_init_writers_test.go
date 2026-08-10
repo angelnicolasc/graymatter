@@ -167,7 +167,12 @@ func TestWriteAntigravity_MergesJSON(t *testing.T) {
 }
 
 func TestParseOnlyFlag(t *testing.T) {
-	got := parseOnlyFlag(" Claudecode, Cursor ,codex")
+	agents := knownAgents(".")
+
+	got, err := parseOnlyFlag(" Claudecode, Cursor ,codex", agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := map[string]bool{"claudecode": true, "cursor": true, "codex": true}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -177,7 +182,19 @@ func TestParseOnlyFlag(t *testing.T) {
 			t.Fatalf("missing key %q in %v", k, got)
 		}
 	}
-	if parseOnlyFlag("") != nil {
+
+	empty, err := parseOnlyFlag("", agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if empty != nil {
 		t.Fatalf("empty string should return nil")
+	}
+
+	// An unrecognised id must fail loudly. Now that the instruction files
+	// follow the selection, silently ignoring it would write nothing at all
+	// and still exit 0.
+	if _, err := parseOnlyFlag("opencode,bogus", agents); err == nil {
+		t.Fatal("unknown agent id should be an error")
 	}
 }

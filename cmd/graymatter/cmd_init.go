@@ -62,31 +62,32 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 			}
 
 			// Build the list of writers to run, honoring --only / --skip-*.
-			type writerEntry struct {
-				name    string
-				id      string
-				run     func() (writeResult, error)
-				skip    bool
-				optIn   bool
-				enabled bool
-			}
+			// Both the agent set and the instruction file each agent reads come
+			// from knownAgents, so this path and the wizard cannot disagree.
+			agents := knownAgents(".")
 
-			onlySet := parseOnlyFlag(only)
-			entries := []writerEntry{
-				{name: "Claude Code", id: "claudecode", run: func() (writeResult, error) { return writeClaudeCodeProject(".") }, skip: skipClaudeCode},
-				{name: "Cursor", id: "cursor", run: func() (writeResult, error) { return writeCursorProject(".") }, skip: skipCursor},
-				{name: "Codex", id: "codex", run: writeCodexHome, skip: skipCodex},
-				{name: "OpenCode", id: "opencode", run: func() (writeResult, error) { return writeOpencodeProject(".") }, skip: skipOpencode},
-				{name: "Antigravity", id: "antigravity", run: func() (writeResult, error) { return writeAntigravityProject(".") }, optIn: !withAntigravity},
+			onlySet, err := parseOnlyFlag(only, agents)
+			if err != nil {
+				return err
 			}
+			skipped := map[string]bool{
+				"claudecode": skipClaudeCode,
+				"cursor":     skipCursor,
+				"codex":      skipCodex,
+				"opencode":   skipOpencode,
+			}
+			optedIn := map[string]bool{"antigravity": withAntigravity}
 
-			for i := range entries {
-				e := &entries[i]
-				if len(onlySet) > 0 {
-					e.enabled = onlySet[e.id]
-					continue
+			enabled := make(map[string]bool, len(agents))
+			for _, a := range agents {
+				switch {
+				case len(onlySet) > 0:
+					enabled[a.id] = onlySet[a.id]
+				case a.optIn:
+					enabled[a.id] = optedIn[a.id]
+				default:
+					enabled[a.id] = !skipped[a.id]
 				}
-				e.enabled = !e.skip && !e.optIn
 			}
 
 			if !quiet {
@@ -98,8 +99,8 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 			}
 
 			var warnings []string
-			for _, e := range entries {
-				if !e.enabled {
+			for _, e := range agents {
+				if !enabled[e.id] {
 					if !quiet {
 						reason := "skipped"
 						if e.optIn {
@@ -141,7 +142,10 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 				if !quiet {
 					fmt.Println("\nAgent instructions (tells the model to actually use the tools):")
 				}
-				for _, res := range writeInstructionFiles(".") {
+				// Only the files the wired agents actually read. Writing both
+				// unconditionally is what put a CLAUDE.md in every
+				// OpenCode-only project (issue #13).
+				for _, res := range writeInstructionFiles(".", instructionFilesFor(agents, enabled)) {
 					if res.warn != "" {
 						warnings = append(warnings, res.warn)
 						continue
@@ -199,17 +203,40 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 	return cmd
 }
 
-func parseOnlyFlag(v string) map[string]bool {
+// parseOnlyFlag parses --only and rejects ids that match no known agent.
+//
+// Silently ignoring a typo used to mean "wire nothing" while still writing both
+// instruction files, which looked like a partial success. Now that the
+// instruction files follow the selection, an unrecognised id would produce a
+// run that writes nothing at all and still exits 0 — so it has to be an error.
+func parseOnlyFlag(v string, agents []agentDef) (map[string]bool, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return nil
+		return nil, nil
 	}
+	known := make(map[string]bool, len(agents))
+	valid := make([]string, 0, len(agents))
+	for _, a := range agents {
+		known[a.id] = true
+		valid = append(valid, a.id)
+	}
+
 	out := map[string]bool{}
+	var unknown []string
 	for _, p := range strings.Split(v, ",") {
 		p = strings.TrimSpace(strings.ToLower(p))
-		if p != "" {
-			out[p] = true
+		if p == "" {
+			continue
 		}
+		if !known[p] {
+			unknown = append(unknown, p)
+			continue
+		}
+		out[p] = true
 	}
-	return out
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("--only: unknown agent %s (valid: %s)",
+			strings.Join(unknown, ", "), strings.Join(valid, ", "))
+	}
+	return out, nil
 }

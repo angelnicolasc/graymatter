@@ -358,3 +358,74 @@ func TestInteractive_EmptyInputProducesNoFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestInstructionFilesFor pins the mapping every init path now depends on.
+//
+// Claude Code reads CLAUDE.md and does not read AGENTS.md; the other four read
+// AGENTS.md. Wiring one agent and getting the other's file is the bug this
+// table exists to prevent, so each single-agent case is spelled out rather than
+// derived from the table under test.
+func TestInstructionFilesFor(t *testing.T) {
+	agents := knownAgents(".")
+
+	cases := []struct {
+		name     string
+		selected []string
+		want     []string
+	}{
+		{"opencode alone", []string{"opencode"}, []string{"AGENTS.md"}},
+		{"claude code alone", []string{"claudecode"}, []string{"CLAUDE.md"}},
+		{"cursor alone", []string{"cursor"}, []string{"AGENTS.md"}},
+		{"codex alone", []string{"codex"}, []string{"AGENTS.md"}},
+		{"antigravity alone", []string{"antigravity"}, []string{"AGENTS.md"}},
+		// Two agents sharing a file must not produce it twice.
+		{"cursor and opencode dedupe", []string{"cursor", "opencode"}, []string{"AGENTS.md"}},
+		{"both files", []string{"claudecode", "opencode"}, []string{"CLAUDE.md", "AGENTS.md"}},
+		{"nothing selected", nil, nil},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sel := map[string]bool{}
+			for _, id := range c.selected {
+				sel[id] = true
+			}
+			got := instructionFilesFor(agents, sel)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %v, want %v", got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// TestKnownAgentsTableIsComplete guards the fields the other paths read off the
+// table. A new agent added without a configPath would be invisible to doctor,
+// and one without an instructionFile would be wired with nothing telling the
+// model to use the tools — both silent failures rather than build errors.
+func TestKnownAgentsTableIsComplete(t *testing.T) {
+	seen := map[string]bool{}
+	for _, a := range knownAgents(".") {
+		if a.id == "" || a.name == "" {
+			t.Errorf("agent %+v is missing an id or name", a)
+		}
+		if seen[a.id] {
+			t.Errorf("duplicate agent id %q", a.id)
+		}
+		seen[a.id] = true
+
+		if a.run == nil {
+			t.Errorf("%s has no writer", a.id)
+		}
+		if a.configPath == nil {
+			t.Errorf("%s has no configPath, so doctor cannot see it", a.id)
+		}
+		if a.instructionFile == "" {
+			t.Errorf("%s has no instructionFile", a.id)
+		}
+	}
+}

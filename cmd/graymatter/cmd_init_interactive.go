@@ -19,13 +19,32 @@ func stdinReader() *bufio.Scanner {
 	return bufio.NewScanner(os.Stdin)
 }
 
-// agentDef describes one known MCP agent for the interactive wizard.
+// agentDef describes one known MCP agent.
+//
+// This table is the single source of truth for "which agent needs which file".
+// It used to feed only the interactive wizard, while `init`'s flag path and
+// `doctor` each carried their own parallel list. That drift is what let
+// `--only opencode` keep writing CLAUDE.md (issue #13) and what let `doctor`
+// report missing instructions for a project covered by `init --global`
+// (issue #17): three lists, one of them updated.
 type agentDef struct {
 	id              string // claudecode, cursor, opencode, codex, antigravity
 	name            string // display name
 	configDesc      string // human-readable config-file description
-	instructionFile string // instruction file it needs ("" if none)
+	instructionFile string // project instruction file it reads ("" if none)
+	optIn           bool   // wired only when explicitly asked for
 	run             func() (writeResult, error)
+
+	// configPath resolves the MCP config this agent actually reads, so doctor
+	// looks exactly where the writer wrote.
+	configPath func(projectDir string) (string, error)
+
+	// globalInstruction is the home-scoped instruction file this agent reads in
+	// every project, or nil when the agent has none that `init --global`
+	// writes. Only these agents can be covered by a global install; for the
+	// rest a project file is the only delivery path, and doctor must not credit
+	// them for a global block they never read.
+	globalInstruction func() (string, error)
 }
 
 // knownAgents returns the list of known agents, with project-scoped writers
@@ -34,23 +53,49 @@ func knownAgents(projectDir string) []agentDef {
 	return []agentDef{
 		{
 			id: "claudecode", name: "Claude Code", configDesc: ".mcp.json",
+			// Claude Code reads CLAUDE.md and explicitly does not read
+			// AGENTS.md; its user-scope file is ~/.claude/CLAUDE.md.
 			instructionFile: "CLAUDE.md",
 			run:             func() (writeResult, error) { return writeClaudeCodeProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, ".mcp.json"), nil
+			},
+			globalInstruction: func() (string, error) {
+				home, err := resolveHome()
+				if err != nil {
+					return "", err
+				}
+				return filepath.Join(home, ".claude", "CLAUDE.md"), nil
+			},
 		},
 		{
 			id: "cursor", name: "Cursor", configDesc: ".cursor/mcp.json",
 			instructionFile: "AGENTS.md",
 			run:             func() (writeResult, error) { return writeCursorProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, ".cursor", "mcp.json"), nil
+			},
 		},
 		{
 			id: "opencode", name: "OpenCode", configDesc: "opencode.jsonc",
 			instructionFile: "AGENTS.md",
 			run:             func() (writeResult, error) { return writeOpencodeProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, "opencode.jsonc"), nil
+			},
+			globalInstruction: func() (string, error) {
+				d, err := opencodeConfigDir()
+				if err != nil {
+					return "", err
+				}
+				return filepath.Join(d, "AGENTS.md"), nil
+			},
 		},
 		{
 			id: "codex", name: "Codex", configDesc: "~/.codex/config.toml",
 			instructionFile: "AGENTS.md",
 			run:             writeCodexHome,
+			configPath:      func(string) (string, error) { return codexConfigPath() },
 		},
 		{
 			id: "antigravity", name: "Antigravity", configDesc: "mcp_config.json",
@@ -58,9 +103,29 @@ func knownAgents(projectDir string) []agentDef {
 			// alongside its own GEMINI.md. AGENTS.md is sufficient here — see
 			// https://antigravity.codes/blog/antigravity-agents-md-guide
 			instructionFile: "AGENTS.md",
+			optIn:           true,
 			run:             func() (writeResult, error) { return writeAntigravityProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, "mcp_config.json"), nil
+			},
 		},
 	}
+}
+
+// instructionFilesFor returns the project instruction files the selected agents
+// need, deduped, in knownAgents order. An OpenCode-only selection yields just
+// AGENTS.md; a Claude-Code-only selection just CLAUDE.md.
+func instructionFilesFor(agents []agentDef, selected map[string]bool) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, a := range agents {
+		if !selected[a.id] || a.instructionFile == "" || seen[a.instructionFile] {
+			continue
+		}
+		seen[a.instructionFile] = true
+		out = append(out, a.instructionFile)
+	}
+	return out
 }
 
 // runInteractiveWizard runs the interactive init wizard.
@@ -115,14 +180,7 @@ func runInteractiveWizard(dir, projectDir string, quiet bool) error {
 	}
 
 	// 5. Build ordered, deduped list of instruction files.
-	var instrFiles []string
-	instrSet := make(map[string]bool)
-	for _, a := range agents {
-		if selSet[a.id] && a.instructionFile != "" && !instrSet[a.instructionFile] {
-			instrSet[a.instructionFile] = true
-			instrFiles = append(instrFiles, a.instructionFile)
-		}
-	}
+	instrFiles := instructionFilesFor(agents, selSet)
 
 	// 6. Run writers and print results.
 	if !quiet {

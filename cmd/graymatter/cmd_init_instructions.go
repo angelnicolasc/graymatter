@@ -152,11 +152,16 @@ func upsertInstructionsBlock(path string) (writeResult, error) {
 	return res, nil
 }
 
-// writeInstructionFiles upserts the memory block into CLAUDE.md and AGENTS.md
-// in projectDir. Returns one result per file, in a stable order.
-func writeInstructionFiles(projectDir string) []writeResult {
+// writeInstructionFiles upserts the memory block into the given instruction
+// files under projectDir. Returns one result per file, in the given order.
+//
+// The file list is the caller's to decide. Writing CLAUDE.md and AGENTS.md
+// unconditionally is what put a CLAUDE.md in every OpenCode-only project: which
+// files are needed depends on which agents are being wired, and only the caller
+// knows that.
+func writeInstructionFiles(projectDir string, names []string) []writeResult {
 	var out []writeResult
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range names {
 		res, err := upsertInstructionsBlock(filepath.Join(projectDir, name))
 		if err != nil {
 			res.warn = fmt.Sprintf("could not update %s: %v", name, err)
@@ -176,19 +181,27 @@ func writeInstructionFiles(projectDir string) []writeResult {
 // lands ahead of project content rather than replacing it. Both are plain
 // markdown, so the same marker-based upsert applies and a user's own global
 // instructions are left untouched.
+//
+// The paths come from knownAgents rather than being listed again here, so
+// adding an agent with a global file is one edit and doctor learns about it at
+// the same time.
 func globalInstructionPaths() ([]string, error) {
-	home, err := resolveHome()
-	if err != nil {
-		return nil, err
+	var out []string
+	seen := map[string]bool{}
+	for _, a := range knownAgents(".") {
+		if a.globalInstruction == nil {
+			continue
+		}
+		p, err := a.globalInstruction()
+		if err != nil {
+			return nil, err
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
 	}
-	opencodeDir, err := opencodeConfigDir()
-	if err != nil {
-		return nil, err
-	}
-	return []string{
-		filepath.Join(home, ".claude", "CLAUDE.md"),
-		filepath.Join(opencodeDir, "AGENTS.md"),
-	}, nil
+	return out, nil
 }
 
 // opencodeConfigDir resolves OpenCode's global config directory.
