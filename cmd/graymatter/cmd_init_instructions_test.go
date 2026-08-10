@@ -266,34 +266,63 @@ func TestWriteGlobalInstructionFiles_PreservesUserContent(t *testing.T) {
 	}
 }
 
-func TestHasInstructionsBlock(t *testing.T) {
+func TestInspectBlock(t *testing.T) {
 	dir := t.TempDir()
+	write := func(name, body string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// The pre-v0.7.0 briefing, markers and all. This is the file the users in
+	// issue #14 were left with, and the reason "is there a block" was never a
+	// good enough question.
+	staleBody := instrBeginMarker + `
+## Memory (GrayMatter)
+
+- ` + "`memory_search`" + ` — call at the start of a task when prior context might matter.
+` + instrEndMarker + "\n"
 
 	managed := filepath.Join(dir, "CLAUDE.md")
 	if _, err := upsertInstructionsBlock(managed); err != nil {
 		t.Fatal(err)
 	}
-	if !hasInstructionsBlock(managed) {
-		t.Error("managed file should be detected")
-	}
-
-	custom := filepath.Join(dir, "AGENTS.md")
-	if err := os.WriteFile(custom, []byte("Use the GrayMatter MCP tools.\n"), 0o644); err != nil {
+	current, err := os.ReadFile(managed)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasInstructionsBlock(custom) {
-		t.Error("hand-written graymatter mention should be detected")
+
+	cases := []struct {
+		name string
+		path string
+		want blockStatus
+	}{
+		{"managed block we just wrote", managed, blockCurrent},
+		{"pre-0.7 block", write("STALE.md", staleBody), blockStale},
+		{"hand-written mention", write("AGENTS.md", "Use the GrayMatter MCP tools.\n"), blockCustom},
+		{"unrelated file", write("OTHER.md", "nothing to see\n"), blockAbsent},
+		{"missing file", filepath.Join(dir, "MISSING.md"), blockAbsent},
+
+		// A CRLF checkout must not read as stale, or every Windows user gets a
+		// warning they cannot clear.
+		{"current block in a CRLF file", write("CRLF.md",
+			strings.ReplaceAll(string(current), "\n", "\r\n")), blockCurrent},
+
+		// One current block plus one stale copy is a stale file: the model is
+		// still being fed the old text.
+		{"current block next to a stale one", write("BOTH.md",
+			string(current)+"\n"+staleBody), blockStale},
 	}
 
-	unrelated := filepath.Join(dir, "OTHER.md")
-	if err := os.WriteFile(unrelated, []byte("nothing to see\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if hasInstructionsBlock(unrelated) {
-		t.Error("unrelated file should not be detected")
-	}
-	if hasInstructionsBlock(filepath.Join(dir, "MISSING.md")) {
-		t.Error("missing file should not be detected")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := inspectBlock(c.path); got != c.want {
+				t.Errorf("inspectBlock = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

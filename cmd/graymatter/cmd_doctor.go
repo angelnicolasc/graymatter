@@ -261,17 +261,28 @@ func checkStore(dir string) checkResult {
 	return flagIfUnused(c, dir, facts)
 }
 
-// mcpClientConfigs mirrors the paths used by the init writers
-// (cmd_init_writers.go). Codex is home-scoped; the rest are project-scoped.
-func mcpClientConfigs(projectDir string) []struct{ client, path string } {
-	out := []struct{ client, path string }{
-		{"Claude Code", filepath.Join(projectDir, ".mcp.json")},
-		{"Cursor", filepath.Join(projectDir, ".cursor", "mcp.json")},
-		{"OpenCode", filepath.Join(projectDir, "opencode.jsonc")},
-		{"Antigravity", filepath.Join(projectDir, "mcp_config.json")},
-	}
-	if codexPath, err := codexConfigPath(); err == nil {
-		out = append(out, struct{ client, path string }{"Codex", codexPath})
+// wiredAgents returns the known agents whose MCP config in this project
+// references graymatter. Paths come from knownAgents, the same table the init
+// writers use, so doctor cannot look somewhere the writer never wrote.
+func wiredAgents(projectDir string) []agentDef {
+	var out []agentDef
+	for _, a := range knownAgents(projectDir) {
+		if a.configPath == nil {
+			continue
+		}
+		p, err := a.configPath(projectDir)
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		// String containment is deliberately tolerant: it covers JSON, JSONC
+		// (comments) and TOML without needing three parsers here.
+		if strings.Contains(string(data), "graymatter") {
+			out = append(out, a)
+		}
 	}
 	return out
 }
@@ -279,16 +290,9 @@ func mcpClientConfigs(projectDir string) []struct{ client, path string } {
 func checkMCPWiring(projectDir string) checkResult {
 	c := checkResult{Name: "mcp wiring"}
 	var wired []string
-	for _, cc := range mcpClientConfigs(projectDir) {
-		data, err := os.ReadFile(cc.path)
-		if err != nil {
-			continue
-		}
-		// String containment is deliberately tolerant: it covers JSON, JSONC
-		// (comments) and TOML without needing three parsers here.
-		if strings.Contains(string(data), "graymatter") {
-			wired = append(wired, fmt.Sprintf("%s (%s)", cc.client, cc.path))
-		}
+	for _, a := range wiredAgents(projectDir) {
+		p, _ := a.configPath(projectDir)
+		wired = append(wired, fmt.Sprintf("%s (%s)", a.name, p))
 	}
 	if len(wired) == 0 {
 		c.Status = "warn"
@@ -300,22 +304,164 @@ func checkMCPWiring(projectDir string) checkResult {
 	return c
 }
 
+// checkInstructions asks the question that matters: for each client actually
+// wired here, does a briefing reach it?
+//
+// It used to look only at the project's CLAUDE.md and AGENTS.md, which made it
+// contradict `graymatter init --global` — the very command its own hint
+// recommends. A global install writes the block where Claude Code and OpenCode
+// read it in every project, and doctor reported that as missing (issue #17).
+// The inverse error is just as bad: crediting a global block to Cursor, which
+// has no global file graymatter writes, would hide a real gap. So coverage is
+// resolved per agent, from the same table that decides where init writes.
 func checkInstructions(projectDir string) checkResult {
 	c := checkResult{Name: "instructions"}
-	var present []string
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
-		if hasInstructionsBlock(filepath.Join(projectDir, name)) {
-			present = append(present, name)
+
+	agents := wiredAgents(projectDir)
+	if len(agents) == 0 {
+		// Nothing wired, so there is no agent whose needs we can check against.
+		// Demanding a file for all five here would double-report the missing
+		// wiring that `mcp wiring` already warns about, so this degrades to the
+		// older question — is there a briefing at all — while still reporting a
+		// stale one.
+		return checkAnyInstructions(projectDir)
+	}
+
+	// An agent whose only briefing is stale is "uncovered", but reporting it in
+	// both lists says the same thing twice and buries the actionable half. It
+	// is counted as outdated only.
+	var covered, uncovered, stale []string
+	seenStale := map[string]bool{}
+	for _, a := range agents {
+		if a.instructionFile == "" {
+			continue
+		}
+		// Every source is inspected, not just the first that covers the agent.
+		// A project block does not shadow the global one — Claude Code loads
+		// the user file and the project file, so an outdated block in either
+		// is still being fed to the model and has to be reported.
+		hit, outdated := "", false
+		for _, cand := range instructionSources(projectDir, a) {
+			switch inspectBlock(cand.path) {
+			case blockCurrent, blockCustom:
+				if hit == "" {
+					hit = cand.label
+				}
+			case blockStale:
+				outdated = true
+				if !seenStale[cand.path] {
+					seenStale[cand.path] = true
+					stale = append(stale, cand.label)
+				}
+			}
+		}
+		switch {
+		case hit != "":
+			covered = append(covered, fmt.Sprintf("%s → %s", a.name, hit))
+		case outdated:
+			// already accounted for in `stale`
+		default:
+			uncovered = append(uncovered, a.name)
 		}
 	}
-	if len(present) == 0 {
+
+	switch {
+	case len(uncovered) > 0 && len(stale) > 0:
+		c.Status = "warn"
+		c.Detail = fmt.Sprintf("nothing tells %s to use the memory tools, and %s %s an outdated block",
+			strings.Join(uncovered, ", "), strings.Join(stale, ", "), carries(len(stale)))
+		c.Hint = "re-run `graymatter init` — it adds what is missing and replaces the managed block in place, leaving everything outside the markers alone"
+	case len(uncovered) > 0:
+		c.Status = "warn"
+		c.Detail = "nothing tells " + strings.Join(uncovered, ", ") + " to use the memory tools"
+		c.Hint = "an MCP connection only makes tools *available* — without instructions the model never calls them; run `graymatter init` (or `--global` for every project)"
+	case len(stale) > 0:
+		// Everything is covered, but by a briefing from before v0.7.0 — the one
+		// that told the model to search "when prior context might matter",
+		// which is a condition it can resolve to false every time (issue #14).
+		c.Status = "warn"
+		c.Detail = strings.Join(stale, ", ") + " " + carries(len(stale)) + " a memory block from an older version"
+		c.Hint = "the old block described the tools instead of prescribing a procedure, which is why agents did not call them; re-run `graymatter init` to replace it in place"
+	default:
+		c.Status, c.Detail = "ok", strings.Join(covered, ", ")
+	}
+	return c
+}
+
+// carries agrees the verb with the number of files, so a single outdated file
+// does not read as a grammar slip in the one message meant to be trusted.
+func carries(n int) string {
+	if n == 1 {
+		return "carries"
+	}
+	return "carry"
+}
+
+// checkAnyInstructions answers "is there a briefing anywhere" for a project
+// with no MCP client wired yet. Staleness is still reported: an old block is
+// worth flagging whether or not anything is wired.
+func checkAnyInstructions(projectDir string) checkResult {
+	c := checkResult{Name: "instructions"}
+	var present, stale []string
+	for _, a := range knownAgents(projectDir) {
+		if a.instructionFile == "" {
+			continue
+		}
+		for _, cand := range instructionSources(projectDir, a) {
+			switch inspectBlock(cand.path) {
+			case blockCurrent, blockCustom:
+				if !contains(present, cand.label) {
+					present = append(present, cand.label)
+				}
+			case blockStale:
+				if !contains(stale, cand.label) {
+					stale = append(stale, cand.label)
+				}
+			}
+		}
+	}
+	switch {
+	case len(present) == 0 && len(stale) == 0:
 		c.Status = "warn"
 		c.Detail = "neither CLAUDE.md nor AGENTS.md tells the model to use the memory tools"
 		c.Hint = "an MCP connection only makes tools *available* — without instructions the model never calls them; run `graymatter init` to add the memory block"
-		return c
+	case len(present) == 0:
+		c.Status = "warn"
+		c.Detail = strings.Join(stale, ", ") + " " + carries(len(stale)) + " a memory block from an older version"
+		c.Hint = "the old block described the tools instead of prescribing a procedure, which is why agents did not call them; re-run `graymatter init` to replace it in place"
+	default:
+		c.Status, c.Detail = "ok", strings.Join(present, ", ")+" mention the memory tools"
+		if len(stale) > 0 {
+			c.Status = "warn"
+			c.Detail += "; " + strings.Join(stale, ", ") + " " + map[bool]string{true: "is", false: "are"}[len(stale) == 1] + " outdated"
+			c.Hint = "re-run `graymatter init` to replace the managed block in place"
+		}
 	}
-	c.Status, c.Detail = "ok", strings.Join(present, ", ")+" mention the memory tools"
 	return c
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// instructionSources lists where a briefing for this agent could live, project
+// file first: a project block overrides, and is what the user most likely means
+// when both exist.
+func instructionSources(projectDir string, a agentDef) []struct{ path, label string } {
+	out := []struct{ path, label string }{
+		{filepath.Join(projectDir, a.instructionFile), a.instructionFile},
+	}
+	if a.globalInstruction != nil {
+		if p, err := a.globalInstruction(); err == nil {
+			out = append(out, struct{ path, label string }{p, p + " (global)"})
+		}
+	}
+	return out
 }
 
 // lsofHint suggests the lock-holder lookup command on platforms that have one.

@@ -375,15 +375,56 @@ func printNextSteps() {
 	fmt.Printf("       graymatter recall  \"my-agent\" \"how should I format this?\"\n")
 }
 
-// hasInstructionsBlock reports whether path contains the managed block (or at
-// least mentions graymatter, for users who wrote their own briefing).
-// Used by `graymatter doctor`.
-func hasInstructionsBlock(path string) bool {
+// normalizeEndings makes block comparisons independent of how a file was
+// checked out or saved. Without it a CRLF file would compare unequal to the
+// canonical block forever, and every check below would be a false alarm.
+func normalizeEndings(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
+
+// blockStatus is what doctor needs to know about one instruction file.
+type blockStatus int
+
+const (
+	blockAbsent  blockStatus = iota // no graymatter briefing at all
+	blockCustom                     // mentions graymatter, but not our managed block
+	blockStale                      // our markers, but not the text we ship today
+	blockCurrent                    // our markers, current text
+)
+
+// inspectBlock classifies the managed block in path.
+//
+// The stale case is the one worth having. The briefing shipped before v0.7.0
+// described the five tools and told the model to search "when prior context
+// might matter" — a condition it can resolve to false every single time, which
+// is the whole of issue #14. Its markers are byte-identical to today's, so a
+// check that looks for a marker, or for the word "graymatter", reports it as
+// healthy. Comparing the text is what separates "a briefing is present" from
+// "the briefing that works is present", and it keeps working for the next
+// revision without anyone remembering to bump a version.
+//
+// Every block in the file is checked, not just the first: a duplicate that
+// still carries the old text is exactly the copy worth catching.
+func inspectBlock(path string) blockStatus {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return blockAbsent
 	}
-	content := strings.ToLower(string(data))
-	return strings.Contains(content, strings.ToLower(instrBeginMarker)) ||
-		strings.Contains(content, "graymatter")
+	content := normalizeEndings(string(data))
+	want := normalizeEndings(strings.TrimSuffix(instructionsBlock(), "\n"))
+
+	spans := managedBlockSpans(content)
+	for _, s := range spans {
+		if content[s[0]:s[1]] != want {
+			return blockStale
+		}
+	}
+	if len(spans) > 0 {
+		return blockCurrent
+	}
+
+	// No managed block. A briefing someone wrote themselves still counts as
+	// instructions — it is theirs, so it is never "stale".
+	if strings.Contains(strings.ToLower(content), "graymatter") {
+		return blockCustom
+	}
+	return blockAbsent
 }
