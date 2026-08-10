@@ -128,13 +128,25 @@ func upsertInstructionsBlock(path string) (writeResult, error) {
 		next = block
 	default:
 		content := string(data)
-		begin := strings.Index(content, instrBeginMarker)
-		end := strings.Index(content, instrEndMarker)
-		if begin >= 0 && end > begin {
-			// Replace the managed block, keep everything around it.
-			next = content[:begin] + strings.TrimSuffix(block, "\n") + content[end+len(instrEndMarker):]
+		// Match the file's existing line endings before splicing. Writing LF
+		// into a CRLF file left it with both, and once the block itself had
+		// picked up CRLF — which is what a checkout with core.autocrlf=true
+		// produces — the equality check below never held again: every run
+		// rewrote the file, reported a change, and dirtied the tree.
+		if usesCRLF(content) {
+			block = toCRLF(block)
+		}
+		le := lineEnding(content)
+
+		// Every managed block goes, and one canonical block comes back where
+		// the first one was. Replacing only the first pair left a duplicate
+		// behind still carrying the old text, which a check that reads the
+		// first pair then happily reports as healthy.
+		stripped, at := stripManagedBlocks(content)
+		if at >= 0 {
+			next = stripped[:at] + strings.TrimSuffix(block, le) + stripped[at:]
 		} else {
-			next = strings.TrimRight(content, "\n") + "\n\n" + block
+			next = strings.TrimRight(stripped, "\r\n") + le + le + block
 		}
 	}
 
@@ -150,6 +162,88 @@ func upsertInstructionsBlock(path string) (writeResult, error) {
 	}
 	res.changed = true
 	return res, nil
+}
+
+// usesCRLF reports whether the file's dominant line ending is CRLF.
+//
+// Majority, not presence: one pasted CRLF line in an otherwise LF file must not
+// drag the whole block over to CRLF. A file that is already mixed keeps what it
+// has — the block follows the majority and the surrounding lines are left
+// alone, which is what makes the result stable instead of trading one rewrite
+// for another.
+func usesCRLF(content string) bool {
+	crlf := strings.Count(content, "\r\n")
+	lines := strings.Count(content, "\n")
+	return crlf*2 > lines
+}
+
+func lineEnding(content string) string {
+	if usesCRLF(content) {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func toCRLF(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+}
+
+// managedBlockSpans returns the [start,end) byte ranges of every managed block
+// in content, in order.
+//
+// Pairing is non-greedy: a begin marker with another begin marker before the
+// next end marker is orphaned — hand-mangled, half-pasted, whatever — and is
+// skipped rather than paired with some later block's terminator. Pairing it
+// would swallow everything in between, which is user content that was never
+// inside a block.
+//
+// One scanner backs both the writer and the check in doctor, so the two cannot
+// disagree about what counts as a block.
+func managedBlockSpans(content string) [][2]int {
+	var spans [][2]int
+	for off := 0; off < len(content); {
+		rel := strings.Index(content[off:], instrBeginMarker)
+		if rel < 0 {
+			break
+		}
+		begin := off + rel
+		after := begin + len(instrBeginMarker)
+
+		endRel := strings.Index(content[after:], instrEndMarker)
+		if endRel < 0 {
+			break // unterminated: nothing to pair here or after it
+		}
+		end := after + endRel + len(instrEndMarker)
+
+		if nextRel := strings.Index(content[after:], instrBeginMarker); nextRel >= 0 && after+nextRel < end {
+			off = after // this begin is orphaned; try the next one
+			continue
+		}
+		spans = append(spans, [2]int{begin, end})
+		off = end
+	}
+	return spans
+}
+
+// stripManagedBlocks removes every managed block from content and reports where
+// the first one started in the result, or -1 when there was none.
+func stripManagedBlocks(content string) (stripped string, insertAt int) {
+	spans := managedBlockSpans(content)
+	if len(spans) == 0 {
+		return content, -1
+	}
+	var b strings.Builder
+	prev := 0
+	insertAt = -1
+	for _, s := range spans {
+		b.WriteString(content[prev:s[0]])
+		if insertAt < 0 {
+			insertAt = b.Len()
+		}
+		prev = s[1]
+	}
+	b.WriteString(content[prev:])
+	return b.String(), insertAt
 }
 
 // writeInstructionFiles upserts the memory block into the given instruction
