@@ -24,7 +24,12 @@ When in doubt, open an issue first. A quick description of what you're building 
 
 ## Setup
 
-**Requirements:** Go 1.22+, no CGO, no Docker, no external services.
+**Requirements:** Go 1.23+, no Docker, no external services.
+
+The workspace declares `go 1.23.0`, so an older toolchain either fetches 1.23
+or refuses outright when `GOTOOLCHAIN=local` — which is what container images
+set. The shipped binary is built without CGO; that constraint is about the
+release artifact, not about your machine. See the note on `-race` below.
 
 ```bash
 git clone https://github.com/angelnicolasc/graymatter
@@ -57,6 +62,27 @@ go test -count=1 -timeout=300s ./...
 Use `./...` rather than naming packages. Both commands used to enumerate
 subtrees, which quietly excluded the root package and `cmd/graymatter` itself,
 so tests living there passed locally and were never run by anyone else.
+
+### The race detector
+
+CI runs every one of those packages under `-race`. The commands above do not,
+so a change can pass locally and still fail the pull request. Add the flag when
+you touch anything concurrent — the daemon, the RPC layer, the store handles,
+the TUI's background loads:
+
+```bash
+go test -race -count=1 -timeout=120s ./...
+
+cd cmd/graymatter
+go test -race -count=1 -timeout=300s ./...
+```
+
+`-race` is the one thing here that needs a C compiler, because the detector is
+built on CGO. Linux and macOS usually have one already; on Windows install
+mingw-w64 or TDM-GCC. Without it the flag fails with `-race requires cgo`, and
+the honest fallback is to run the suite without it and let CI catch what you
+cannot. That is a gap in your local coverage, not a licence to skip the flag
+when you have the toolchain.
 
 All tests use `t.TempDir()` with injected stubs. No real embedding model is required — tests that need one use a fixed-vector stub or keyword mode.
 
