@@ -189,6 +189,11 @@ func checkStore(dir string) checkResult {
 	dbPath := filepath.Join(dir, "gray.db")
 	if _, err := os.Stat(dbPath); err != nil {
 		c.Status, c.Detail = "info", "no database yet (gray.db is created on first write)"
+		// Anyone reading this line right after `init` is one step from the most
+		// common false alarm: the client has not been restarted, so the tools
+		// are not loaded yet and nothing has had a chance to write. The hint
+		// disappears as soon as a single fact exists.
+		c.Hint = "if your agent cannot see the memory tools, restart your MCP client; clients launch their servers at startup, so a session that predates `graymatter init` never picks them up"
 		return flagIfUnused(c, dir, 0)
 	}
 

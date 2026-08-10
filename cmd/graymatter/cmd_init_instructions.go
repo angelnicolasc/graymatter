@@ -250,6 +250,24 @@ func installGlobalInstructions(quiet bool) []string {
 	return warnings
 }
 
+// printNextSteps closes both init paths with the same advice.
+//
+// The restart comes first because it is the step that makes a correct install
+// look broken. MCP clients launch their servers at startup, so the tools do not
+// exist in the session that ran init, and an agent that goes straight to
+// calling them finds nothing however green doctor is. Shared between the plain
+// and interactive paths so the two cannot drift.
+func printNextSteps() {
+	fmt.Printf("\nNext steps:\n")
+	fmt.Printf("  1. Restart your MCP client (editor, agent, or terminal session).\n")
+	fmt.Printf("     Clients launch their MCP servers at startup, so the memory tools\n")
+	fmt.Printf("     are not available in the session that just ran init.\n")
+	fmt.Printf("  2. graymatter doctor   — verify the whole setup end to end\n")
+	fmt.Printf("  3. Try it out:\n")
+	fmt.Printf("       graymatter remember \"my-agent\" \"user prefers bullet points\"\n")
+	fmt.Printf("       graymatter recall  \"my-agent\" \"how should I format this?\"\n")
+}
+
 // hasInstructionsBlock reports whether path contains the managed block (or at
 // least mentions graymatter, for users who wrote their own briefing).
 // Used by `graymatter doctor`.

@@ -168,10 +168,7 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
 				}
 				fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
-				fmt.Printf("\nNext steps:\n")
-				fmt.Printf("  graymatter doctor   — verify the whole setup end to end\n")
-				fmt.Printf("  graymatter remember \"my-agent\" \"user prefers bullet points\"\n")
-				fmt.Printf("  graymatter recall  \"my-agent\" \"how should I format this?\"\n")
+				printNextSteps()
 			}
 
 			if added, pathErr := addExeDirToUserPath(); pathErr != nil {
