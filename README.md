@@ -658,12 +658,14 @@ where the reason the direct-bbolt fast path got rejected lives.
 
 The two also mean different things by *knowledge graph*. Theirs is functions,
 classes, files, routes, with `CALLS` / `IMPORTS` edges, derived automatically by
-parsing your code, and it is the primary thing you query. GrayMatter's nodes are
-person / project / decision / preference / fact — entities named in the facts
-themselves — and the graph is built explicitly, via `memory_reflect` with
-`action="link"` or the TUI, rather than derived from anything. It is there to be
-browsed and exported (there is an Obsidian exporter), not traversed the way a
-call graph is. The clearest tell is decay: facts here carry a weight on a 30-day
+parsing your code, and it is the primary thing you query. GrayMatter's is a much
+smaller idea: entities named in the facts themselves, typed person / project /
+decision / preference / fact, never derived from source. It is also the least
+finished part of this project — the wiring that would populate it is not
+connected in shipped builds, tracked in
+[#24](https://github.com/angelnicolasc/graymatter/issues/24) — so take the fact
+store, not the graph, as what GrayMatter actually gives you today. The clearest
+tell is decay: facts here carry a weight on a 30-day
 half-life and fade when nothing touches them, which a code graph must never do,
 since a stale one is simply wrong.
 
