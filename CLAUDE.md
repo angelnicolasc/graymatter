@@ -32,8 +32,10 @@ code conventions. Two things the tree does not make obvious:
 
 - **bbolt is single-writer, and daemon mode is what makes concurrent access
   work.** One process owns the store and every other one (TUI, MCP server, CLI,
-  `run`, the REST server) connects as a client over a local socket or named
-  pipe. Clients spawn the daemon on first use and it idle-exits when unused.
+  `run`, the REST server) connects as a client over a Unix domain socket on
+  POSIX, TCP loopback on Windows — where the token in the 0600 discovery file
+  is the only access control, since any local process can reach loopback.
+  Clients spawn the daemon on first use and it idle-exits when unused.
   `--no-daemon` opts out and brings the lock contention back. See
   `cmd/graymatter/internal/daemon/` and `pkg/memory/rpc/`.
 - **The module is split.** The root is the library; `cmd/graymatter/` is the CLI

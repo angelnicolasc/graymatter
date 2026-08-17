@@ -628,10 +628,56 @@ store, err := memory.Open(memory.StoreConfig{
 - Not a framework. Not an agent runner. Not a replacement for your existing tooling.
 - Not a hosted service. Not a SaaS. Not a cloud product.
 - Not a knowledge base UI. Not Notion. Not Obsidian.
+- Not a code-intelligence tool. It never parses, indexes, or reads your source.
 - Not trying to win the enterprise memory market.
 
 It is exactly one thing: **the missing stateful layer for Go CLI agents**,
 packaged as a library you import in three lines.
+
+---
+
+## How it compares
+
+Two categories get confused with this one often enough to be worth spelling out.
+Both are complementary: you can run them alongside GrayMatter and the tool
+surfaces never collide.
+
+**Code graphs** — [codegraph](https://github.com/colbymchenry/codegraph),
+[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp), and
+others. These parse your source with tree-sitter and expose symbols, call
+edges, routes, and blast radius. The repo is the source of truth: delete the
+index, re-run it, and you get the same graph back, because the graph is a
+projection of code that already exists.
+
+GrayMatter never reads your source. There is no parser and no indexing step, so
+a fact exists only because something deliberately wrote it — `memory_add` over
+MCP, `graymatter remember`, `POST /remember`, or `Memory.Remember` from Go.
+Delete `.graymatter/` and nothing regenerates it, because it was never in the
+tree. A code graph tells you that every client dials the daemon; GrayMatter is
+where the reason the direct-bbolt fast path got rejected lives.
+
+The two also mean different things by *knowledge graph*. Theirs is functions,
+classes, files, routes, with `CALLS` / `IMPORTS` edges, derived automatically by
+parsing your code, and it is the primary thing you query. GrayMatter's nodes are
+person / project / decision / preference / fact — entities named in the facts
+themselves — and the graph is built explicitly, via `memory_reflect` with
+`action="link"` or the TUI, rather than derived from anything. It is there to be
+browsed and exported (there is an Obsidian exporter), not traversed the way a
+call graph is. The clearest tell is decay: facts here carry a weight on a 30-day
+half-life and fade when nothing touches them, which a code graph must never do,
+since a stale one is simply wrong.
+
+**Context compressors** — tools that sit on the transport and shrink what is
+already moving through it: file reads, shell output, request payloads.
+GrayMatter never sees your traffic. The agent writes one distilled sentence and
+recalls a handful of facts later, so the payload is not made smaller, it stops
+being sent. Some compressors also ship session memory, which genuinely overlaps;
+the difference is scope, since GrayMatter is five MCP tools in a static binary
+with nothing in your request path and no account.
+
+Token-reduction numbers across these categories are not comparable either. A
+code graph saves you exploration tokens; a compressor saves you payload bytes;
+GrayMatter saves you conversation history. They stack.
 
 ---
 

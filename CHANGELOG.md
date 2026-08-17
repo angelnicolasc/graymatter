@@ -8,6 +8,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Documentation
+
+- **`CLAUDE.md` named the wrong Windows transport.** It described daemon
+  clients connecting over "a local socket or named pipe". There is no named
+  pipe: `pkg/memory/rpc/sock_windows.go` binds TCP loopback on a
+  kernel-assigned port, because Go's standard library has no portable named-pipe
+  support. Corrected, and the consequence is now stated — on Windows the token
+  in the 0600 discovery file is the only access control, since any local process
+  can reach loopback.
+- **Added a "How it compares" section to the README** covering code graphs and
+  context compressors, after [#23](https://github.com/angelnicolasc/graymatter/issues/23)
+  showed the existing text does not say *what* the knowledge graph is a graph of.
+
 ---
 
 ## [0.8.0] – 2026-08-10
