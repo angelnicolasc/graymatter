@@ -8,6 +8,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Documentation
+
+- **`CLAUDE.md` named the wrong Windows transport.** It described daemon
+  clients connecting over "a local socket or named pipe". There is no named
+  pipe: `pkg/memory/rpc/sock_windows.go` binds TCP loopback on a
+  kernel-assigned port, because Go's standard library has no portable named-pipe
+  support. Corrected, along with what follows from it — on Windows the 256-bit
+  token in the discovery file is the only access control, and the `0600` passed
+  to `os.WriteFile` buys nothing there, since Windows ignores POSIX modes and
+  the file inherits its parent directory's ACL. Verified on Windows 10: the
+  discovery file carries zero non-inherited ACEs, and its ACL is byte-identical
+  to its parent's.
+- **Added a "How it compares" section to the README** covering code graphs and
+  context compressors, after [#23](https://github.com/angelnicolasc/graymatter/issues/23)
+  showed the existing text does not say *what* the knowledge graph is a graph of.
+
 ---
 
 ## [0.8.0] – 2026-08-10
