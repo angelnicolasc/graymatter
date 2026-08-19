@@ -691,7 +691,7 @@ GrayMatter saves you conversation history. They stack.
 - [x] Hybrid retrieval (vector + keyword + recency, RRF fusion)
 - [x] CLI: `init remember recall checkpoint export run sessions plugin server`
 - [x] MCP server (Claude Code / Cursor) + `memory_reflect` self-edit tool
-- [x] Knowledge graph (entity extraction, node/edge linking, Obsidian export)
+- [ ] Knowledge graph — schema, bbolt storage and the TUI view are in, but nodes have no write path in shipped builds, so entity extraction and the graph's Obsidian export never run ([#24](https://github.com/angelnicolasc/graymatter/issues/24))
 - [x] Shared memory across agents (`--shared`, `--all` flags, `__shared__` namespace)
 - [x] REST API server mode (`graymatter server --addr :8080`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)
