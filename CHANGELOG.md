@@ -8,6 +8,118 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Security
+
+A security audit against v0.8.0 raised 17 findings; all 17 were re-verified
+against the tree and remediated, each with a regression test that fails without
+its fix. [`docs/threat-model.md`](docs/threat-model.md) is new and states both
+what GrayMatter defends and what it does not.
+
+Four defaults change. Everything else here is invisible unless you were relying
+on the hole.
+
+| Before | Now | Migration |
+|---|---|---|
+| `graymatter server --addr :8080` (every interface) | `--addr 127.0.0.1:8080` | Pass `--addr :8080` explicitly; startup warns |
+| REST and MCP-HTTP served anyone | Bearer token on every route but `/healthz` | Send the header, or `--no-auth` (loopback only) |
+| `DELETE /forget` deleted the closest match | Needs `"confirm": true`, or use `DELETE /forget/{id}` | Add the field, or switch to the exact form |
+| Plugin manifests had no checksum | `sha256` is required and verified | Add the digest; a wrong one prints the right one |
+
+**The two network listeners served the whole store to anyone who could reach
+the port.** `graymatter server` bound every interface by default — `:8080` is
+not localhost — and checked no credential on any route: read, write and delete
+on every agent's memory, from the LAN, unauthenticated. `graymatter mcp serve
+--http` was the same hole over MCP, where the tool surface includes
+`memory_add` and `memory_reflect`; the `Mcp-Session-Id` looked like a barrier
+but the server hands one to every caller during `initialize`.
+
+Both now bind `127.0.0.1` and require `Authorization: Bearer <token>`, compared
+in constant time. The token is 256 bits (the same `rpc.GenerateToken` the
+daemon uses), generated on first run, printed once, and stored in
+`<data-dir>/graymatter.http-token`; `--token` and `GRAYMATTER_HTTP_TOKEN`
+override it. `/healthz` stays open so liveness probes keep working. `/metrics`
+does not — it lists every agent ID the server has seen. `--no-auth` restores
+the old behaviour but is refused on any address that is not loopback: no
+credential plus reachable from the network is the combination that made this
+critical.
+
+**Two agents writing at once could kill the daemon.** `chromemVectorStore` kept
+its collections in a map with no mutex, while `Store.Put` reaches it outside
+the store lock and the daemon serves every RPC on its own goroutine. The result
+was `fatal error: concurrent map read and map write` — unrecoverable, taking
+every client's access to memory with it. The map is now behind a mutex, and the
+lookup-or-create returns the handle so `AddDocument` and `Query` no longer
+re-read it either.
+
+**`plugin remove ../../../anything` deleted that directory.** `filepath.Join`
+cleans a path; it does not contain it. `Install` had the same defect through
+`manifest.Name`, which is chosen by whoever published the plugin. Both ends now
+validate the name against a whitelist and verify the resolved path really is
+under the plugins directory, before any filesystem call.
+
+**Installing a plugin no longer takes the manifest's word for anything.**
+`sha256` is a required field, verified against the executable before the
+install is recorded and again before every call. The executable is copied into
+`<data-dir>/plugins/<name>/bin/` and the stored manifest points there, so what
+runs later is the reviewed bytes rather than whatever sits at an external path
+by then. Manifests are fetched over HTTPS only (`--insecure` for local
+testing), and `plugin install` shows name, version, tools and digest and asks
+first — `--yes` for scripts, and EOF on stdin is a refusal rather than assumed
+consent.
+
+**Recalled memory reaches the model as data, not as more system prompt.**
+`graymatter run` used to concatenate facts under a bare `## Memory` heading, at
+the same authority as the operator's own instructions — so anything that could
+write a fact could plant instructions that survive restarts. Facts now go
+inside a `<memory>` fence with an explicit note that the contents carry no
+authority, flattened to one line each with the delimiters neutralised so a
+stored fact cannot close the block and continue as prompt. Framing is
+mitigation, not a guarantee; the durable control is who can write a fact, which
+is what the authentication above is for.
+
+**`/metrics` was an unbounded allocation and a target list.** Keys came from the
+request path, the request method and the agent ID, and `expvar` entries are
+permanent. Route and method keys now come from fixed sets and agent IDs are
+capped at 1000 distinct buckets, with the rest folded into `other`.
+
+**The REST surface is harder to abuse in small ways.** Request bodies are capped
+at 1 MiB (413 past that). Every response carries `Cache-Control: no-store` and
+`X-Content-Type-Options: nosniff`. Internal failures answer `internal error` and
+log the detail instead of returning `err.Error()`, which carried absolute
+filesystem paths, PIDs and daemon state to whoever could reach the port;
+validation errors stay detailed, because those describe the caller's own input.
+
+**CI and release stopped trusting mutable references.** Every action is pinned
+by commit SHA — `@v4` is whatever commit its owner last moved that tag to, and
+the release job runs with a token that can publish binaries people install with
+`sudo mv /usr/local/bin`. goreleaser is pinned to `v2.17.1` rather than
+`latest`, and both workflows default to `permissions: contents: read`.
+
+**Builds move to Go 1.26.7.** `govulncheck` reported 14 standard-library
+advisories reachable from this code on go1.26.1; release builds were on 1.22,
+worse still. All are fixed at 1.26.6 or earlier. The test matrix keeps 1.23 —
+the minimum `go.mod` declares — and adds 1.26.7 beside it.
+`cmd/graymatter/go.mod` declares `toolchain go1.26.7` so `go install ...@latest`
+produces a patched binary even on an older Go; the root module deliberately
+does not, since forcing a toolchain download on library consumers is not this
+project's call. A blocking `govulncheck` job now scans both modules.
+
+**Smaller holes closed.** The `kg_audit` bucket is capped at 10 000 entries
+(it grew forever) and `audit.Write` returns its error instead of discarding it.
+`sessions logs` refuses a log path that resolves outside `<data-dir>/logs`; the
+path comes back out of bbolt, so it is only as trustworthy as whatever wrote the
+record. The three embedding providers bound how much of an error body they read
+into a message. On Unix, the fallback socket moves from a predictable temp-dir
+path into a `0700` per-UID directory whose mode, ownership and symlink status
+are all verified. `SessionKill` cross-checks the PID against the file
+graymatter wrote when it spawned the session, so a made-up session record is no
+longer a way to have the daemon terminate an arbitrary process. `init --no-path`
+skips the PATH entry.
+
+Known gaps, stated rather than implied: there is no namespace isolation between
+agents, facts carry no provenance, there is no rate limiting, and any process
+running as you can read the daemon token. All four are in the threat model.
+
 ### Documentation
 
 - **`CLAUDE.md` named the wrong Windows transport.** It described daemon
