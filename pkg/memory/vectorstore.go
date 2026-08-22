@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"path/filepath"
+	"sync"
 
 	chromem "github.com/philippgille/chromem-go"
 )
@@ -34,8 +35,17 @@ type VectorStore interface {
 }
 
 // chromemVectorStore wraps chromem-go to satisfy VectorStore.
+//
+// collections is a plain map behind mu. The interface contract above promises
+// concurrent safety and the store delivers on it: Put calls addToVector
+// outside the store mutex, the daemon serves every RPC in its own goroutine,
+// and the background reconcile loop touches the same map. Without mu, two
+// agents writing at once hit "concurrent map read and map write", which is a
+// fatal error no recover() can catch — the daemon dies and takes every
+// client's memory with it.
 type chromemVectorStore struct {
 	db          *chromem.DB
+	mu          sync.Mutex
 	collections map[string]*chromem.Collection
 }
 
@@ -53,22 +63,32 @@ func newChromemVectorStore(dataDir string) (*chromemVectorStore, error) {
 }
 
 func (c *chromemVectorStore) EnsureCollection(name string) error {
-	if _, ok := c.collections[name]; ok {
-		return nil
+	_, err := c.collection(name)
+	return err
+}
+
+// collection returns the named collection, creating it on first use. The lock
+// is held across GetOrCreateCollection so two callers racing on a new
+// collection agree on which handle wins.
+func (c *chromemVectorStore) collection(name string) (*chromem.Collection, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if col, ok := c.collections[name]; ok {
+		return col, nil
 	}
 	col, err := c.db.GetOrCreateCollection(name, nil, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.collections[name] = col
-	return nil
+	return col, nil
 }
 
 func (c *chromemVectorStore) AddDocument(ctx context.Context, collection, id, content string, embedding []float32, metadata map[string]string) error {
-	if err := c.EnsureCollection(collection); err != nil {
+	col, err := c.collection(collection)
+	if err != nil {
 		return err
 	}
-	col := c.collections[collection]
 	return col.AddDocument(ctx, chromem.Document{
 		ID:        id,
 		Content:   content,
@@ -78,10 +98,10 @@ func (c *chromemVectorStore) AddDocument(ctx context.Context, collection, id, co
 }
 
 func (c *chromemVectorStore) Query(ctx context.Context, collection string, embedding []float32, n int) ([]VectorResult, error) {
-	if err := c.EnsureCollection(collection); err != nil {
+	col, err := c.collection(collection)
+	if err != nil {
 		return nil, err
 	}
-	col := c.collections[collection]
 	raw, err := col.QueryEmbedding(ctx, embedding, n, nil, nil)
 	if err != nil {
 		return nil, err
