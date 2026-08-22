@@ -635,12 +635,18 @@ Authorization: Bearer <token>
 
 ```json
 {
-  "requests_total":     {"remember": 120, "recall": 340, "healthz": 5},
-  "request_latency_us": {"remember": 4200, "recall": 1800},
-  "facts_total":        {"stored": 120},
-  "recall_total":       {"served": 340}
+  "requests_total":     {"POST /remember": 120, "GET /recall": 340, "GET /healthz": 5},
+  "request_latency_us": {"POST /remember": 4200, "GET /recall": 1800},
+  "facts_total":        {"planner": 120},
+  "recall_total":       {"planner": 340}
 }
 ```
+
+Keys are bounded. Request keys come from the fixed route and method sets, and
+anything else folds into `other`; agent IDs get their own counter until there
+are 1000 of them, after which the rest fold into `other` too. Both are client
+input, and `expvar` entries are permanent — unbounded keys were a way to grow
+the process heap until it died.
 
 For library users, `memory.StoreConfig` exposes hooks for APM integration:
 
