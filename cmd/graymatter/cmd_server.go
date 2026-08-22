@@ -33,7 +33,9 @@ Routes:
   GET    /recall           ?agent=<id>&q=<query>[&k=<int>]
   POST   /consolidate      {"agent":"<id>"}
   GET    /facts            ?agent=<id>[&limit=<int>]
-  DELETE /forget           {"agent":"<id>","query":"<query>"}
+  DELETE /forget           {"agent":"<id>","id":"<fact-id>"}
+                           or {"agent":"<id>","query":"<q>","confirm":true}
+  DELETE /forget/{id}      ?agent=<id>
   GET    /healthz
 
 Every route except /healthz requires an HTTP bearer token:

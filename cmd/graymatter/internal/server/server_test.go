@@ -308,9 +308,13 @@ func TestForget(t *testing.T) {
 		"text":  "Grass is green.",
 	})
 
-	status, body := doJSON(t, http.MethodDelete, base+"/forget", map[string]string{
-		"agent": "dave",
-		"query": "sky blue",
+	// A similarity delete needs "confirm": true now — the embedder picks the
+	// victim, and there is no undo. See TestForgetByQuery_NeedsConfirmation
+	// for the dry-run half.
+	status, body := doJSON(t, http.MethodDelete, base+"/forget", map[string]any{
+		"agent":   "dave",
+		"query":   "sky blue",
+		"confirm": true,
 	})
 	if status != http.StatusOK {
 		t.Fatalf("forget status = %d; body: %s", status, body)

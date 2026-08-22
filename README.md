@@ -456,6 +456,21 @@ touches the file.
 probes keep working. `/metrics` is **not** — it lists every agent ID the server
 has seen.
 
+Deleting a fact:
+
+```bash
+# Exact, and preferred:
+curl -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/forget/01M0N0T7R...?agent=alice"
+```
+
+`DELETE /forget` with a `query` still deletes the closest match, but it now
+needs `"confirm": true`. Without it the response names the candidate and its
+ID so you can check before committing to it — "closest" is whatever the
+embedder thinks, and there is no undo.
+
+Request bodies are capped at 1 MiB, and every response carries
+`Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
 **Migrating from 0.8.x.** Two defaults changed:
 
 | Before | Now | If you relied on the old behaviour |

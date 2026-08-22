@@ -13,7 +13,9 @@
 //	GET    /recall?agent=<id>&q=<query>[&k=<int>]
 //	POST   /consolidate        body: {"agent":"<id>"}
 //	GET    /facts?agent=<id>[&limit=<int>]
-//	DELETE /forget             body: {"agent":"<id>","query":"<query>"}
+//	DELETE /forget             body: {"agent":"<id>","id":"<fact-id>"}
+//	                           or:   {"agent":"<id>","query":"<q>","confirm":true}
+//	DELETE /forget/{id}?agent=<id>
 //	GET    /healthz
 //
 // Every route except /healthz requires a bearer token (see Option and package
@@ -24,6 +26,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -132,6 +136,7 @@ func New(addr string, store Store, logger *slog.Logger, opts ...Option) *Server 
 	protected.HandleFunc("POST /consolidate", s.handleConsolidate)
 	protected.HandleFunc("GET /facts", s.handleFacts)
 	protected.HandleFunc("DELETE /forget", s.handleForget)
+	protected.HandleFunc("DELETE /forget/{id}", s.handleForgetByID)
 	// /metrics lists every agent ID the server has seen, which is a free
 	// target list for anyone enumerating. It belongs behind the gate too.
 	protected.Handle("GET /metrics", metricsHandler())
@@ -214,7 +219,7 @@ func (s *Server) handleRemember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.Remember(r.Context(), req.Agent, req.Text); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "remember", err)
 		return
 	}
 	s.metrics.recordFact(req.Agent)
@@ -236,7 +241,7 @@ func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := s.store.Recall(r.Context(), agent, query, topK)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "recall", err)
 		return
 	}
 	s.metrics.recordRecall(agent)
@@ -264,7 +269,7 @@ func (s *Server) handleConsolidate(w http.ResponseWriter, r *http.Request) {
 	// have served, and admitted ones where the daemon had no key anyway.
 	// Whoever owns the store owns the policy.
 	if err := s.store.Consolidate(r.Context(), req.Agent); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "consolidate", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -284,7 +289,7 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	facts, err := s.store.List(agent)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "list facts", err)
 		return
 	}
 	if len(facts) > limit {
@@ -308,22 +313,82 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 type forgetRequest struct {
 	Agent string `json:"agent"`
 	Query string `json:"query"`
+
+	// ID deletes exactly that fact and nothing else. Preferred over Query.
+	ID string `json:"id"`
+
+	// Confirm has to be true for a query-based delete to actually delete.
+	// Without it the request is a dry run that names the candidate.
+	Confirm bool `json:"confirm"`
+}
+
+// handleForgetByID deletes one fact by its exact ID. DELETE /forget/{id}.
+//
+// The similarity-based delete below has no undo and picks its victim through
+// an embedder, so there needs to be a way to say exactly which fact to remove.
+func (s *Server) handleForgetByID(w http.ResponseWriter, r *http.Request) {
+	agent := r.URL.Query().Get("agent")
+	id := r.PathValue("id")
+	if agent == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "agent query param and a fact id are required")
+		return
+	}
+
+	// Confirm the fact exists before reporting a deletion, so a caller can
+	// tell "removed it" from "there was nothing there".
+	facts, err := s.store.List(agent)
+	if err != nil {
+		s.writeInternalError(w, "list facts", err)
+		return
+	}
+	for _, f := range facts {
+		if f.ID == id {
+			if err := s.store.Delete(agent, id); err != nil {
+				s.writeInternalError(w, "delete fact", err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "deleted_id": id})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 }
 
 // handleForget deletes the single most-similar fact to the query.
+//
+// "Most similar" is whatever the configured embedder thinks, so an ambiguous
+// query used to silently delete the wrong fact with no way back. The delete
+// now needs "confirm": true; without it the response names the candidate and
+// its ID, which the caller can then pass to DELETE /forget/{id}.
 func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 	var req forgetRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	if req.Agent == "" || req.Query == "" {
-		writeError(w, http.StatusBadRequest, "agent and query are required")
+	if req.Agent == "" {
+		writeError(w, http.StatusBadRequest, "agent is required")
 		return
 	}
+
+	// An exact ID in the body does the same thing as the path form.
+	if req.ID != "" {
+		r.SetPathValue("id", req.ID)
+		q := r.URL.Query()
+		q.Set("agent", req.Agent)
+		r.URL.RawQuery = q.Encode()
+		s.handleForgetByID(w, r)
+		return
+	}
+
+	if req.Query == "" {
+		writeError(w, http.StatusBadRequest, "id or query is required")
+		return
+	}
+
 	// Recall 1 result to find the best match, then delete its fact ID.
 	results, err := s.store.Recall(r.Context(), req.Agent, req.Query, 1)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "recall", err)
 		return
 	}
 	if len(results) == 0 {
@@ -334,13 +399,21 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 	// Find the fact ID by matching the recalled text.
 	facts, err := s.store.List(req.Agent)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeInternalError(w, "list facts", err)
 		return
 	}
 	for _, f := range facts {
 		if f.Text == results[0] {
+			if !req.Confirm {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":    "confirm_required",
+					"candidate": map[string]string{"id": f.ID, "text": f.Text},
+					"hint":      `re-send with "confirm": true, or DELETE /forget/` + f.ID + "?agent=" + req.Agent,
+				})
+				return
+			}
 			if err := s.store.Delete(req.Agent, f.ID); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+				s.writeInternalError(w, "delete fact", err)
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "deleted_id": f.ID})
@@ -353,7 +426,13 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 // --- HTTP utilities ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	// Responses carry stored memory, which is the sensitive part of this
+	// service. Nothing between here and the caller should keep a copy, and
+	// nothing should be free to guess at the content type.
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v) // headers already sent; encoding errors are unrecoverable
 }
@@ -362,8 +441,30 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeInternalError logs the real failure and tells the client nothing.
+//
+// Handlers used to return err.Error() verbatim, and store errors carry
+// absolute filesystem paths, daemon state and bbolt internals — reconnaissance
+// handed to whoever can reach the port. Validation errors are different: those
+// describe the caller's own input, so they stay detailed.
+func (s *Server) writeInternalError(w http.ResponseWriter, op string, err error) {
+	s.logger.Error("request failed", "op", op, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal error")
+}
+
+// maxBodyBytes caps a request body. The largest legitimate body here is one
+// fact, and a megabyte of prose is already an implausible fact.
+const maxBodyBytes = 1 << 20
+
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", maxBodyBytes))
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return false
 	}
