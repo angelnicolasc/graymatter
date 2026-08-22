@@ -79,7 +79,7 @@ func startTestServer(t *testing.T) (baseURL string, cleanup func()) {
 		t.Fatalf("listen: %v", err)
 	}
 
-	srv := New(ln.Addr().String(), testStore{st}, nil)
+	srv := New(ln.Addr().String(), testStore{st}, nil, WithAuthToken(testToken))
 	go func() { _ = srv.Serve(ln) }()
 
 	stop := func() { _ = srv.Shutdown(context.Background()) }
@@ -88,7 +88,19 @@ func startTestServer(t *testing.T) (baseURL string, cleanup func()) {
 	return "http://" + ln.Addr().String(), stop
 }
 
+// testToken is the bearer credential the test server is built with. Every
+// helper below sends it; the tests that care about the gate itself send
+// something else on purpose.
+const testToken = "test-token-0123456789abcdef"
+
 func doJSON(t *testing.T, method, url string, body any) (statusCode int, respBody []byte) {
+	t.Helper()
+	return doJSONAuth(t, method, url, body, testToken)
+}
+
+// doJSONAuth is doJSON with an explicit credential. An empty token sends no
+// Authorization header at all.
+func doJSONAuth(t *testing.T, method, url string, body any, token string) (statusCode int, respBody []byte) {
 	t.Helper()
 	var r io.Reader
 	if body != nil {
@@ -104,6 +116,9 @@ func doJSON(t *testing.T, method, url string, body any) (statusCode int, respBod
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -122,7 +137,7 @@ func TestHealthz_ReportsStoreLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := New(ln.Addr().String(), unreadyStore{err: errStoreGone}, nil)
+	srv := New(ln.Addr().String(), unreadyStore{err: errStoreGone}, nil, WithAuthToken(testToken))
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 
@@ -347,13 +362,17 @@ func TestUnknownRoute(t *testing.T) {
 	base, stop := startTestServer(t)
 	defer stop()
 
-	resp, err := http.Get(base + "/nosuchroute") //nolint:noctx
-	if err != nil {
-		t.Fatalf("get: %v", err)
+	// Authenticated: the route genuinely does not exist.
+	status, _ := doJSON(t, http.MethodGet, base+"/nosuchroute", nil)
+	if status != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown route, got %d", status)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("expected 404 for unknown route, got %d", resp.StatusCode)
+
+	// Unauthenticated: the gate answers first, so an anonymous caller cannot
+	// map the route table by watching 404s and 401s diverge.
+	status, _ = doJSONAuth(t, http.MethodGet, base+"/nosuchroute", nil, "")
+	if status != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated unknown route, got %d", status)
 	}
 }
 

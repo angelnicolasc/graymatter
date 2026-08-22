@@ -242,8 +242,8 @@ GrayMatter speaks plain MCP. If your client isn't on the table above,
 point it at the binary:
 
 ```bash
-graymatter mcp serve              # stdio transport
-graymatter mcp serve --http :8080 # HTTP transport
+graymatter mcp serve                        # stdio transport
+graymatter mcp serve --http 127.0.0.1:8080  # HTTP transport (bearer token required)
 ```
 
 The schema is identical to every other MCP server — `command` +
@@ -413,16 +413,48 @@ graymatter recall   --all "agent" "query"         # merge agent + shared memory
 graymatter checkpoint list    "agent"             # show saved checkpoints
 graymatter checkpoint resume  "agent"             # print latest checkpoint as JSON
 graymatter mcp serve                              # start MCP server (Claude Code / Cursor)
-graymatter mcp serve --http :8080                 # HTTP transport
+graymatter mcp serve --http 127.0.0.1:8080        # HTTP transport
 graymatter export --format obsidian --out ~/vault # dump to Obsidian vault
 graymatter tui                                    # 4-view terminal UI
 graymatter run agent.md [--background]            # run a SKILL.md agent file
 graymatter sessions list                          # list managed agent sessions
 graymatter plugin install manifest.json           # install a plugin
-graymatter server --addr :8080                    # REST API server
+graymatter server                                 # REST API server (127.0.0.1:8080)
 ```
 
 Global flags: `--dir` (data dir), `--quiet`, `--json`
+
+### Network surfaces are authenticated and loopback-only
+
+`graymatter server` and `graymatter mcp serve --http` are the two commands that
+open a port. Both bind `127.0.0.1` and both require an HTTP bearer token:
+
+```bash
+graymatter server                       # 127.0.0.1:8080, token required
+TOKEN=$(cat .graymatter/graymatter.http-token)
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/facts?agent=alice"
+```
+
+The token is 256 bits, generated on first run, printed once, and stored in
+`<data-dir>/graymatter.http-token` (`0600` — a real guarantee on POSIX; on
+Windows the file inherits its parent directory's ACL). Set
+`GRAYMATTER_HTTP_TOKEN` or pass `--token` to supply your own instead; neither
+touches the file.
+
+`/healthz` is the one route that answers without a credential, so liveness
+probes keep working. `/metrics` is **not** — it lists every agent ID the server
+has seen.
+
+**Migrating from 0.8.x.** Two defaults changed:
+
+| Before | Now | If you relied on the old behaviour |
+|---|---|---|
+| `--addr :8080` (every interface) | `--addr 127.0.0.1:8080` | Pass `--addr :8080` explicitly; you get a warning on startup |
+| No authentication | Bearer token required | Send the header, or pass `--no-auth` |
+
+`--no-auth` restores the old unauthenticated behaviour but only on a loopback
+address — the combination that made this a critical finding (no credential,
+reachable from the LAN) is refused outright.
 
 ---
 
@@ -570,10 +602,11 @@ Output: single static binary, ~10 MB, no runtime dependencies.
 ## Metrics & APM hooks
 
 
-The REST server (`graymatter server`) exposes a `/metrics` endpoint powered by Go's standard `expvar` package — zero extra dependencies.
+The REST server (`graymatter server`) exposes a `/metrics` endpoint powered by Go's standard `expvar` package — zero extra dependencies. It sits behind the same bearer token as every other data route, because it names every agent the server has seen.
 
 ```
 GET /metrics
+Authorization: Bearer <token>
 ```
 
 ```json
@@ -693,7 +726,7 @@ GrayMatter saves you conversation history. They stack.
 - [x] MCP server (Claude Code / Cursor) + `memory_reflect` self-edit tool
 - [ ] Knowledge graph — schema, bbolt storage and the TUI view are in, but nodes have no write path in shipped builds, so entity extraction and the graph's Obsidian export never run ([#24](https://github.com/angelnicolasc/graymatter/issues/24))
 - [x] Shared memory across agents (`--shared`, `--all` flags, `__shared__` namespace)
-- [x] REST API server mode (`graymatter server --addr :8080`)
+- [x] REST API server mode (`graymatter server`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)
 - [x] 4-view Bubble Tea TUI (Memory / Sessions / Knowledge Graph / Stats)
 - [x] Context-propagation API — all public methods accept `context.Context` (ctx-first, uniform)

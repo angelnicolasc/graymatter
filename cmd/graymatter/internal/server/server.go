@@ -15,6 +15,10 @@
 //	GET    /facts?agent=<id>[&limit=<int>]
 //	DELETE /forget             body: {"agent":"<id>","query":"<query>"}
 //	GET    /healthz
+//
+// Every route except /healthz requires a bearer token (see Option and package
+// httpauth). /healthz stays open so orchestrators can probe liveness without a
+// credential; it answers "ok" or "store unavailable" and nothing else.
 package server
 
 import (
@@ -26,6 +30,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/httpauth"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -70,10 +75,45 @@ type Server struct {
 	logger  *slog.Logger
 }
 
-// New creates a Server bound to store that will listen on addr (e.g. ":8080").
-func New(addr string, store Store, logger *slog.Logger) *Server {
+// options holds what Option values accumulate into.
+type options struct {
+	token     string
+	anonymous bool
+}
+
+// Option customises a Server at construction. Existing three-argument calls to
+// New keep compiling; without WithAuthToken or WithAnonymousAccess the server
+// is built with no credential to match and therefore rejects every request but
+// /healthz. Failing closed is deliberate: this listener used to serve the whole
+// memory store to anyone who could reach the port.
+type Option func(*options)
+
+// WithAuthToken requires callers to present token as an HTTP bearer
+// credential. The token is compared in constant time.
+func WithAuthToken(token string) Option {
+	return func(o *options) { o.token = token }
+}
+
+// WithAnonymousAccess serves every route without any credential check.
+//
+// This exists so a local single-user setup can keep scripting against the API
+// the way it did before authentication landed. The caller is responsible for
+// making sure the listener is loopback-only — `graymatter server` refuses to
+// combine --no-auth with an address other people can reach.
+func WithAnonymousAccess() Option {
+	return func(o *options) { o.anonymous = true }
+}
+
+// New creates a Server bound to store that will listen on addr
+// (e.g. "127.0.0.1:8080").
+func New(addr string, store Store, logger *slog.Logger, opts ...Option) *Server {
 	if logger == nil {
 		logger = slog.Default()
+	}
+
+	var cfg options
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	m := newServerMetrics("graymatter_server")
@@ -84,14 +124,26 @@ func New(addr string, store Store, logger *slog.Logger) *Server {
 		logger:  logger,
 	}
 
+	// Everything that touches memory goes behind the bearer gate. /healthz is
+	// registered on the outer mux, so it — and only it — answers without one.
+	protected := http.NewServeMux()
+	protected.HandleFunc("POST /remember", s.handleRemember)
+	protected.HandleFunc("GET /recall", s.handleRecall)
+	protected.HandleFunc("POST /consolidate", s.handleConsolidate)
+	protected.HandleFunc("GET /facts", s.handleFacts)
+	protected.HandleFunc("DELETE /forget", s.handleForget)
+	// /metrics lists every agent ID the server has seen, which is a free
+	// target list for anyone enumerating. It belongs behind the gate too.
+	protected.Handle("GET /metrics", metricsHandler())
+
+	var gated http.Handler = protected
+	if !cfg.anonymous {
+		gated = httpauth.Middleware(cfg.token, protected)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.HandleFunc("POST /remember", s.handleRemember)
-	mux.HandleFunc("GET /recall", s.handleRecall)
-	mux.HandleFunc("POST /consolidate", s.handleConsolidate)
-	mux.HandleFunc("GET /facts", s.handleFacts)
-	mux.HandleFunc("DELETE /forget", s.handleForget)
-	mux.Handle("GET /metrics", metricsHandler())
+	mux.Handle("/", gated)
 
 	s.httpSrv = &http.Server{
 		Addr:         addr,
