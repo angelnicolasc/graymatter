@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -153,10 +152,15 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	}
 
 	// Recall relevant memory and inject into system prompt.
+	//
+	// Facts go in as clearly-labelled untrusted data, not as more system
+	// prompt. Anything that can write a fact — another agent, a page an agent
+	// read, the REST or MCP surface — otherwise gets to plant instructions
+	// that persist across restarts and land in every later run.
 	memFacts, _ := store.RecallDefault(ctx, def.Name, def.Task)
 	systemContent := def.SystemPrompt
-	if len(memFacts) > 0 {
-		systemContent += "\n\n## Memory\n" + strings.Join(memFacts, "\n")
+	if block := BuildMemoryBlock(memFacts); block != "" {
+		systemContent += "\n\n" + block
 	}
 
 	// Reconstruct message history (prior turns) and append the new user task.
