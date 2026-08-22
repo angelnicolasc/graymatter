@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Nothing here publishes anything. upload-artifact needs no write scope.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (${{ matrix.os }} / go${{ matrix.go }})
@@ -14,13 +18,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.22", "1.23"]
+        # 1.23 is the minimum go.mod declares, so it stays in the matrix to
+        # keep that promise honest. 1.26.7 is the toolchain the released
+        # binaries are built with; every stdlib advisory govulncheck reported
+        # against 1.26.1 is fixed at 1.26.6 or earlier.
+        go: ["1.23", "1.26.7"]
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit SHA. A tag like @v4 points at whatever
+      # commit its owner last moved it to; the version comment is for humans,
+      # the SHA is what runs.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Go ${{ matrix.go }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -38,7 +49,7 @@ jobs:
       - name: Test CLI module with coverage
         working-directory: cmd/graymatter
         shell: bash
-        run: go test -race -count=1 -timeout=300s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/... ./internal/kg/... ./internal/server/... ./internal/plugin/... ./internal/mcp/... ./internal/daemon/...
+        run: go test -race -count=1 -timeout=300s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/... ./internal/kg/... ./internal/server/... ./internal/plugin/... ./internal/mcp/... ./internal/daemon/... ./internal/httpauth/...
 
       # The two coverage steps above enumerate packages explicitly, which left
       # the root package and the CLI entrypoint untested on every platform:
@@ -78,8 +89,8 @@ jobs:
           fi
 
       - name: Upload coverage reports
-        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.23'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.26.7'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-report
           path: |
@@ -97,17 +108,42 @@ jobs:
           $env:CGO_ENABLED = "0"
           go build -ldflags="-s -w" -o NUL ./cmd/graymatter
 
+  # A blocking gate, not a report. govulncheck only flags advisories with a
+  # call path reachable from this code, so a failure here means a vulnerability
+  # someone can actually reach, not a version-number mismatch.
+  vulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.7"
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Scan core library
+        run: govulncheck ./...
+
+      - name: Scan CLI module
+        working-directory: cmd/graymatter
+        run: govulncheck ./...
+
   bench:
     name: Benchmarks (non-blocking)
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.23"
+          go-version: "1.26.7"
           cache: true
 
       - name: Run benchmarks (core)
