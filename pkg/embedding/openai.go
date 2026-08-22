@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -90,8 +89,8 @@ func (o *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai embed: status %d: %s", resp.StatusCode, string(data))
+		body := errorBody(resp.Body)
+		return nil, fmt.Errorf("openai embed: status %d: %s", resp.StatusCode, body)
 	}
 
 	var result openaiEmbedResponse

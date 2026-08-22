@@ -8,9 +8,30 @@ package embedding
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
+
+// maxErrorBodyBytes caps how much of a non-200 response body goes into an
+// error message.
+//
+// The three HTTP providers used to io.ReadAll an error body whole. The Ollama
+// URL is user-configurable and the others sit behind whatever proxy the
+// network imposes, so a hostile or broken endpoint could answer 500 with an
+// endless chunked body and exhaust the memory of whatever is embedding. Eight
+// kibibytes is more than any real error message needs.
+const maxErrorBodyBytes = 8 << 10
+
+// errorBody reads a bounded prefix of an error response for use in a message.
+func errorBody(r io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(r, maxErrorBodyBytes))
+	if err != nil && len(data) == 0 {
+		return fmt.Sprintf("<unreadable: %v>", err)
+	}
+	return string(data)
+}
 
 // Mode mirrors graymatter.EmbeddingMode to avoid circular imports.
 type Mode int
