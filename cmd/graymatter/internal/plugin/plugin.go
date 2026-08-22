@@ -21,11 +21,48 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const pluginTimeout = 30 * time.Second
+
+// pluginNameRe is the whitelist for a plugin identifier. A plugin name becomes
+// a directory name under the plugins dir, and filepath.Join cleans a path
+// without containing it: Join(pluginsDir, "../../../elsewhere") happily points
+// outside the store. Both Install (which takes the name from a manifest
+// written by whoever published the plugin) and Remove (which takes it from the
+// command line) go through here.
+//
+// Letters, digits, '-' and '_', starting with a letter or digit. No
+// separators, no dots, so ".." cannot be spelled at all.
+var pluginNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// pluginPath resolves the on-disk directory for a plugin name.
+//
+// The regex is the real gate; the containment check below is defence in depth,
+// so that loosening the pattern later cannot quietly reintroduce traversal. It
+// compares cleaned absolute paths, which does not follow symlinks — a
+// pre-existing symlink inside the plugins dir is out of scope here, since
+// anyone who can plant one can write to the plugins dir directly.
+func pluginPath(name, pluginDir string) (string, error) {
+	if !pluginNameRe.MatchString(name) {
+		return "", fmt.Errorf(
+			"plugin %q: invalid name (letters, digits, '-' and '_' only, "+
+				"starting with a letter or digit, at most 64 characters)", name)
+	}
+
+	absRoot, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return "", fmt.Errorf("plugin %q: resolve plugins dir: %w", name, err)
+	}
+	dir := filepath.Join(absRoot, name)
+	if dir == absRoot || !strings.HasPrefix(dir, absRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("plugin %q: resolved path escapes the plugins directory", name)
+	}
+	return dir, nil
+}
 
 // MCPToolSpec is the tool definition a plugin registers in the MCP server.
 type MCPToolSpec struct {
@@ -86,6 +123,14 @@ func Install(url, pluginDir string) error {
 		return fmt.Errorf("plugin install: manifest missing required field: binary")
 	}
 
+	// The name comes from a JSON file written by whoever published the plugin,
+	// and it used to become a directory path verbatim. Validate it before any
+	// filesystem call, so a refused install leaves nothing behind.
+	dir, err := pluginPath(manifest.Name, pluginDir)
+	if err != nil {
+		return fmt.Errorf("plugin install: %w", err)
+	}
+
 	// If binary path is relative, resolve it relative to the manifest location.
 	if !filepath.IsAbs(manifest.Binary) {
 		base := filepath.Dir(url)
@@ -102,7 +147,6 @@ func Install(url, pluginDir string) error {
 	}
 
 	// Persist manifest.
-	dir := filepath.Join(pluginDir, manifest.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("plugin install: mkdir: %w", err)
 	}
@@ -145,8 +189,16 @@ func List(pluginDir string) ([]PluginManifest, error) {
 }
 
 // Remove uninstalls a plugin by name from pluginDir.
+//
+// The name is validated before it reaches os.RemoveAll. It used to be joined
+// straight onto pluginDir, which made `graymatter plugin remove ../../../x` a
+// recursive delete of any directory the user could reach — no undo, no
+// recycle bin.
 func Remove(name, pluginDir string) error {
-	dir := filepath.Join(pluginDir, name)
+	dir, err := pluginPath(name, pluginDir)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q not installed", name)
 	}
