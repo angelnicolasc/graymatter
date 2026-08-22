@@ -140,8 +140,7 @@ func (b *DirectBackend) AuditWrite(e audit.Entry) error {
 	if store == nil {
 		return nil
 	}
-	audit.Write(store.DB(), e)
-	return nil
+	return audit.Write(store.DB(), e)
 }
 
 func (b *DirectBackend) KGLink(from, to, relation string) error {

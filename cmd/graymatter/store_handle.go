@@ -231,8 +231,7 @@ func (d *directStore) KGLink(from, to, relation string) error {
 }
 
 func (d *directStore) AuditWrite(e audit.Entry) error {
-	audit.Write(d.store.DB(), e)
-	return nil
+	return audit.Write(d.store.DB(), e)
 }
 
 func (d *directStore) TokenSummary(days int) (harness.TokenUsageSummary, error) {
