@@ -418,7 +418,7 @@ graymatter export --format obsidian --out ~/vault # dump to Obsidian vault
 graymatter tui                                    # 4-view terminal UI
 graymatter run agent.md [--background]            # run a SKILL.md agent file
 graymatter sessions list                          # list managed agent sessions
-graymatter plugin install manifest.json           # install a plugin
+graymatter plugin install manifest.json           # install a plugin (sha256 required, asks first)
 graymatter server                                 # REST API server (127.0.0.1:8080)
 ```
 

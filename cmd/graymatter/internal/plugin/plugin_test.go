@@ -7,8 +7,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
+
+// mustHash returns the SHA-256 a manifest has to declare for path. Manifests
+// carry a mandatory digest now, so every test that builds one needs this.
+func mustHash(t *testing.T, path string) string {
+	t.Helper()
+	sum, err := fileSHA256(path)
+	if err != nil {
+		t.Fatalf("hash %s: %v", path, err)
+	}
+	return sum
+}
 
 // buildEchoPlugin compiles a minimal plugin binary that echoes the tool name.
 // Skipped if the Go compiler is unavailable.
@@ -75,6 +87,7 @@ func fakeManifest(t *testing.T, dir, name string, tools []MCPToolSpec) (manifest
 		Version: "1.0.0",
 		Binary:  binPath,
 		Tools:   tools,
+		SHA256:  mustHash(t, binPath),
 	}
 	data, _ := json.Marshal(m)
 	manifestPath = filepath.Join(dir, name+".json")
@@ -116,7 +129,11 @@ func TestInstall_MissingBinary(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 
-	m := PluginManifest{Name: "broken", Version: "1.0.0", Binary: filepath.Join(dir, "nonexistent"), Tools: []MCPToolSpec{{Name: "t"}}}
+	m := PluginManifest{
+		Name: "broken", Version: "1.0.0", Binary: filepath.Join(dir, "nonexistent"),
+		Tools:  []MCPToolSpec{{Name: "t"}},
+		SHA256: strings.Repeat("0", 64),
+	}
 	data, _ := json.Marshal(m)
 	mp := filepath.Join(dir, "broken.json")
 	_ = os.WriteFile(mp, data, 0o644)
@@ -130,7 +147,7 @@ func TestInstall_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 
-	m := map[string]any{"version": "1.0.0", "binary": "/some/bin"}
+	m := map[string]any{"version": "1.0.0", "binary": "/some/bin", "sha256": strings.Repeat("0", 64)}
 	data, _ := json.Marshal(m)
 	mp := filepath.Join(dir, "noname.json")
 	_ = os.WriteFile(mp, data, 0o644)
@@ -150,7 +167,11 @@ func TestInstall_RelativeBinary(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(dir, binName), []byte("#!/bin/sh\n"), 0o755)
 
-	m := PluginManifest{Name: "rel-test", Version: "1.0.0", Binary: binName, Tools: []MCPToolSpec{{Name: "rel_tool"}}}
+	m := PluginManifest{
+		Name: "rel-test", Version: "1.0.0", Binary: binName,
+		Tools:  []MCPToolSpec{{Name: "rel_tool"}},
+		SHA256: mustHash(t, filepath.Join(dir, binName)),
+	}
 	data, _ := json.Marshal(m)
 	mp := filepath.Join(dir, "rel-test.json")
 	_ = os.WriteFile(mp, data, 0o644)
@@ -165,6 +186,18 @@ func TestInstall_RelativeBinary(t *testing.T) {
 	}
 	if !filepath.IsAbs(plugins[0].Binary) {
 		t.Errorf("stored binary path should be absolute, got %q", plugins[0].Binary)
+	}
+	// Install copies the executable into the plugin's own bin/ directory, so
+	// what runs later cannot be swapped by touching an external path.
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if !strings.HasPrefix(plugins[0].Binary, absPluginDir+string(os.PathSeparator)) {
+		t.Errorf("stored binary %q is outside the plugins dir %q", plugins[0].Binary, absPluginDir)
+	}
+	if _, err := os.Stat(plugins[0].Binary); err != nil {
+		t.Errorf("installed binary missing: %v", err)
 	}
 }
 
@@ -249,6 +282,7 @@ func TestCall_EchoPlugin(t *testing.T) {
 		Name:   "echo",
 		Binary: binPath,
 		Tools:  []MCPToolSpec{{Name: "echo_hello"}},
+		SHA256: mustHash(t, binPath),
 	}
 
 	resp, err := Call(context.Background(), manifest, "echo_hello", map[string]any{"msg": "hi"})

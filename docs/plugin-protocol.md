@@ -44,6 +44,7 @@ Install a plugin by providing a manifest JSON file:
   "version":     "1.0.0",
   "description": "Greets a person by name.",
   "binary":      "./plugin-hello",
+  "sha256":      "3f786850e387550fdab836ed7e6dc881de23001b…",
   "tools": [
     {
       "name":        "hello_greet",
@@ -58,21 +59,56 @@ Install a plugin by providing a manifest JSON file:
 | `name`        | `string`       | yes      | Unique plugin identifier (alphanumeric + hyphens).             |
 | `version`     | `string`       | no       | Semver string for informational display.                       |
 | `description` | `string`       | no       | Human-readable description shown in `plugin list`.             |
-| `binary`      | `string`       | yes      | Path to the plugin executable. Relative paths are resolved relative to the manifest file location. HTTP installs require an absolute path. |
+| `binary`      | `string`       | yes      | Path to the plugin executable. Relative paths are resolved relative to the manifest file location. Remote installs require an absolute path. |
+| `sha256`      | `string`       | yes      | Lowercase hex SHA-256 of the executable. Verified before install and again before every call. |
 | `tools`       | `[]ToolSpec`   | no       | MCP tools this plugin registers. Each entry has `name` and `description`. |
+
+### Integrity and trust
+
+Installing a plugin grants code execution on the user's machine, so the install
+path is deliberately strict:
+
+- **`sha256` is required.** Nothing else ties a manifest to the bytes it will
+  run. The digest is checked before the install is recorded, and again before
+  every call — a binary swapped afterwards does not get to run.
+- **The executable is copied into the store.** After install, `binary` points at
+  `<data-dir>/plugins/<name>/bin/<file>`. A manifest can name any executable on
+  the machine, but what runs later is the copy that was verified, not whatever
+  is at the original path by then.
+- **Manifests are fetched over HTTPS only.** `http://` needs `--insecure`, which
+  exists for testing against a local server.
+- **`graymatter plugin install` asks first**, showing name, version, tools and
+  digest. `--yes` skips the prompt for scripted installs.
+
+Computing the digest:
+
+```bash
+sha256sum ./plugin-hello          # Linux / macOS
+Get-FileHash ./plugin-hello.exe   # Windows PowerShell
+```
+
+If you get it wrong, the error prints the digest the file actually has, which
+is the value to paste back into the manifest.
 
 ---
 
 ## Lifecycle
+
+> **Status.** `install`, `list` and `remove` are wired up today. The MCP server
+> does not yet register plugin tools, so nothing in the shipped binary reaches
+> `Call` — the diagram below describes the intended path, not a code path you
+> can exercise right now.
 
 ```
 graymatter mcp serve
 │
 ├─ receives tool call for "hello_greet"
 │
-├─ FindByTool("hello_greet", manifests)  →  PluginManifest{Binary: "/path/plugin-hello"}
+├─ FindByTool("hello_greet", manifests)  →  PluginManifest{Binary: ".../plugins/hello/bin/plugin-hello"}
 │
-├─ exec.CommandContext(ctx, "/path/plugin-hello")
+├─ VerifyBinary(manifest)  →  sha256 must still match the manifest
+│
+├─ exec.CommandContext(ctx, ".../plugins/hello/bin/plugin-hello")
 │    stdin  ← {"tool":"hello_greet","input":{"name":"Alice"}}\n
 │    stdout → {"output":"Hello, Alice!"}\n
 │    30-second context timeout
@@ -99,6 +135,8 @@ CGO_ENABLED=0 go build -o plugin-hello ./examples/plugin-hello
 Install:
 
 ```bash
+# The committed manifest ships a placeholder digest; put the real one in first.
+sha256sum ./plugin-hello
 graymatter plugin install examples/plugin-hello/manifest.json
 ```
 

@@ -156,6 +156,9 @@ func TestInstall_RefusesTraversalName(t *testing.T) {
 				Version: "1.0.0",
 				Binary:  binPath,
 				Tools:   []MCPToolSpec{{Name: "evil_tool"}},
+				// A correct digest, so the traversing name is the only thing
+				// left for Install to object to.
+				SHA256: mustHash(t, binPath),
 			})
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
