@@ -97,9 +97,19 @@ this". Treat the whole store at the trust level of its least trusted writer.
 
 **Same-user processes are inside the boundary.** The daemon's token sits in a
 file readable by the user who owns the store, by design. Any process running as
-that user can read it and drive the store, including `Shutdown` and
-`SessionKill`. GrayMatter is not a defence against malware already running as
-you.
+that user can read it and drive the store, including `Shutdown`. GrayMatter is
+not a defence against malware already running as you.
+
+`SessionKill` is narrowed anyway: it will only terminate a PID that matches the
+PID file graymatter wrote when it spawned that session, so an RPC client cannot
+turn a made-up session record into "kill this arbitrary process for me". That
+closes the RPC surface as a kill primitive; it does not stop a same-user
+process that can write both the record and the file.
+
+**`init` puts the executable's directory on your PATH.** On Windows that is
+`HKCU\Environment`. If that directory is writable by anyone else, it becomes a
+hijack point for every process that later resolves a command through it. Pass
+`--no-path` to skip it, or install into a directory only you can write.
 
 **`0600` is POSIX-only.** On Windows, the discovery file and the HTTP token file
 inherit their parent directory's ACL. The mode passed to `os.WriteFile` does
