@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 )
 
 func sessionsCmd() *cobra.Command {
@@ -91,9 +92,11 @@ func sessionsLogsCmd() *cobra.Command {
 				if s.LogFile == "" {
 					return fmt.Errorf("session %q was not started in background mode (no log file)", sessionID)
 				}
-				data, err := os.ReadFile(s.LogFile)
+				// The path comes back out of bbolt, so it is only as
+				// trustworthy as whatever wrote the session record.
+				data, err := harness.ReadSessionLog(dataDir, s.LogFile)
 				if err != nil {
-					return fmt.Errorf("read log file %q: %w", s.LogFile, err)
+					return err
 				}
 				_, err = cmd.OutOrStdout().Write(data)
 				return err
@@ -148,6 +151,3 @@ func formatAge(t time.Time) string {
 		return t.Format("2006-01-02 15:04")
 	}
 }
-
-// Ensure os is used (needed for json output path via os.Stdout fallback).
-var _ = os.Stdout
