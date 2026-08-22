@@ -42,6 +42,12 @@ const binSubdir = "bin"
 // sha256Re matches a lowercase hex SHA-256 digest.
 var sha256Re = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
+// placeholderSHA256 is what an example manifest carries when the digest cannot
+// be known in advance, because it belongs to a binary the reader compiles.
+// Install recognises it and says so rather than reporting a mismatch against
+// 64 zeros, which reads like a broken example.
+const placeholderSHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
 // pluginNameRe is the whitelist for a plugin identifier. A plugin name becomes
 // a directory name under the plugins dir, and filepath.Join cleans a path
 // without containing it: Join(pluginsDir, "../../../elsewhere") happily points
@@ -216,6 +222,16 @@ func Install(url, pluginDir string, opts ...InstallOption) error {
 		return fmt.Errorf("plugin install: hash binary: %w", err)
 	}
 	if got != manifest.SHA256 {
+		// A manifest for a binary the user compiles themselves cannot ship with
+		// a real digest, so the examples carry placeholderSHA256. Reporting
+		// that as an ordinary mismatch against 64 zeros reads like a bug in the
+		// example; name it, and hand over the value to paste.
+		if manifest.SHA256 == placeholderSHA256 {
+			return fmt.Errorf(
+				"plugin install: manifest %q still carries the placeholder sha256. "+
+					"The digest depends on the binary you build, so it cannot ship in the file. "+
+					"Set \"sha256\" to %s and install again", url, got)
+		}
 		return fmt.Errorf(
 			"plugin install: binary %q does not match the manifest: sha256 is %s, manifest says %s",
 			source, got, manifest.SHA256)
