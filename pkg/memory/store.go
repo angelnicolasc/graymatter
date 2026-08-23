@@ -414,6 +414,22 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 		if b == nil {
 			return nil
 		}
+		// Update, never create.
+		//
+		// Recall bumps the access counter of every fact it returns from a
+		// detached goroutine, so a Delete can land between the caller reading
+		// a fact and that write arriving. bolt's Put does not care whether the
+		// key still exists, so the writeback used to bring the fact back —
+		// after the store had already reported it deleted.
+		//
+		// That made forget unreliable on every path built on it: `graymatter
+		// forget`, DELETE /forget, and memory_reflect's forget and update, all
+		// of which recall or list before they delete. Nothing creates a fact
+		// through here — Put is the creation path — so refusing to write a key
+		// that is gone costs nothing and closes the window.
+		if b.Get([]byte(f.ID)) == nil {
+			return nil
+		}
 		data, err := f.marshal()
 		if err != nil {
 			return err

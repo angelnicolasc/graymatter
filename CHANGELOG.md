@@ -104,6 +104,16 @@ produces a patched binary even on an older Go; the root module deliberately
 does not, since forcing a toolchain download on library consumers is not this
 project's call. A blocking `govulncheck` job now scans both modules.
 
+**`forget` now sticks.** Recall bumps the access counter of every fact it
+returns from a detached goroutine, and bolt's `Put` does not care whether the
+key still exists — so a writeback landing after a delete brought the fact back,
+*after* the store had reported it gone. Every deletion path was affected, since
+all of them recall or list before they delete: `graymatter forget`, both
+`DELETE /forget` routes, and `memory_reflect`'s forget and update. `UpdateFact`
+now refuses to write a key that is no longer there; nothing creates a fact
+through it, so the guard costs nothing. Caught by CI on one matrix entry, not
+by the local runs.
+
 **Smaller holes closed.** The `kg_audit` bucket is capped at 10 000 entries
 (it grew forever) and `audit.Write` returns its error instead of discarding it.
 `sessions logs` refuses a log path that resolves outside `<data-dir>/logs`; the
