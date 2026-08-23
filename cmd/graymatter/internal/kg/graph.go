@@ -26,7 +26,7 @@ var (
 // Node represents a named entity in the knowledge graph.
 type Node struct {
 	ID         string    `json:"id"`
-	Label      string    `json:"label"`      // e.g. "Maria", "sales-closer"
+	Label      string    `json:"label"`       // e.g. "Maria", "sales-closer"
 	EntityType string    `json:"entity_type"` // person/project/decision/preference/fact
 	FirstSeen  time.Time `json:"first_seen"`
 	LastSeen   time.Time `json:"last_seen"`
@@ -103,6 +103,15 @@ func (g *Graph) Upsert(node Node) error {
 
 // Link inserts or updates an edge between two nodes.
 // Edges are keyed by "from|to|relation" so duplicate links upsert, not append.
+//
+// Endpoints that do not exist yet are auto-upserted as placeholder nodes
+// ({Label: id, EntityType: "unknown"}) inside the same transaction. Agents
+// legitimately link before any extractor ran, and an edge whose endpoints are
+// missing is invisible to every traversal while still occupying storage —
+// the dangling-edge class behind issue #24. Creating the endpoints keeps the
+// invariant "every edge is traversable" unconditional; rejecting the link
+// instead would punish exactly the caller (link-before-extract) the tool is
+// meant to serve.
 func (g *Graph) Link(edge Edge) error {
 	if edge.From == "" || edge.To == "" {
 		return fmt.Errorf("kg: link: From and To must not be empty")
@@ -110,17 +119,38 @@ func (g *Graph) Link(edge Edge) error {
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = time.Now().UTC()
 	}
+	created := edge.CreatedAt
 	if edge.Weight == 0 {
 		edge.Weight = 1.0
 	}
 	key := edgeKey(edge.From, edge.To, edge.Relation)
 	return g.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketEdges)
+		nodes := tx.Bucket(bucketNodes)
+		for _, id := range [2]string{edge.From, edge.To} {
+			if nodes.Get([]byte(id)) != nil {
+				continue
+			}
+			placeholder := Node{
+				ID:         id,
+				Label:      id,
+				EntityType: "unknown",
+				FirstSeen:  created,
+				LastSeen:   created,
+				Weight:     1.0,
+			}
+			data, err := json.Marshal(placeholder)
+			if err != nil {
+				return fmt.Errorf("kg: link: marshal placeholder node %q: %w", id, err)
+			}
+			if err := nodes.Put([]byte(id), data); err != nil {
+				return err
+			}
+		}
 		data, err := json.Marshal(edge)
 		if err != nil {
 			return err
 		}
-		return b.Put([]byte(key), data)
+		return tx.Bucket(bucketEdges).Put([]byte(key), data)
 	})
 }
 

@@ -78,6 +78,9 @@ type KGLinkResponse struct{}
 type KGUpsertRequest struct{ ID, Label, EntityType string }
 type KGUpsertResponse struct{}
 
+type KGExportObsidianRequest struct{ OutDir string }
+type KGExportObsidianResponse struct{}
+
 type AuditWriteRequest struct{ E audit.Entry }
 type AuditWriteResponse struct{}
 
@@ -195,6 +198,17 @@ func (h *Host) KGUpsert(req *KGUpsertRequest, resp *KGUpsertResponse) error {
 		return errNoKG
 	}
 	return h.adapter.UpsertNode(req.ID, req.Label, req.EntityType)
+}
+
+// KGExportObsidian writes the graph's entity notes and canvas into outDir,
+// next to whatever the facts export produced. Runs host-side because the
+// graph lives on the daemon's bbolt handle; only the destination path
+// crosses the wire.
+func (h *Host) KGExportObsidian(req *KGExportObsidianRequest, resp *KGExportObsidianResponse) error {
+	if h.graph == nil {
+		return errNoKG
+	}
+	return h.graph.ExportObsidian(req.OutDir)
 }
 
 // AuditWrite records an agent self-edit event.

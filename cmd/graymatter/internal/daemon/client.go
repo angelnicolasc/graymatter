@@ -233,6 +233,11 @@ func (c *Client) KGUpsert(id, label, entityType string) error {
 	return c.hostCall("KGUpsert", &KGUpsertRequest{ID: id, Label: label, EntityType: entityType}, &KGUpsertResponse{})
 }
 
+// KGExportObsidian writes the daemon's graph entities and canvas into outDir.
+func (c *Client) KGExportObsidian(outDir string) error {
+	return c.hostCall("KGExportObsidian", &KGExportObsidianRequest{OutDir: outDir}, &KGExportObsidianResponse{})
+}
+
 // AuditWrite records an agent self-edit event.
 func (c *Client) AuditWrite(e audit.Entry) error {
 	return c.hostCall("AuditWrite", &AuditWriteRequest{E: e}, &AuditWriteResponse{})

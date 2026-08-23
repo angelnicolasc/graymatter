@@ -48,6 +48,7 @@ type cliStore interface {
 	SessionResolve(agentID, sessionID string) (string, error)
 	KGNodes() ([]kg.Node, error)
 	KGLink(from, to, relation string) error
+	ExportGraphObsidian(outDir string) error
 	AuditWrite(e audit.Entry) error
 	TokenSummary(days int) (harness.TokenUsageSummary, error)
 	TokenRecord(agent, model string, input, output, cacheRead, cacheWrite uint64) error
@@ -72,6 +73,12 @@ type daemonStore struct {
 }
 
 func (d daemonStore) IsReadOnly() bool { return false }
+
+// ExportGraphObsidian runs host-side: the graph lives on the daemon's bbolt
+// handle, so only the destination path crosses the wire.
+func (d daemonStore) ExportGraphObsidian(outDir string) error {
+	return d.Client.KGExportObsidian(outDir)
+}
 
 // Ready uses the RPC protocol ping, which is the cheapest call that proves the
 // daemon is both reachable and speaking a compatible protocol.
@@ -228,6 +235,16 @@ func (d *directStore) KGLink(from, to, relation string) error {
 		return fmt.Errorf("knowledge graph not available: %w", err)
 	}
 	return kg.NewGraphAdapter(g).LinkNodes(from, to, relation)
+}
+
+// ExportGraphObsidian writes the graph's entity notes and canvas into outDir.
+// Direct mode opens the graph on this process's bbolt handle.
+func (d *directStore) ExportGraphObsidian(outDir string) error {
+	g, err := kg.Open(d.store.DB())
+	if err != nil {
+		return fmt.Errorf("knowledge graph not available: %w", err)
+	}
+	return g.ExportObsidian(outDir)
 }
 
 func (d *directStore) AuditWrite(e audit.Entry) error {

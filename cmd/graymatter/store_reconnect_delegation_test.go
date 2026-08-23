@@ -108,6 +108,11 @@ func (r *recordingStore) KGLink(from, to, relation string) error {
 	r.rec("KGLink", from, to, relation)
 	return nil
 }
+
+func (r *recordingStore) ExportGraphObsidian(outDir string) error {
+	r.rec("ExportGraphObsidian", outDir)
+	return nil
+}
 func (r *recordingStore) AuditWrite(e audit.Entry) error {
 	r.rec("AuditWrite", e.Action)
 	return nil
@@ -164,6 +169,7 @@ func TestReconnectingStore_DelegatesEveryMethod(t *testing.T) {
 		{"SessionSave", func(r *reconnectingStore) { _ = r.SessionSave(harness.HarnessSession{ID: "sess-1"}) }, []any{"sess-1"}},
 		{"KGNodes", func(r *reconnectingStore) { _, _ = r.KGNodes() }, nil},
 		{"KGLink", func(r *reconnectingStore) { _ = r.KGLink("from-1", "to-2", "rel-3") }, []any{"from-1", "to-2", "rel-3"}},
+		{"ExportGraphObsidian", func(r *reconnectingStore) { _ = r.ExportGraphObsidian("out-1") }, []any{"out-1"}},
 		{"AuditWrite", func(r *reconnectingStore) { _ = r.AuditWrite(audit.Entry{Action: "act-1"}) }, []any{"act-1"}},
 		{"TokenSummary", func(r *reconnectingStore) { _, _ = r.TokenSummary(30) }, []any{30}},
 		{"TokenRecord", func(r *reconnectingStore) {

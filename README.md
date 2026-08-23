@@ -425,6 +425,7 @@ graymatter checkpoint resume  "agent"             # print latest checkpoint as J
 graymatter mcp serve                              # start MCP server (Claude Code / Cursor)
 graymatter mcp serve --http 127.0.0.1:8080        # HTTP transport
 graymatter export --format obsidian --out ~/vault # dump to Obsidian vault
+graymatter export --format obsidian --include-graph --out ~/vault # + entities & canvas
 graymatter tui                                    # 4-view terminal UI
 graymatter run agent.md [--background]            # run a SKILL.md agent file
 graymatter sessions list                          # list managed agent sessions

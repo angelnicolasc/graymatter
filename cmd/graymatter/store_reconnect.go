@@ -264,6 +264,10 @@ func (r *reconnectingStore) KGLink(from, to, relation string) error {
 	return r.do(func(s cliStore) error { return s.KGLink(from, to, relation) })
 }
 
+func (r *reconnectingStore) ExportGraphObsidian(outDir string) error {
+	return r.do(func(s cliStore) error { return s.ExportGraphObsidian(outDir) })
+}
+
 func (r *reconnectingStore) AuditWrite(e audit.Entry) error {
 	return r.do(func(s cliStore) error { return s.AuditWrite(e) })
 }

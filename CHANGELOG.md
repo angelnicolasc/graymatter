@@ -10,6 +10,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`graymatter export --include-graph`** — the Obsidian export now writes the
+  knowledge graph alongside facts: one entity note per node (frontmatter with
+  type, first/last seen, weight) plus an Obsidian canvas. Works through the
+  daemon too; only the destination path crosses the wire. Requires
+  `--format obsidian`.
+- **`Graph.Link` never leaves dangling edges** — endpoints that do not exist
+  are auto-upserted as placeholder nodes (`EntityType: "unknown"`) inside the
+  same transaction, so every edge is traversable no matter when the agent
+  links relative to extraction.
+- **Wiring contract tests** pin what shipped builds do and do not do with the
+  knowledge graph: defaults never auto-wire extraction, explicit `SetKG`
+  drives node upserts during consolidation, and today's engine has no path
+  that creates edges (documented before the wiring round changes it).
 - **`graymatter doctor --audit [path]`** — free auditor for instruction
   documents, no store or adoption required. Reports approx token cost per
   prompt (tokenizer declared in every output), near-duplicate paragraphs
