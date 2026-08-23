@@ -1,0 +1,105 @@
+{"id":"x001","text":"Maria Rodriguez took over the pricing review after the last reorg.","gold":[{"id":"maria rodriguez","label":"Maria Rodriguez","type":"person"}]}
+{"id":"x002","text":"Diego Fernandez and Priya Nataraj co-own the vendor evaluation.","gold":[{"id":"diego fernandez","label":"Diego Fernandez","type":"person"},{"id":"priya nataraj","label":"Priya Nataraj","type":"person"}]}
+{"id":"x003","text":"Our CTO prefers written updates over standing meetings.","gold":[{"id":"cto","label":"CTO","type":"role"}]}
+{"id":"x004","text":"Send the onboarding checklist to @nick before Friday.","gold":[{"id":"@nick","label":"@nick","type":"person"}]}
+{"id":"x005","text":"Northwind Labs signed the data processing addendum yesterday.","gold":[{"id":"northwind labs","label":"Northwind Labs","type":"organization"}]}
+{"id":"x006","text":"Acme Corp renewed at the enterprise tier with a 24-month clause.","gold":[{"id":"acme corp","label":"Acme Corp","type":"organization"}]}
+{"id":"x007","text":"The migration deadline moved to 2026-11-02 without slack.","gold":[{"id":"2026-11-02","label":"2026-11-02","type":"date"}]}
+{"id":"x008","text":"Reference deck lives at https://drive.example.com/mba/strategy-deck for reviewers.","gold":[{"id":"https://drive.example.com/mba/strategy-deck","label":"https://drive.example.com/mba/strategy-deck","type":"reference"}]}
+{"id":"x009","text":"Professor Whitfield said \"always cite the source dataset\" during the seminar.","gold":[{"id":"professor whitfield","label":"Professor Whitfield","type":"person"},{"id":"always cite the source dataset","label":"always cite the source dataset","type":"preference"}]}
+{"id":"x010","text":"The Atlas Migration finished ahead of schedule.","gold":[{"id":"atlas migration","label":"Atlas Migration","type":"project"}]}
+{"id":"x011","text":"Kubernetes clusters were upgraded; Kubernetes docs were linked from the runbook.","gold":[{"id":"kubernetes","label":"Kubernetes","type":"fact"}]}
+{"id":"x012","text":"Valentina Ruiz presented the capstone outline to the committee.","gold":[{"id":"valentina ruiz","label":"Valentina Ruiz","type":"person"}]}
+{"id":"x013","text":"Golden Harvest Foods requested a joint case study.","gold":[{"id":"golden harvest foods","label":"golden harvest foods","type":"organization"}]}
+{"id":"x014","text":"We reviewed Porter five forces today.","gold":[]}
+{"id":"x015","text":"Deploy the staging build after the smoke suite passes.","gold":[]}
+{"id":"x016","text":"Sofia Marchetti owns supplier risk; Ahmed Karim covers logistics.","gold":[{"id":"sofia marchetti","label":"Sofia Marchetti","type":"person"},{"id":"ahmed karim","label":"Ahmed Karim","type":"person"}]}
+{"id":"x017","text":"Meridian Capital asked for SOC2 evidence before signature.","gold":[{"id":"meridian capital","label":"meridian capital","type":"organization"}]}
+{"id":"x018","text":"Kickoff for the thesis survey is scheduled for 2026-09-14.","gold":[{"id":"2026-09-14","label":"2026-09-14","type":"date"}]}
+{"id":"x019","text":"The director asked for weekly deltas instead of status essays.","gold":[{"id":"director","label":"director","type":"role"}]}
+{"id":"x020","text":"Retool dashboards replaced three spreadsheets this quarter.","gold":[{"id":"retool dashboards","label":"retool dashboards","type":"fact"}]}
+{"id":"x021","text":"Lucia Beltran flagged that the sample size skews toward enterprise users.","gold":[{"id":"lucia beltran","label":"Lucia Beltran","type":"person"}]}
+{"id":"x022","text":"Interview notes quote Professor Okafor: \"defend the null hypothesis\".","gold":[{"id":"professor okafor","label":"Professor Okafor","type":"person"},{"id":"defend the null hypothesis","label":"defend the null hypothesis","type":"preference"}]}
+{"id":"x023","text":"Vertex Analytics shipped their API changelog at https://vertex.example.com/changelog.","gold":[{"id":"vertex analytics","label":"vertex analytics","type":"organization"},{"id":"https://vertex.example.com/changelog","label":"https://vertex.example.com/changelog","type":"reference"}]}
+{"id":"x024","text":"The pricing committee meets biweekly on Tuesdays.","gold":[]}
+{"id":"x025","text":"Hector Salazar filed the trademark paperwork for the product name.","gold":[{"id":"hector salazar","label":"Hector Salazar","type":"person"}]}
+{"id":"x026","text":"Bluepeak Systems escalated a latency incident overnight.","gold":[{"id":"bluepeak systems","label":"bluepeak systems","type":"organization"}]}
+{"id":"x027","text":"Remember that 2027-01-18 is the cohort registration cutoff.","gold":[{"id":"2027-01-18","label":"2027-01-18","type":"date"}]}
+{"id":"x028","text":"Our manager wants one-page briefs, not slide decks.","gold":[{"id":"manager","label":"manager","type":"role"}]}
+{"id":"x029","text":"Tomas Iglesias demoed the valuation model to the investment club.","gold":[{"id":"tomas iglesias","label":"Tomas Iglesias","type":"person"}]}
+{"id":"x030","text":"The Obsidian vault import worked without losing backlinks.","gold":[{"id":"obsidian vault import","label":"obsidian vault import","type":"fact"}]}
+{"id":"x031","text":"Camila Duarte joined as senior analyst covering fintech.","gold":[{"id":"camila duarte","label":"Camila Duarte","type":"person"}]}
+{"id":"x032","text":"Ironclad Legal reviewed clause 7.3 twice this month.","gold":[{"id":"ironclad legal","label":"ironclad legal","type":"organization"}]}
+{"id":"x033","text":"Ping @maria when the dataset lands in the shared drive.","gold":[{"id":"@maria","label":"@maria","type":"person"}]}
+{"id":"x034","text":"The regression suite runs nightly at 02:30 UTC.","gold":[]}
+{"id":"x035","text":"Rafael Ortiz and Naomi Chen disagreed on discount cadence; Rafael Ortiz revised the memo.","gold":[{"id":"rafael ortiz","label":"Rafael Ortiz","type":"person"},{"id":"naomi chen","label":"Naomi Chen","type":"person"}]}
+{"id":"x036","text":"Summit Ridge Partners closed their follow-on investment round.","gold":[{"id":"summit ridge partners","label":"summit ridge partners","type":"organization"}]}
+{"id":"x037","text":"The thesis defense window opens 2026-12-05.","gold":[{"id":"2026-12-05","label":"2026-12-05","type":"date"}]}
+{"id":"x038","text":"Our VP Finance requested sensitivity analysis on churn assumptions.","gold":[{"id":"vp finance","label":"VP Finance","type":"role"}]}
+{"id":"x039","text":"PostgreSQL partitions reduced query time measurably.","gold":[{"id":"postgresql partitions","label":"postgresql partitions","type":"fact"}]}
+{"id":"x040","text":"Elena Petrova published the literature matrix for chapter two.","gold":[{"id":"elena petrova","label":"Elena Petrova","type":"person"}]}
+{"id":"x041","text":"Cobalt Freight extended the pilot for another quarter.","gold":[{"id":"cobalt freight","label":"cobalt freight","type":"organization"}]}
+{"id":"x042","text":"Standup notes moved into the daily thread; nothing else changed.","gold":[]}
+{"id":"x043","text":"Joaquin Mendoza maintains the alumni contact graph.","gold":[{"id":"joaquin mendoza","label":"Joaquin Mendoza","type":"person"}]}
+{"id":"x044","text":"The syllabus references https://mba.example.edu/syllabus-finance as required reading.","gold":[{"id":"https://mba.example.edu/syllabus-finance","label":"https://mba.example.edu/syllabus-finance","type":"reference"}]}
+{"id":"x045","text":"Nora Haddad warned that survivorship bias inflates the case-study results.","gold":[{"id":"nora haddad","label":"Nora Haddad","type":"person"}]}
+{"id":"x046","text":"Copperline Manufacturing paused expansions pending rates.","gold":[{"id":"copperline manufacturing","label":"copperline manufacturing","type":"organization"}]}
+{"id":"x047","text":"The offsite agenda includes negotiation practice on Thursday.","gold":[]}
+{"id":"x048","text":"Isabella Kontos archived the legacy billing scripts.","gold":[{"id":"isabella kontos","label":"Isabella Kontos","type":"person"}]}
+{"id":"x049","text":"Quarter-end close lands on 2026-09-30 this fiscal year.","gold":[{"id":"2026-09-30","label":"2026-09-30","type":"date"}]}
+{"id":"x050","text":"The partner track requires sponsorship from two directors.","gold":[{"id":"partner track","label":"partner track","type":"fact"}]}
+{"id":"x051","text":"Andres Villalobos prototyped the cohort retention dashboard.","gold":[{"id":"andres villalobos","label":"Andres Villalobos","type":"person"}]}
+{"id":"x052","text":"Silverpine Consulting billed the discovery phase already.","gold":[{"id":"silverpine consulting","label":"silverpine consulting","type":"organization"}]}
+{"id":"x053","text":"The registrar confirmed enrollment for the analytics elective.","gold":[]}
+{"id":"x054","text":"Ask @diego whether the rubric allows appendix citations.","gold":[{"id":"@diego","label":"@diego","type":"person"}]}
+{"id":"x055","text":"Gabriela Fuentes mapped stakeholder incentives for chapter three.","gold":[{"id":"gabriela fuentes","label":"Gabriela Fuentes","type":"person"}]}
+{"id":"x056","text":"Redwood Grid Utilities disclosed the outage postmortem publicly.","gold":[{"id":"redwood grid utilities","label":"redwood grid utilities","type":"organization"}]}
+{"id":"x057","text":"Midterms week overrides all recurring syncs.","gold":[]}
+{"id":"x058","text":"Bruno Castellanos negotiated the data residency amendment.","gold":[{"id":"bruno castellanos","label":"Bruno Castellanos","type":"person"}]}
+{"id":"x059","text":"The accelerator demo day is set for 2026-10-22.","gold":[{"id":"2026-10-22","label":"2026-10-22","type":"date"}]}
+{"id":"x060","text":"Finance shared the model at https://sheets.example.com/valuation-master.","gold":[{"id":"https://sheets.example.com/valuation-master","label":"https://sheets.example.com/valuation-master","type":"reference"}]}
+{"id":"x061","text":"Paula Reyes trimmed the reading list to twelve core papers.","gold":[{"id":"paula reyes","label":"Paula Reyes","type":"person"}]}
+{"id":"x062","text":"Granite Peak Insurance adopted our reconciliation template.","gold":[{"id":"granite peak insurance","label":"granite peak insurance","type":"organization"}]}
+{"id":"x063","text":"The alumni panel praised the applied statistics module.","gold":[]}
+{"id":"x064","text":"Federico Bianchi chairs the ethics review for student projects.","gold":[{"id":"federico bianchi","label":"Federico Bianchi","type":"person"}]}
+{"id":"x065","text":"Ops reported that the queue depth stabilized overnight.","gold":[]}
+{"id":"x066","text":"Mariana Sosa verified the survey instrument against the pilot answers.","gold":[{"id":"mariana sosa","label":"Mariana Sosa","type":"person"}]}
+{"id":"x067","text":"Halcyon Media requested usage rights for the case footage.","gold":[{"id":"halcyon media","label":"halcyon media","type":"organization"}]}
+{"id":"x068","text":"Budget reviews happen quarterly; the next one follows the offsite.","gold":[]}
+{"id":"x069","text":"Emilio Navarro drafted the cold-outreach sequence for sponsors.","gold":[{"id":"emilio navarro","label":"Emilio Navarro","type":"person"}]}
+{"id":"x070","text":"The library extended remote access to 2026-08-31.","gold":[{"id":"2026-08-31","label":"2026-08-31","type":"date"}]}
+{"id":"x071","text":"Juliana Prado documented the interview protocol verbatim.","gold":[{"id":"juliana prado","label":"Juliana Prado","type":"person"}]}
+{"id":"x072","text":"Foxbridge Retail rolled our recommendation pilot to forty stores.","gold":[{"id":"foxbridge retail","label":"foxbridge retail","type":"organization"}]}
+{"id":"x073","text":"The writing coach insists \"one argument per paragraph\".","gold":[{"id":"one argument per paragraph","label":"one argument per paragraph","type":"preference"}]}
+{"id":"x074","text":"Ignacio Rivas exported the transcript for qualitative coding.","gold":[{"id":"ignacio rivas","label":"Ignacio Rivas","type":"person"}]}
+{"id":"x075","text":"Beacon Health Group renewed without renegotiation.","gold":[{"id":"beacon health group","label":"beacon health group","type":"organization"}]}
+{"id":"x076","text":"The capstone advisor prefers hypotheses stated falsifiably.","gold":[{"id":"capstone advisor","label":"capstone advisor","type":"role"}]}
+{"id":"x077","text":"Otto Lindqvist validated the exchange-rate adjustments.","gold":[{"id":"otto lindqvist","label":"Otto Lindqvist","type":"person"}]}
+{"id":"x078","text":"Scholarship applications close 2026-10-01 sharp.","gold":[{"id":"2026-10-01","label":"2026-10-01","type":"date"}]}
+{"id":"x079","text":"The study group shares summaries every Sunday evening.","gold":[]}
+{"id":"x080","text":"Renata Aguilar defended the sampling strategy successfully.","gold":[{"id":"renata aguilar","label":"Renata Aguilar","type":"person"}]}
+{"id":"x081","text":"Piedmont Logistics integrated our tracking webhook.","gold":[{"id":"piedmont logistics","label":"piedmont logistics","type":"organization"}]}
+{"id":"x082","text":"Follow @graymatter for release announcements only.","gold":[{"id":"@graymatter","label":"@graymatter","type":"person"}]}
+{"id":"x083","text":"Mateo Carrizo quantified the switching-cost assumptions.","gold":[{"id":"mateo carrizo","label":"Mateo Carrizo","type":"person"}]}
+{"id":"x084","text":"The audit trail satisfied the external reviewers completely.","gold":[]}
+{"id":"x085","text":"Adriana Molina reconciled conflicting survey waves.","gold":[{"id":"adriana molina","label":"Adriana Molina","type":"person"}]}
+{"id":"x086","text":"Juniper Labs opened their sandbox to our cohort.","gold":[{"id":"juniper labs","label":"juniper labs","type":"organization"}]}
+{"id":"x087","text":"The professor highlighted \"correlation is not causation\" again.","gold":[{"id":"correlation is not causation","label":"correlation is not causation","type":"preference"}]}
+{"id":"x088","text":"Sebastián Yañez joined the treasury rotation late.","gold":[{"id":"sebastián yañez","label":"Sebastián Yañez","type":"person"}]}
+{"id":"x089","text":"Thesis milestones were re-baselined on 2026-11-20.","gold":[{"id":"2026-11-20","label":"2026-11-20","type":"date"}]}
+{"id":"x090","text":"Verónica Castro leads the women-in-finance speaker series.","gold":[{"id":"verónica castro","label":"Verónica Castro","type":"person"}]}
+{"id":"x091","text":"Northgate Semiconductors cited our benchmark in their whitepaper.","gold":[{"id":"northgate semiconductors","label":"northgate semiconductors","type":"organization"}]}
+{"id":"x092","text":"The whiteboard photo was illegible; retyped everything manually.","gold":[]}
+{"id":"x093","text":"Felipe Duarte automated the citation formatting entirely.","gold":[{"id":"felipe duarte","label":"Felipe Duarte","type":"person"}]}
+{"id":"x094","text":"Alpine Ventures co-invested with our seed syndicate.","gold":[{"id":"alpine ventures","label":"alpine ventures","type":"organization"}]}
+{"id":"x095","text":"The registrar portal crashed during enrollment week.","gold":[]}
+{"id":"x096","text":"Daniela Quiroga synthesized thirty interviews into six themes.","gold":[{"id":"daniela quiroga","label":"Daniela Quiroga","type":"person"}]}
+{"id":"x097","text":"Reading responses are due before each Monday session.","gold":[]}
+{"id":"x098","text":"Martín Escobar tested three pricing page variants concurrently.","gold":[{"id":"martín escobar","label":"Martín Escobar","type":"person"}]}
+{"id":"x099","text":"Orchid Biotech referenced our methodology section favorably.","gold":[{"id":"orchid biotech","label":"orchid biotech","type":"organization"}]}
+{"id":"x100","text":"The career fair yielded two strong analyst conversations.","gold":[]}
+{"id":"x101","text":"Paloma Herrera keeps the decision log updated religiously.","gold":[{"id":"paloma herrera","label":"Paloma Herrera","type":"person"}]}
+{"id":"x102","text":"Final grades post on 2026-12-18.","gold":[{"id":"2026-12-18","label":"2026-12-18","type":"date"}]}
+{"id":"x103","text":"Nicolás Ferreyra benchmarked our latency against the incumbent.","gold":[{"id":"nicolás ferreyra","label":"Nicolás Ferreyra","type":"person"}]}
+{"id":"x104","text":"Willow Creek Capital preferred the convertible structure.","gold":[{"id":"willow creek capital","label":"willow creek capital","type":"organization"}]}
+{"id":"x105","text":"The agent stored this entire corpus automatically during consolidation.","gold":[]}
