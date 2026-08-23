@@ -49,6 +49,11 @@ touched, every rewrite leaves the previous file as <file>.bak, and edits
 made by hand are detected against the recorded hash and reported before
 the next sync replaces them.
 
+Concurrent syncs from several processes serialize their store reads
+through the daemon but not the target-file write: last writer wins, and
+the next sync converges the block. Nothing corrupts; avoid racing syncs
+against one file.
+
 Use --check to report block state without writing; --dry-run to preview
 the exact bytes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

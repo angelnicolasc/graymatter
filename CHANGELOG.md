@@ -33,6 +33,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`doctor --audit` no longer reports marker syntax quoted inside fenced
+  code blocks.** A document that teaches or documents the managed-block
+  syntax inside ``` fences — this repository's own docs do it — produced
+  failure-level findings and exit code 1 for markers that are quoted text,
+  not active regions. Fenced regions are now blanked before marker scanning;
+  duplication, size and staleness still read the full file.
+- **`doctor --audit` staleness states why it cannot measure instead of
+  reporting false freshness.** When git is missing, the path is outside any
+  repository, or the file is not tracked, blame returns a reason with no
+  error — and the report printed `available: true` with every bucket at zero
+  and a median of 0 days: unmeasurable content presented as fresh. The
+  reason now reaches the report verbatim (`unavailable (…)`), as its own
+  documentation always claimed.
+- **Fact text can no longer forge instructions markers into projected
+  blocks.** A stored fact quoting the instructions briefing verbatim was
+  sanitized against context-kind markers only; the projected body carried
+  live `graymatter:instructions:` markers, which made `doctor --audit` see a
+  nested instructions region that does not exist (failure finding, exit 1)
+  on a structurally healthy file. Sanitization neutralizes both marker
+  families.
+- **`context-sync` idempotence, backup and manual-edit detection are pinned
+  by tests** alongside the audit's duplication threshold (near-boundary
+  pairs, not just identical text), staleness buckets with mixed commit ages
+  under a fixed clock, splice behaviour when an orphaned begin marker
+  precedes a real block, and the `doctor --audit` exit-code contract.
+
 - **Recall breaks score ties deterministically (oldest first); previously
   arbitrary.** The three signal rankings were sorted by score alone, and
   `sort.Slice` is not stable, so facts that scored equally received arbitrary

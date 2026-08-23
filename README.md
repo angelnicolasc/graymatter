@@ -538,6 +538,10 @@ Safety properties:
   next sync replaces the block — warned first, never silently.
 - The projection is deterministic: same store state, same block bytes.
   `FuzzRenderBlock` holds fact text to the same rules.
+- Known limitation: two `context-sync` processes racing on one machine
+  serialize their store reads through the daemon but not the file write —
+  last writer wins. The loser's view returns on the next sync; nothing
+  corrupts, and a single-writer workflow (the normal case) never hits it.
 
 Run `graymatter context-sync --check` for state without writing, or `--dry-run`
 to preview the exact bytes.
