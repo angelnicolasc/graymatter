@@ -432,6 +432,7 @@ graymatter sessions list                          # list managed agent sessions
 graymatter plugin install manifest.json           # install a plugin (sha256 required, asks first)
 graymatter server                                 # REST API server (127.0.0.1:8080)
 graymatter context-sync                           # project top facts into a managed block in AGENTS.md (opt-in)
+graymatter doctor --audit [path]                  # audit any CLAUDE.md/AGENTS.md: tokens, duplicates, staleness, markers
 ```
 
 Global flags: `--dir` (data dir), `--quiet`, `--json`

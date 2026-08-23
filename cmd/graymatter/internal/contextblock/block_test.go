@@ -230,8 +230,13 @@ func TestGolden_Body(t *testing.T) {
 	if err != nil {
 		t.Fatalf("golden missing; run with -update to write it: %v", err)
 	}
-	if string(want) != got {
-		t.Fatalf("golden mismatch (-want +got):\n--- want\n+++ got\n%s", unifiedish(string(want), got))
+	// Checkouts with autocrlf hand the golden back as CRLF while RenderBody
+	// always emits LF: the contract is content, not line endings, so the
+	// comparison normalises before byte comparison.
+	got = strings.ReplaceAll(got, "\r\n", "\n")
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if wantStr != got {
+		t.Fatalf("golden mismatch (-want +got):\n--- want\n+++ got\n%s", unifiedish(wantStr, got))
 	}
 	// The oversized fact must be the one dropped: rank priority, not size.
 	if strings.Contains(got, "filler") {

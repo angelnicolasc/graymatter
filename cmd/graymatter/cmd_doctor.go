@@ -29,8 +29,9 @@ type checkResult struct {
 }
 
 func doctorCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
+	var audit bool
+	cmd := &cobra.Command{
+		Use:   "doctor [path]",
 		Short: "Diagnose the GrayMatter setup in this directory",
 		Long: `Checks every link in the chain that makes agent memory work:
 
@@ -40,8 +41,22 @@ func doctorCmd() *cobra.Command {
   4. MCP server wired into at least one client config
   5. CLAUDE.md / AGENTS.md tell the model to use the memory tools
 
-Exit code is 1 only when a check fails outright; warnings exit 0.`,
+With --audit, skips the setup checks and instead audits the instruction
+documents themselves: approx token cost per prompt (tokenizer declared in
+the output), near-duplicate paragraphs, staleness by git blame, size
+alerts at declared thresholds, and structural conflicts in managed
+blocks. Works on any project — no .graymatter directory required.
+Exit code is 1 only when a finding is a failure; warnings exit 0.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if audit {
+				root := "."
+				if len(args) > 0 {
+					root = args[0]
+				}
+				return runDoctorAudit(cmd, root)
+			}
+
 			checks := []checkResult{
 				checkBinaryOnPath(),
 				checkDataDir(dataDir),
@@ -102,6 +117,8 @@ Exit code is 1 only when a check fails outright; warnings exit 0.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
+	return cmd
 }
 
 func checkBinaryOnPath() checkResult {

@@ -10,6 +10,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`graymatter doctor --audit [path]`** — free auditor for instruction
+  documents, no store or adoption required. Reports approx token cost per
+  prompt (tokenizer declared in every output), near-duplicate paragraphs
+  (word-5-shingle Jaccard ≥ 0.8), staleness buckets from git blame
+  (≤30d / 31–90d / >90d / uncommitted), size alerts at declared thresholds,
+  and structural conflicts in managed blocks only: unterminated or duplicate
+  graymatter regions, nesting across kinds, and context-block hashes that no
+  longer verify. Semantic contradiction detection is out of scope by design.
+  Human and JSON output; exit code 1 only on failure-level findings.
 - **`graymatter context-sync` (opt-in)** — projects the highest-weight live
   facts into a managed block inside CLAUDE.md / AGENTS.md under an explicit
   token budget (default 512), regenerated on every run. Safety model:
