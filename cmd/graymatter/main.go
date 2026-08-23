@@ -45,6 +45,7 @@ func main() {
 		sessionsCmd(),
 		pluginCmd(),
 		serverCmd(),
+		contextSyncCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

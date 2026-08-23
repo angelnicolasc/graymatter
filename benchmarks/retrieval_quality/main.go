@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/angelnicolasc/graymatter/benchmarks/internal/tokens"
+	"github.com/angelnicolasc/graymatter/internal/tokens"
 	"github.com/angelnicolasc/graymatter/pkg/embedding"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )

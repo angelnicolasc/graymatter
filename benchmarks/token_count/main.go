@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/angelnicolasc/graymatter/benchmarks/internal/tokens"
+	"github.com/angelnicolasc/graymatter/internal/tokens"
 	"github.com/angelnicolasc/graymatter/pkg/embedding"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -133,8 +133,9 @@ var corpus = [100]string{
 
 // approxTokens estimates GPT-4-class token count for text.
 //
-// The approximation lives in benchmarks/internal/tokens so that this benchmark
-// and benchmarks/retrieval_quality cannot drift into meaning different things
+// The approximation lives in internal/tokens so that this benchmark,
+// benchmarks/retrieval_quality and the context-sync budget cannot drift into
+// meaning different things
 // by the word "tokens" — docs/benchmarks.md publishes figures from both.
 func approxTokens(text string) int {
 	return tokens.Approx(text)

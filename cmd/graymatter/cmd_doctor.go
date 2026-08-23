@@ -48,6 +48,7 @@ Exit code is 1 only when a check fails outright; warnings exit 0.`,
 				checkStore(dataDir),
 				checkMCPWiring("."),
 				checkInstructions("."),
+				checkContextSync("."),
 			}
 
 			if jsonOut {

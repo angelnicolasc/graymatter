@@ -8,6 +8,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`graymatter context-sync` (opt-in)** — projects the highest-weight live
+  facts into a managed block inside CLAUDE.md / AGENTS.md under an explicit
+  token budget (default 512), regenerated on every run. Safety model:
+  content outside the markers is never touched; every rewrite keeps the
+  previous file as `<file>.bak`; hand edits are detected against the SHA-256
+  recorded in the block header and reported by `doctor` and by
+  `context-sync --check` — warned, then overwritten, never silently merged.
+  The projection is deterministic given a store state, tombstoned facts are
+  excluded immediately, and `FuzzRenderBlock` (the fourth fuzz target) holds
+  fact text to the same structure rules. The engine is untouched: `Recall`
+  never reads the block.
+
 ### Fixed
 
 - **Recall breaks score ties deterministically (oldest first); previously

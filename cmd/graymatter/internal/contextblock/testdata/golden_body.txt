@@ -1,0 +1,6 @@
+## Memory context (GrayMatter)
+- Prefers Go interfaces over concrete types at module boundaries
+- Deploy target is eu-central-1; latency SLO p95 under 300ms
+- Uses conventional commits; scope is the package name
+- Postgres 16 in staging, connection pool capped at 20 per service
+- Retired the queue in favour of direct gRPC streams (decision 2026-07-14) second line removed

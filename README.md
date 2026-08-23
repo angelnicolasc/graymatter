@@ -431,6 +431,7 @@ graymatter run agent.md [--background]            # run a SKILL.md agent file
 graymatter sessions list                          # list managed agent sessions
 graymatter plugin install manifest.json           # install a plugin (sha256 required, asks first)
 graymatter server                                 # REST API server (127.0.0.1:8080)
+graymatter context-sync                           # project top facts into a managed block in AGENTS.md (opt-in)
 ```
 
 Global flags: `--dir` (data dir), `--quiet`, `--json`
@@ -522,6 +523,24 @@ Consolidation auto-enables when `ANTHROPIC_API_KEY` is set. To use Ollama:
 cfg := graymatter.DefaultConfig()
 cfg.ConsolidateLLM = "ollama"
 ```
+
+### Context block (opt-in)
+
+`graymatter context-sync` projects the highest-weight live facts into a managed
+block inside CLAUDE.md / AGENTS.md, inside an explicit token budget — so the
+file your agent already reads every session stays current instead of rotting.
+
+Safety properties:
+
+- Content outside the markers is never touched; the markers themselves say so.
+- Every rewrite leaves the previous file as `<file>.bak`.
+- A hand edit is detected against the recorded hash: `doctor` warns, and the
+  next sync replaces the block — warned first, never silently.
+- The projection is deterministic: same store state, same block bytes.
+  `FuzzRenderBlock` holds fact text to the same rules.
+
+Run `graymatter context-sync --check` for state without writing, or `--dry-run`
+to preview the exact bytes.
 
 ---
 
