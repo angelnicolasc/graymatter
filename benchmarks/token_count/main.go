@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -148,13 +147,21 @@ const (
 // concatenated. GrayMatter = top-8 most relevant observations recalled.
 var sessionCounts = []int{1, 10, 30, 100}
 
-func main() {
-	start := time.Now()
+// result is one row of the benchmark table.
+type result struct {
+	Sessions     int
+	FullTokens   int
+	RecallTokens int
+	Reduction    float64 // percent
+}
 
+// runBenchmark executes the full measurement and returns one result per entry
+// in sessionCounts. It is separated from main so the reproducibility test can
+// call it and compare the published tables against freshly measured numbers.
+func runBenchmark() ([]result, error) {
 	dataDir, err := os.MkdirTemp("", "graymatter-bench-*")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mktemp: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("mktemp: %w", err)
 	}
 	defer os.RemoveAll(dataDir)
 
@@ -165,8 +172,7 @@ func main() {
 		Embedder: emb,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open store: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("open store: %w", err)
 	}
 	defer store.Close()
 
@@ -175,6 +181,61 @@ func main() {
 	perm := rng.Perm(len(corpus))
 
 	ctx := context.Background()
+
+	results := make([]result, 0, len(sessionCounts))
+	inserted := 0
+
+	for _, target := range sessionCounts {
+		// Insert observations up to the target session count.
+		for inserted < target && inserted < len(corpus) {
+			if err := store.Put(ctx, agentID, corpus[perm[inserted]]); err != nil {
+				return nil, fmt.Errorf("put: %w", err)
+			}
+			inserted++
+		}
+
+		// Full injection: ALL stored observations concatenated.
+		allFacts, err := store.List(agentID)
+		if err != nil {
+			return nil, fmt.Errorf("list: %w", err)
+		}
+		var fullTexts []string
+		for _, f := range allFacts {
+			fullTexts = append(fullTexts, f.Text)
+		}
+		fullTokens := approxTokens(strings.Join(fullTexts, "\n"))
+
+		// GrayMatter: recall only top-K most relevant observations.
+		recalled, err := store.Recall(ctx, agentID, query, topK)
+		if err != nil {
+			return nil, fmt.Errorf("recall: %w", err)
+		}
+		recallTokens := approxTokens(strings.Join(recalled, "\n"))
+
+		reduction := 0.0
+		if fullTokens > 0 {
+			reduction = float64(fullTokens-recallTokens) / float64(fullTokens) * 100
+		}
+
+		results = append(results, result{
+			Sessions:     target,
+			FullTokens:   fullTokens,
+			RecallTokens: recallTokens,
+			Reduction:    reduction,
+		})
+	}
+
+	return results, nil
+}
+
+func main() {
+	start := time.Now()
+
+	results, err := runBenchmark()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println()
 	fmt.Println("GrayMatter Token Efficiency Benchmark")
@@ -186,50 +247,13 @@ func main() {
 		"Sessions", "Full Injection", "GrayMatter Recall", "Reduction")
 	fmt.Println(strings.Repeat("─", 72))
 
-	inserted := 0
-
-	for _, target := range sessionCounts {
-		// Insert observations up to the target session count.
-		for inserted < target && inserted < len(corpus) {
-			if err := store.Put(ctx, agentID, corpus[perm[inserted]]); err != nil {
-				fmt.Fprintf(os.Stderr, "put: %v\n", err)
-				os.Exit(1)
-			}
-			inserted++
-		}
-
-		// Full injection: ALL stored observations concatenated.
-		allFacts, err := store.List(agentID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "list: %v\n", err)
-			os.Exit(1)
-		}
-		var fullTexts []string
-		for _, f := range allFacts {
-			fullTexts = append(fullTexts, f.Text)
-		}
-		fullTokens := approxTokens(strings.Join(fullTexts, "\n"))
-
-		// GrayMatter: recall only top-K most relevant observations.
-		recalled, err := store.Recall(ctx, agentID, query, topK)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "recall: %v\n", err)
-			os.Exit(1)
-		}
-		recallTokens := approxTokens(strings.Join(recalled, "\n"))
-
-		reduction := 0.0
-		if fullTokens > 0 {
-			reduction = float64(fullTokens-recallTokens) / float64(fullTokens) * 100
-		}
-
+	for _, r := range results {
 		fmt.Printf("%-10d  ~%-17d  ~%-21d  %.0f%%\n",
-			target, fullTokens, recallTokens, reduction)
+			r.Sessions, r.FullTokens, r.RecallTokens, r.Reduction)
 	}
 
 	fmt.Println(strings.Repeat("─", 72))
 	fmt.Printf("\nRun time:  %s\n", time.Since(start).Truncate(time.Millisecond))
-	fmt.Printf("Data dir:  %s (auto-deleted)\n", filepath.Base(dataDir))
 	fmt.Println()
 	fmt.Println("Approximation: words × 1.33 ≈ GPT-4 tokens (±10% for English prose).")
 	fmt.Println("With vector embeddings (Ollama / OpenAI / Anthropic) recall precision")

@@ -1,48 +1,79 @@
 # GrayMatter Token Benchmarks
 
-## Methodology
-
-Comparison across a simulated 30-session agent history:
-- **Baseline**: inject full conversation history into every new run
-- **GrayMatter**: use `Recall()` with hybrid retrieval (top-k=8)
-
-Agent: `sales-closer` with 30 prior sessions, ~400 words per session.
-
-## Results
-
-| Metric                        | Baseline (full inject) | GrayMatter (hybrid recall) |
-|-------------------------------|------------------------|---------------------------|
-| Tokens per run (session 1)    | ~800                   | ~800                      |
-| Tokens per run (session 10)   | ~4,800                 | ~900                      |
-| Tokens per run (session 30)   | ~12,000                | ~1,100                    |
-| Tokens per run (session 100)  | ~40,000                | ~1,200                    |
-| Relevance@8 vs full context   | 100% (noisy)           | ~91% (clean)              |
-
-**~90% token reduction after 10+ sessions. Context quality improves over time.**
-
-## Why hybrid retrieval beats full injection
-
-Full injection includes:
-- Stale facts (things that were relevant 3 months ago)
-- Contradicted facts (Maria's budget changed; old entry still there)
-- Noise (metadata, non-actionable observations)
-
-GrayMatter hybrid retrieval (vector + keyword + recency) surfaces only:
-- Semantically close to the current query
-- Recent enough to be relevant (decay curve)
-- High-weight facts (survived consolidation)
-
-## Consolidation impact
-
-After running `Consolidate()` over 30 sessions:
-- 30 session summaries → 4 consolidated memory paragraphs
-- No information loss on key facts (names, amounts, deadlines)
-- Noise removed: pleasantries, status updates, duplicates
-
-## Running the benchmark yourself
+Every number on this page is printed by one command. If a figure here and a
+figure the command prints disagree, CI fails
+(`benchmarks/token_count/main_test.go`) — the table is parsed out of this
+markdown and compared against a live run.
 
 ```bash
 go run ./benchmarks/token_count
 ```
 
-Output: table of token counts by session count, both strategies.
+## What is measured
+
+| | |
+|---|---|
+| **Baseline** | Full-history injection — every stored observation concatenated into the prompt |
+| **GrayMatter** | `Recall()` with hybrid retrieval, `topK=8` |
+| **Corpus** | 100 paragraph-length agent observations (~50–70 words each), sales domain |
+| **Session** | One stored observation. "30 sessions" = 30 observations in the store |
+| **Query** | `"follow up with prospects and close pending deals this week"` — one fixed query |
+| **Embedder** | Keyword-only (TF-IDF + recency). No LLM, no network, deterministic |
+| **Insertion order** | Shuffled with a fixed seed (42) so ranking is not biased by recency |
+| **Tokenizer** | `words × 1.33`, an approximation of GPT-4-class tokenization — within ±10% of tiktoken for English prose. Not a real BPE tokenizer |
+
+## Results
+
+| Sessions | Full injection | GrayMatter | Reduction |
+|----------|---------------|------------|-----------|
+| 1        | ~80 tokens    | ~80 tokens  | 0% |
+| 10       | ~630 tokens   | ~550 tokens | 12% |
+| 30       | ~1,880 tokens | ~550 tokens | 71% |
+| 100      | ~6,960 tokens | ~670 tokens | **90%** |
+
+**90% is the canonical figure**, and it means one specific thing: at 100
+stored observations, against full-history injection, on this corpus, with this
+tokenizer. It is not a claim about any other baseline.
+
+The reduction is a function of how much history exists. At one session there
+is nothing to cut and the number is 0%. The curve is the result, not the
+100-session row.
+
+## What this benchmark does not measure
+
+Stated plainly, because the omissions are larger than the result:
+
+- **Relevance.** The benchmark never checks whether the 8 recalled
+  observations are the *right* 8. A system that returned 8 facts at random
+  would score an identical 90% reduction here. Retrieval quality is not
+  measured anywhere in this repository yet.
+- **A realistic baseline.** Full-history injection is the weakest possible
+  comparison. Production systems truncate. A sliding window keeping the last 8
+  observations would cost roughly 8 × ~70 ≈ 560 tokens in steady state —
+  statistically indistinguishable from GrayMatter's ~550–670. **Against a
+  sliding window, GrayMatter does not win on tokens**, and the honest
+  differentiator has to be what a window cannot do: recall a fact from session
+  3 at session 90, and stop returning a fact that has been superseded.
+- **Multiple queries or domains.** One fixed query, one domain.
+- **Vector embeddings.** Keyword-only, so the numbers are reproducible without
+  an API key. Vector recall changes precision; it is not measured here.
+- **Consolidation.** Runs with consolidation untriggered.
+
+Earlier revisions of this page published a token table nothing produced, and a
+relevance score no code computed. Both are gone. The tests named at the top
+exist so that neither can come back quietly.
+
+## Reproducing
+
+```bash
+go run ./benchmarks/token_count
+```
+
+No API key, no network, no LLM. The store is created in a temporary directory
+and deleted on exit. Runs in well under a second.
+
+To verify the published tables against a fresh measurement the way CI does:
+
+```bash
+go test ./benchmarks/token_count/
+```
