@@ -1,0 +1,87 @@
+# GrayMatter retrieval-quality corpus, version 1.
+#
+# Frozen fixture. Extend by adding corpus-v2, never by editing this file:
+# every result published against v1 becomes unreproducible otherwise.
+#
+# kind=gold        planted early, needed by a query asked much later
+# kind=stale       contradicted later; must not be returned after supersede
+# kind=replacement the fact that supersedes the stale one
+# kind=filler      everything else
+{"domain": "infra", "id": "f001", "kind": "filler", "session": 1, "text": "The staging cluster runs on three m5.large nodes in eu-west-1."}
+{"domain": "infra", "id": "f002", "kind": "gold", "session": 2, "text": "Database migrations must run before the API rollout, never after; the reverse order corrupted the orders table in March."}
+{"domain": "product", "id": "f031", "kind": "gold", "session": 2, "text": "Enterprise customers require SSO through SAML before they will sign; it is the single most common blocker in procurement."}
+{"domain": "infra", "id": "f003", "kind": "gold", "session": 3, "text": "The deploy pipeline requires a signed release tag; unsigned tags are rejected by the admission controller."}
+{"domain": "team", "id": "f055", "kind": "gold", "session": 3, "text": "Code review requires two approvals for changes touching billing or authentication."}
+{"domain": "infra", "id": "f004", "kind": "gold", "session": 4, "text": "Rollbacks are performed with argo rollouts undo, not by redeploying the previous image tag."}
+{"domain": "infra", "id": "f005", "kind": "filler", "session": 5, "text": "The blue-green cutover holds both environments for 30 minutes before draining the old one."}
+{"domain": "product", "id": "f032", "kind": "filler", "session": 6, "text": "The free tier is capped at 1000 stored records per workspace."}
+{"domain": "team", "id": "f056", "kind": "filler", "session": 7, "text": "Incident retrospectives are blameless and published internally within five working days."}
+{"domain": "infra", "id": "f006", "kind": "stale", "session": 8, "text": "Production secrets are stored in Vault under the path secret/prod/api."}
+{"domain": "infra", "id": "f007", "kind": "filler", "session": 9, "text": "The CI runner pool autoscales between 2 and 12 instances."}
+{"domain": "product", "id": "f033", "kind": "filler", "session": 10, "text": "Churn is concentrated in accounts that never invited a second user."}
+{"domain": "infra", "id": "f008", "kind": "filler", "session": 11, "text": "Container images are built with buildkit and pushed to the internal registry."}
+{"domain": "team", "id": "f057", "kind": "filler", "session": 12, "text": "The oncall rotation is one week long with a secondary for escalation."}
+{"domain": "infra", "id": "f009", "kind": "filler", "session": 13, "text": "The load balancer health check hits /healthz with a 2 second timeout."}
+{"domain": "product", "id": "f034", "kind": "filler", "session": 14, "text": "The onboarding checklist has five steps and a 60 percent completion rate."}
+{"domain": "infra", "id": "f010", "kind": "filler", "session": 15, "text": "Terraform state lives in an S3 bucket with DynamoDB locking."}
+{"domain": "team", "id": "f058", "kind": "filler", "session": 16, "text": "Sprint planning happens on Monday morning and runs 90 minutes."}
+{"domain": "product", "id": "f035", "kind": "filler", "session": 17, "text": "Usage based pricing was rejected in favour of seat based after the pricing survey."}
+{"domain": "infra", "id": "f011", "kind": "filler", "session": 18, "text": "Log retention in the observability stack is 14 days for debug, 90 days for audit."}
+{"domain": "team", "id": "f059", "kind": "filler", "session": 19, "text": "Design documents are required for anything estimated over two weeks."}
+{"domain": "product", "id": "f036", "kind": "filler", "session": 20, "text": "The mobile client is read only; all writes go through the web app."}
+{"domain": "infra", "id": "f012", "kind": "filler", "session": 21, "text": "The nightly backup job snapshots the primary at 03:00 UTC."}
+{"domain": "team", "id": "f060", "kind": "filler", "session": 22, "text": "The team works asynchronously with two overlapping core hours."}
+{"domain": "product", "id": "f037", "kind": "filler", "session": 23, "text": "Customers on the legacy plan keep their pricing until renewal."}
+{"domain": "infra", "id": "f013", "kind": "filler", "session": 24, "text": "Canary deploys route 5 percent of traffic for the first ten minutes."}
+{"domain": "team", "id": "f061", "kind": "filler", "session": 25, "text": "Pull requests older than five days are automatically flagged as stale."}
+{"domain": "product", "id": "f038", "kind": "filler", "session": 26, "text": "The export feature produces CSV and JSON, not XLSX."}
+{"domain": "infra", "id": "f014", "kind": "filler", "session": 27, "text": "The service mesh enforces mTLS between all internal services."}
+{"domain": "team", "id": "f062", "kind": "filler", "session": 28, "text": "Interview loops include a systems design round for senior candidates."}
+{"domain": "product", "id": "f039", "kind": "filler", "session": 29, "text": "Trial length is 14 days with no credit card required."}
+{"domain": "infra", "id": "f015", "kind": "filler", "session": 30, "text": "Node draining waits for in-flight requests up to a 60 second grace period."}
+{"domain": "team", "id": "f063", "kind": "filler", "session": 32, "text": "The engineering handbook lives in the docs repository, not in the wiki."}
+{"domain": "product", "id": "f040", "kind": "filler", "session": 33, "text": "The admin console supports role based access with three fixed roles."}
+{"domain": "infra", "id": "f016", "kind": "filler", "session": 34, "text": "The staging database is reseeded from an anonymised production dump weekly."}
+{"domain": "team", "id": "f064", "kind": "filler", "session": 36, "text": "Fridays are reserved for maintenance work and no feature deploys."}
+{"domain": "product", "id": "f041", "kind": "filler", "session": 37, "text": "In app notifications are batched hourly to avoid alert fatigue."}
+{"domain": "infra", "id": "f017", "kind": "filler", "session": 38, "text": "Alert routing sends page-level alerts to PagerDuty and warnings to Slack."}
+{"domain": "team", "id": "f065", "kind": "filler", "session": 40, "text": "New engineers ship a production change in their first week by design."}
+{"domain": "product", "id": "f042", "kind": "filler", "session": 41, "text": "The search feature indexes titles and tags but not attachment contents."}
+{"domain": "infra", "id": "f018", "kind": "filler", "session": 42, "text": "The API gateway rate limit is 100 requests per minute per API key."}
+{"domain": "team", "id": "f066", "kind": "filler", "session": 44, "text": "Architecture decisions are recorded as ADRs with a reversal condition."}
+{"domain": "product", "id": "f043", "kind": "filler", "session": 45, "text": "Annual contracts get a 20 percent discount over monthly billing."}
+{"domain": "infra", "id": "f019", "kind": "filler", "session": 46, "text": "Image vulnerability scans block promotion on any critical CVE."}
+{"domain": "team", "id": "f067", "kind": "filler", "session": 48, "text": "The team runs a monthly load test against a production sized environment."}
+{"domain": "product", "id": "f044", "kind": "filler", "session": 49, "text": "The API returns cursor based pagination, not offset based."}
+{"domain": "infra", "id": "f020", "kind": "filler", "session": 50, "text": "The disaster recovery target is a four hour RTO and one hour RPO."}
+{"domain": "team", "id": "f068", "kind": "filler", "session": 52, "text": "Dependency upgrades are batched weekly rather than merged ad hoc."}
+{"domain": "product", "id": "f045", "kind": "filler", "session": 53, "text": "Custom fields are limited to 50 per workspace for performance reasons."}
+{"domain": "infra", "id": "f021", "kind": "filler", "session": 55, "text": "Feature flags are evaluated server side and cached for 30 seconds."}
+{"domain": "team", "id": "f069", "kind": "filler", "session": 57, "text": "Postmortem action items are tracked as issues with an owner and a date."}
+{"domain": "product", "id": "f046", "kind": "filler", "session": 58, "text": "The activity feed retains 90 days of history on all paid plans."}
+{"domain": "infra", "id": "f022", "kind": "filler", "session": 60, "text": "The read replica lag alert fires above 5 seconds sustained for a minute."}
+{"domain": "team", "id": "f070", "kind": "filler", "session": 62, "text": "Pairing is encouraged for unfamiliar subsystems but not mandated."}
+{"domain": "product", "id": "f047", "kind": "filler", "session": 63, "text": "Webhooks retry with exponential backoff for up to 24 hours."}
+{"domain": "infra", "id": "f023", "kind": "filler", "session": 65, "text": "Connection pooling is handled by pgbouncer in transaction mode."}
+{"domain": "team", "id": "f071", "kind": "filler", "session": 67, "text": "The definition of done includes updated docs and a passing coverage gate."}
+{"domain": "product", "id": "f048", "kind": "filler", "session": 68, "text": "The billing portal is provided by Stripe customer portal, not built in house."}
+{"domain": "infra", "id": "f024", "kind": "replacement", "session": 71, "text": "Production secrets moved from Vault to AWS Secrets Manager; the Vault path is decommissioned."}
+{"domain": "team", "id": "f072", "kind": "filler", "session": 72, "text": "Support escalations reach engineering through a dedicated rotation channel."}
+{"domain": "product", "id": "f049", "kind": "filler", "session": 73, "text": "Data residency in the EU is available on the enterprise plan only."}
+{"domain": "infra", "id": "f025", "kind": "filler", "session": 76, "text": "The CDN caches static assets for 24 hours with stale-while-revalidate."}
+{"domain": "team", "id": "f073", "kind": "filler", "session": 77, "text": "Quarterly planning allocates 20 percent of capacity to technical debt."}
+{"domain": "product", "id": "f050", "kind": "filler", "session": 78, "text": "The audit log is immutable and exportable by workspace admins."}
+{"domain": "infra", "id": "f026", "kind": "filler", "session": 81, "text": "Schema changes require a backward compatible intermediate release."}
+{"domain": "team", "id": "f074", "kind": "filler", "session": 82, "text": "Release notes are written by the engineer who shipped the change."}
+{"domain": "product", "id": "f051", "kind": "filler", "session": 83, "text": "Bulk import accepts up to 10000 rows per file."}
+{"domain": "infra", "id": "f027", "kind": "filler", "session": 86, "text": "The queue consumer scales on visible message count, not CPU."}
+{"domain": "team", "id": "f075", "kind": "filler", "session": 87, "text": "The team retro happens every second Thursday."}
+{"domain": "product", "id": "f052", "kind": "filler", "session": 88, "text": "Two factor authentication is enforced for admin roles by default."}
+{"domain": "infra", "id": "f028", "kind": "filler", "session": 90, "text": "Cross region replication is enabled for the audit bucket only."}
+{"domain": "team", "id": "f076", "kind": "filler", "session": 91, "text": "Hiring decisions require unanimous agreement from the loop."}
+{"domain": "product", "id": "f053", "kind": "filler", "session": 92, "text": "The changelog is published publicly and syndicated over RSS."}
+{"domain": "infra", "id": "f029", "kind": "filler", "session": 94, "text": "The TLS certificates renew automatically 30 days before expiry."}
+{"domain": "team", "id": "f077", "kind": "filler", "session": 95, "text": "Documentation changes skip the two approval rule."}
+{"domain": "product", "id": "f054", "kind": "filler", "session": 96, "text": "Sandbox workspaces reset every 30 days."}
+{"domain": "infra", "id": "f030", "kind": "filler", "session": 98, "text": "Container memory limits are set to twice the observed p99 working set."}
+{"domain": "team", "id": "f078", "kind": "filler", "session": 99, "text": "On call compensation is time off in lieu, not overtime pay."}
