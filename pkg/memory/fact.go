@@ -20,7 +20,35 @@ type Fact struct {
 	// New facts start at 1.0 and decay over time via the forgetting curve.
 	Weight    float64   `json:"weight"`
 	Embedding []float32 `json:"embedding,omitempty"`
+
+	// SupersededBy marks this fact as retired. Empty means live.
+	//
+	// A non-empty value excludes the fact from Recall immediately and
+	// unconditionally — regardless of Weight, and without waiting for a
+	// consolidation cycle. It holds the ID of the fact that replaced this one
+	// when there is a replacement, or SupersededByAgent when an agent retired
+	// it with nothing to put in its place.
+	//
+	// This is a tombstone, not a delete. The fact stays in the store, stays
+	// visible to List, export and the TUI, and keeps decaying; pruning by
+	// weight remains the only thing that ever removes it. That is what keeps
+	// the storage model append-only while still letting a contradiction take
+	// effect at once — see docs/decisions/007-supersede-tombstones.md.
+	//
+	// Added in v0.10.0. Facts written by earlier versions have no
+	// superseded_by key and load as live.
+	SupersededBy string `json:"superseded_by,omitempty"`
 }
+
+// SupersededByAgent is the SupersededBy marker for a fact an agent retired
+// without a replacement — memory_reflect's forget action. Any non-empty value
+// excludes a fact from recall; this one records that the removal was a
+// deliberate agent decision rather than a correction pointing at a newer fact.
+const SupersededByAgent = "agent"
+
+// IsSuperseded reports whether the fact has been retired and must be kept out
+// of retrieval.
+func (f Fact) IsSuperseded() bool { return f.SupersededBy != "" }
 
 // newFact creates a Fact with a new ULID and weight=1.0.
 func newFact(agentID, text string, embedding []float32) Fact {

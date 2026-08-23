@@ -19,9 +19,35 @@ import (
 // Returns the top-k fact texts, ready to inject into a system prompt.
 func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]string, error) {
 	start := time.Now()
-	facts, err := s.List(agentID)
-	if err != nil || len(facts) == 0 {
+	stored, err := s.List(agentID)
+	if err != nil || len(stored) == 0 {
 		return nil, err
+	}
+
+	// Drop superseded facts before anything is scored. Filtering here rather
+	// than at the end means a tombstoned fact cannot displace a live one from
+	// the top-k, and the three signals below rank only what is still true.
+	//
+	// The vector index is deliberately not filtered: it can still return a
+	// superseded ID, but the fusion loop iterates over facts, so such an ID
+	// only ever contributes a rank nobody reads.
+	facts := make([]Fact, 0, len(stored))
+	var supersededTexts map[string]bool
+	for _, f := range stored {
+		if f.IsSuperseded() {
+			if supersededTexts == nil {
+				supersededTexts = make(map[string]bool)
+			}
+			supersededTexts[f.Text] = true
+			continue
+		}
+		facts = append(facts, f)
+	}
+	if len(facts) == 0 {
+		if s.cfg.OnRecall != nil {
+			s.cfg.OnRecall(agentID, query, 0, time.Since(start))
+		}
+		return nil, nil
 	}
 
 	// --- Signal 1: vector similarity ---
@@ -142,7 +168,10 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 				break
 			}
 			for _, nt := range neighborTexts {
-				if !seen[nt] {
+				// The graph stores node labels, not fact IDs, so a superseded
+				// fact's text can still be reachable as a neighbour. Skip it:
+				// the tombstone has to hold on every path into the result.
+				if !seen[nt] && !supersededTexts[nt] {
 					seen[nt] = true
 					result = append(result, nt)
 				}
