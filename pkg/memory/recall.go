@@ -99,7 +99,17 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	}
 
 	// --- RRF fusion ---
+	//
+	// k=60 is the constant from Cormack, Clarke & Buettcher (SIGIR 2009). It
+	// stays fixed: it damps the difference between adjacent ranks, and with a
+	// single signal enabled it cannot change the ordering at all, so making it
+	// configurable would add a knob with no reachable effect.
 	const k = 60.0
+	w := s.cfg.SignalWeights
+	if w == nil {
+		d := DefaultSignalWeights()
+		w = &d
+	}
 	type scored struct {
 		id    string
 		score float64
@@ -108,13 +118,13 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	for _, f := range facts {
 		rrf := 0.0
 		if r, ok := vectorRank[f.ID]; ok {
-			rrf += 1.0 / (k + float64(r))
+			rrf += w.Vector / (k + float64(r))
 		}
 		if r, ok := kwRank[f.ID]; ok {
-			rrf += 1.0 / (k + float64(r))
+			rrf += w.Keyword / (k + float64(r))
 		}
 		if r, ok := recRank[f.ID]; ok {
-			rrf += 0.5 / (k + float64(r)) // recency gets half weight
+			rrf += w.Recency / (k + float64(r))
 		}
 		candidates[f.ID] = rrf
 	}
@@ -124,6 +134,21 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		allScored = append(allScored, scored{id, sc})
 	}
 	sort.Slice(allScored, func(i, j int) bool { return allScored[i].score > allScored[j].score })
+
+	// Optional relevance floor, relative to the best score in this result set.
+	// At the default of 0 every score clears the bar and the slice is
+	// untouched, which is the pre-v0.10.0 contract of returning exactly topK.
+	if s.cfg.MinRelevance > 0 && len(allScored) > 0 {
+		floor := s.cfg.MinRelevance * allScored[0].score
+		cut := len(allScored)
+		for i, sc := range allScored {
+			if sc.score < floor {
+				cut = i
+				break
+			}
+		}
+		allScored = allScored[:cut]
+	}
 
 	// Build fact lookup.
 	factByID := make(map[string]*Fact, len(facts))
@@ -254,4 +279,28 @@ func tokenize(text string) []string {
 		}
 	}
 	return result
+}
+
+// SignalWeights sets the relative contribution of each retrieval signal to the
+// fused ranking. Zero disables a signal entirely.
+//
+// The defaults are the values that were compile-time constants before v0.10.0.
+// Recency is deliberately weighted below the other two: it is a tie-breaker
+// that keeps fresh context ahead of equally-relevant stale context, not a
+// ranking criterion of its own. Weighted at parity it drowns relevance out on
+// any store with a steady write rate.
+type SignalWeights struct {
+	// Vector weights cosine similarity from the vector store. Ignored when no
+	// embedder is configured, since there are no vector ranks to weight.
+	Vector float64
+	// Keyword weights the TF-IDF approximation over stored text.
+	Keyword float64
+	// Recency weights the exponential decay from CreatedAt.
+	Recency float64
+}
+
+// DefaultSignalWeights returns the weights Recall uses when StoreConfig leaves
+// SignalWeights nil: vector 1.0, keyword 1.0, recency 0.5.
+func DefaultSignalWeights() SignalWeights {
+	return SignalWeights{Vector: 1.0, Keyword: 1.0, Recency: 0.5}
 }

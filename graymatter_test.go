@@ -3,7 +3,10 @@ package graymatter
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // TestNew_HealthyOnSuccess verifies that a successful New() returns a Memory
@@ -70,5 +73,86 @@ func TestDefaultConfig_ConsolidateThreshold(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.ConsolidateThreshold != 20 {
 		t.Fatalf("ConsolidateThreshold default: got %d, want 20", cfg.ConsolidateThreshold)
+	}
+}
+
+// TestConfig_RankingFieldsReachTheStore covers the plumbing rather than the
+// behaviour: a Config field that is accepted, documented, and then dropped on
+// the way to StoreConfig is worse than not having it, because it fails
+// silently. Both new fields are exercised through the public constructor.
+func TestConfig_RankingFieldsReachTheStore(t *testing.T) {
+	ctx := context.Background()
+
+	// Recency-only weights make the effect unmistakable: the ranking must
+	// ignore keyword relevance entirely and return the newest fact first.
+	cfg := DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.EmbeddingMode = EmbeddingKeyword
+	cfg.SignalWeights = &memory.SignalWeights{Vector: 0, Keyword: 0, Recency: 1}
+
+	mem, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewWithConfig: %v", err)
+	}
+	defer mem.Close()
+
+	if err := mem.Remember(ctx, "cfg", "kubernetes deployment pipeline notes"); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if err := mem.Remember(ctx, "cfg", "the coffee machine takes whole beans"); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	got, err := mem.Recall(ctx, "cfg", "kubernetes deployment pipeline")
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("Recall returned nothing")
+	}
+	if !strings.Contains(got[0], "coffee") {
+		t.Errorf("Config.SignalWeights did not reach the store: recency-only ranking "+
+			"put %q first, expected the newest fact", got[0])
+	}
+}
+
+// TestConfig_MinRelevanceReachesTheStore does the same for the relevance floor.
+func TestConfig_MinRelevanceReachesTheStore(t *testing.T) {
+	ctx := context.Background()
+
+	cfg := DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.EmbeddingMode = EmbeddingKeyword
+	cfg.MinRelevance = 0.9
+
+	mem, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewWithConfig: %v", err)
+	}
+	defer mem.Close()
+
+	if err := mem.Remember(ctx, "cfg", "kubernetes deployment pipeline notes"); err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	for _, filler := range []string{
+		"the coffee machine takes whole beans",
+		"parking permits renew through the portal",
+		"lunch is catered on fridays",
+	} {
+		if err := mem.Remember(ctx, "cfg", filler); err != nil {
+			t.Fatalf("Remember: %v", err)
+		}
+	}
+
+	got, err := mem.Recall(ctx, "cfg", "kubernetes deployment pipeline")
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("MinRelevance trimmed the best match")
+	}
+	if len(got) == 4 {
+		t.Errorf("Config.MinRelevance did not reach the store: all %d facts were "+
+			"returned despite a 0.9 floor: %v", len(got), got)
 	}
 }
