@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -100,13 +101,24 @@ told, so widen the bind deliberately, not by accident.`,
 	return cmd
 }
 
+// printTokenLocation announces a freshly minted token by path, never by value.
+//
+// stderr is not a private channel: CI captures it, supervisors persist it,
+// people paste it into issues. Printing the credential there put a copy of it
+// somewhere nobody was tracking, which is the wrong trade for saving one `cat`.
+// The path plus the command to read it is all the user actually needs.
+func printTokenLocation(out io.Writer, path string) {
+	fmt.Fprintf(out, "Generated an API token in %s\n", path)
+	fmt.Fprintf(out, "Clients authenticate with: Authorization: Bearer $(cat %q)\n", path)
+}
+
 // resolveServerAuth turns the auth flags into server options, and refuses the
 // one combination that caused the original finding: no credential on an
 // address the rest of the network can reach.
 //
-// It also prints the token the first time one is minted. Printing it on every
-// start would scatter the credential through logs and terminal scrollback;
-// printing it never would leave the user with a server they cannot call.
+// It also says where the token landed the first time one is minted. Saying so
+// on every start would be noise; saying nothing would leave the user with a
+// server they cannot call and no clue why.
 func resolveServerAuth(cmd *cobra.Command, addr, token string, noAuth bool) ([]server.Option, error) {
 	out := cmd.OutOrStderr()
 
@@ -131,8 +143,7 @@ func resolveServerAuth(cmd *cobra.Command, addr, token string, noAuth bool) ([]s
 			return nil, err
 		}
 		if created && !quiet {
-			fmt.Fprintf(out, "Generated API token (stored in %s):\n\n  %s\n\n",
-				httpauth.TokenFilePath(dataDir), token)
+			printTokenLocation(out, httpauth.TokenFilePath(dataDir))
 		}
 	}
 

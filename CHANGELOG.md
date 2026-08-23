@@ -35,7 +35,7 @@ but the server hands one to every caller during `initialize`.
 
 Both now bind `127.0.0.1` and require `Authorization: Bearer <token>`, compared
 in constant time. The token is 256 bits (the same `rpc.GenerateToken` the
-daemon uses), generated on first run, printed once, and stored in
+daemon uses), generated on first run and stored in
 `<data-dir>/graymatter.http-token`; `--token` and `GRAYMATTER_HTTP_TOKEN`
 override it. `/healthz` stays open so liveness probes keep working. `/metrics`
 does not — it lists every agent ID the server has seen. `--no-auth` restores

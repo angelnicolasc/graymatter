@@ -53,8 +53,12 @@ func TestMCPHTTPAuth_SharesTheTokenWithREST(t *testing.T) {
 	if created {
 		t.Error("the MCP command should have created the shared token already")
 	}
-	if !strings.Contains(buf.String(), tok) {
-		t.Errorf("first run did not print the token: %q", buf.String())
+	// The path, never the credential — same rule as the REST command.
+	if strings.Contains(buf.String(), tok) {
+		t.Errorf("first run printed the credential itself: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), httpauth.TokenFilePath(dir)) {
+		t.Errorf("first run did not say where the token landed: %q", buf.String())
 	}
 }
 

@@ -67,7 +67,11 @@ func TestServerAuth_AllowsAnonymousOnLoopback(t *testing.T) {
 }
 
 // TestServerAuth_GeneratesAndReusesToken covers the first-run experience: the
-// token is printed once, stored, and reused silently afterwards.
+// location of the token is announced once, and the token itself never is.
+//
+// stderr is not a private channel — CI captures it, supervisors persist it,
+// people paste it into issues — so printing the credential there left a copy
+// somewhere nobody was tracking.
 func TestServerAuth_GeneratesAndReusesToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(httpauth.TokenEnv, "")
@@ -80,16 +84,16 @@ func TestServerAuth_GeneratesAndReusesToken(t *testing.T) {
 		t.Fatalf("first run: %v", err)
 	}
 	first := buf.String()
-	if !strings.Contains(first, "Generated API token") {
-		t.Errorf("first run did not print the token: %q", first)
-	}
 
 	tok, _, err := httpauth.LoadOrCreateToken(dir)
 	if err != nil {
 		t.Fatalf("read back token: %v", err)
 	}
-	if !strings.Contains(first, tok) {
-		t.Errorf("printed token does not match the stored one; printed: %q", first)
+	if strings.Contains(first, tok) {
+		t.Errorf("first run printed the credential itself: %q", first)
+	}
+	if !strings.Contains(first, httpauth.TokenFilePath(dir)) {
+		t.Errorf("first run did not say where the token landed: %q", first)
 	}
 
 	cmd2, buf2 := newAuthTestCmd()
@@ -97,7 +101,10 @@ func TestServerAuth_GeneratesAndReusesToken(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 	if strings.Contains(buf2.String(), tok) {
-		t.Errorf("second run reprinted the credential: %q", buf2.String())
+		t.Errorf("second run printed the credential: %q", buf2.String())
+	}
+	if strings.Contains(buf2.String(), "Generated") {
+		t.Errorf("second run announced a token it did not mint: %q", buf2.String())
 	}
 }
 

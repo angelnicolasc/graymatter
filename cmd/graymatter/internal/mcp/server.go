@@ -31,7 +31,7 @@ import (
 
 const (
 	serverName    = "graymatter"
-	serverVersion = "0.1.0"
+	serverVersion = "0.9.0"
 
 	httpReadHeaderTimeout = 15 * time.Second
 	httpIdleTimeout       = 120 * time.Second

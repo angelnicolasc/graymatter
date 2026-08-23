@@ -117,8 +117,7 @@ func resolveMCPHTTPAuth(cmd *cobra.Command, addr, token string, noAuth bool) ([]
 			return nil, err
 		}
 		if created && !quiet {
-			fmt.Fprintf(out, "Generated API token (stored in %s):\n\n  %s\n\n",
-				httpauth.TokenFilePath(dataDir), token)
+			printTokenLocation(out, httpauth.TokenFilePath(dataDir))
 		}
 	}
 
