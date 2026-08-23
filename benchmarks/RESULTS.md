@@ -1,12 +1,11 @@
 # Retrieval quality — predictions and results
 
-**Predictions in this file were committed before the benchmark existed.** The
-check is `git log --follow benchmarks/RESULTS.md`: the commit adding the
-predictions section precedes the commit adding the numbers. A prediction
-written after seeing the data is not a prediction.
+Predictions in this file were committed before the benchmark existed.
+`git log --follow benchmarks/RESULTS.md` shows the commit adding the
+predictions preceding the commit adding the numbers.
 
-**One of the three predictions failed.** It is reported below in the same
-detail as the two that held, because that was the deal.
+All three predictions are scored below against the measurement, including the
+one that landed outside its stated band.
 
 | | |
 |---|---|
@@ -15,45 +14,43 @@ detail as the two that held, because that was the deal.
 | Command | `go run ./benchmarks/retrieval_quality` |
 | Fixtures | `benchmarks/fixtures/corpus-v1.jsonl`, `benchmarks/fixtures/queries-v1.jsonl` |
 | Environment | keyword embedder, no network, no LLM, no API key |
-| Reproducibility | 3 consecutive runs, every quality metric identical |
+| Reproducibility | 3 consecutive local runs and one CI run, every quality metric identical |
 
 ---
 
-## Why this benchmark exists
+## Scope
 
-`benchmarks/token_count` measures one thing — tokens saved against
-full-history injection — and `docs/benchmarks.md` is explicit that this is the
-weakest baseline available and that nothing in the repository measures
-retrieval quality at all. A system returning eight facts at random scores the
-same 90% reduction.
+`benchmarks/token_count` measures tokens saved against full-history injection.
+It does not measure whether the returned facts answer the query: a system
+returning eight facts at random scores the same 90% reduction.
 
-This benchmark measures the thing that actually matters, against the baseline
-production actually uses.
+This benchmark measures retrieval quality, against a sliding window as well as
+against full-history injection.
 
-## What is compared
+## Systems compared
 
 | System | Description |
 |---|---|
-| `full-history` | Every stored fact injected. The weak baseline, kept for continuity with `token_count`. |
-| `window-8` | A real sliding window: the last 8 facts by insertion order, nothing else. Implemented directly, not simulated. |
+| `full-history` | Every stored fact injected. Kept for continuity with `token_count`. |
+| `window-8` | A sliding window: the last 8 facts by insertion order. Implemented directly, not simulated. |
 | `graymatter-fixed-k` | `Recall` with `TopK=8`, every knob at its default. |
 | `graymatter-adaptive` | `Recall` with `TopK=8` and `MinRelevance=0.5`. |
 | `graymatter-recency-only` | `SignalWeights{Vector:0, Keyword:0, Recency:1}`, `TopK=8`. |
 
-`graymatter-recency-only` is an **internal cross-check, not a baseline**.
-ADR-006 claims a sliding window is the special case of this ranking with all
-weight on recency. That claim is testable precisely because `window-8` is
-implemented independently.
+`graymatter-recency-only` is a cross-check, not a baseline. ADR-006 states that
+a sliding window is the special case of this ranking with all weight on
+recency; `window-8` is implemented independently so that statement can be
+tested rather than assumed.
 
 ## Protocol
 
-Two modes, never mixed in one comparison:
+Two modes, not mixed within a single comparison:
 
 - **fixed-K** — `TopK=8` for GrayMatter against `window-8`, which holds 8
-  facts. Equal budget. All headline comparisons are in this mode.
+  facts. Equal fact budget.
 - **adaptive** — `MinRelevance=0.5`, which returns a variable number of facts.
-  Reported separately. Comparing an adaptive run against a fixed-K baseline
-  would measure the budget, not the ranking.
+  Reported separately, since a comparison against a fixed-K baseline measures
+  the budget as well as the ranking.
 
 Corpus: 78 facts across three domains (infra 30, product 24, team 24), written
 in session order 1 to 99. Queries: 6 across the same three domains, all asked
@@ -61,34 +58,33 @@ at session 100. Five **gold** facts are planted at sessions 2 to 4. One
 **stale** fact (session 8) is contradicted by a **replacement** (session 71),
 and is tombstoned before the queries run.
 
-Both fixtures are frozen. Extending means adding `corpus-v2`, never editing v1.
+Both fixtures are frozen. Extending means adding `corpus-v2` rather than
+editing v1, so results published against v1 stay reproducible.
 
 ## Metrics
 
 | Metric | Definition |
 |---|---|
 | **HitRate** | Fraction of queries where at least one gold fact appears in the returned set. |
-| **Dead** | Fraction of queries returning a fact the store already knows is superseded. |
+| **Dead** | Fraction of queries returning a fact the store records as superseded. |
 | **Tokens/q** | `words × 1.33` over the returned set — the same approximation `token_count` uses, from the same shared function, so the two benchmarks are numerically comparable. |
 | **p50 / p95** | Wall-clock per `Recall` call. |
 
-On the term *hallucination*: GrayMatter cannot hallucinate in the generative
-sense, because it only ever returns strings it stored. The meaningful analogue
-is returning a fact the store knows to be superseded, which is the **Dead**
-column. Naming it "hallucination" would borrow credibility from a metric this
-benchmark does not measure.
+The **Dead** column is named for what it measures: a returned fact that the
+store records as superseded. The generative sense of "hallucination" does not
+apply, since retrieval returns only stored strings.
 
 ---
 
 ## Results
 
-### fixed-K protocol — equal budget
+### fixed-K protocol — equal fact budget
 
 | System | HitRate | Dead | Tokens/q | Facts/q | p50 | p95 |
 |---|---|---|---|---|---|---|
-| `full-history` | 100% | **17%** | 1141 | 78.0 | 0s | 18µs |
-| `window-8` | **0%** | 0% | 95 | 8.0 | 0s | 0s |
-| `graymatter-fixed-k` | **83%** | **0%** | 114 | 8.0 | 605µs | 1.57ms |
+| `full-history` | 100% | 17% | 1141 | 78.0 | 0s | 18µs |
+| `window-8` | 0% | 0% | 95 | 8.0 | 0s | 0s |
+| `graymatter-fixed-k` | 83% | 0% | 114 | 8.0 | 605µs | 1.57ms |
 | `graymatter-recency-only` | 0% | 0% | 95 | 8.0 | 531µs | 1.61ms |
 
 ### adaptive protocol — reported separately
@@ -110,102 +106,96 @@ graymatter-recency-only     x     x     x     x     x     x
 
 `·` hit · `x` miss · `D` returned a superseded fact
 
+| Query | Domain | Text |
+|---|---|---|
+| q1 | infra | what order do migrations and the api rollout go in |
+| q2 | infra | how do i roll back a bad deploy |
+| q3 | infra | are release tags required to be signed for deploy |
+| q4 | product | what blocks enterprise customers from signing |
+| q5 | team | how many approvals does a billing change need |
+| q6 | infra | where are production secrets stored |
+
 ---
 
 ## Predictions, scored
 
-### P1 — Tokens: GrayMatter will not beat a sliding window — **FAILED**
+### P1 — tokens relative to a sliding window
 
-Predicted: within **±15%** of `window-8`.
-Measured: **114 vs 95 tokens/query — GrayMatter is 20% more expensive.**
+Predicted: `graymatter-fixed-k` within **±15%** of `window-8`.
+Measured: **114 against 95 tokens/query, +20%** — outside the stated band.
 
-The prediction failed, and it failed in the direction unfavourable to
-GrayMatter: it costs *more* than a window at the same fact budget, and by
-enough to fall outside the band.
+Cause: at equal fact count both systems return 8 facts, and the facts selected
+by relevance are longer than the 8 most recent ones. The planted gold facts are
+full explanatory sentences; the newest 8 include several short ones. Token cost
+at a fixed fact count therefore tracks the length of the selected facts, not
+the count.
 
-The cause is visible in the corpus. Both systems return 8 facts; a window
-returns whatever is newest, while GrayMatter returns whatever is most relevant,
-and on this corpus the relevant facts are the longer ones — the planted gold
-facts are full explanatory sentences, and the newest 8 include several short
-ones. Eight facts is not eight equal-sized facts.
+The adaptive mode reaches the same HitRate at 64 tokens/query by returning 4
+facts instead of 8. That measurement belongs to the adaptive protocol and is
+not a fixed-K comparison.
 
-This does not overturn the design, but it does kill a claim that could have
-been made carelessly: **at equal fact count, GrayMatter is not the cheaper
-option.** If tokens are the only thing being optimised, a window wins on this
-corpus. The adaptive mode is the interesting reply — it reaches the same
-HitRate at 64 tokens/query, below the window's 95, by returning 4 facts instead
-of 8. That is a real result, and it lives in a different protocol, so it is not
-quoted as a fixed-K win.
-
-### P2 — HitRate: the window loses old facts by construction — **HELD**
+### P2 — HitRate on facts planted early
 
 Predicted: `window-8` ≈ 0%, `graymatter-fixed-k` > 70%.
-Measured: **0%** and **83%**.
+Measured: **0%** and **83%** — both within the predicted ranges.
 
-The window scores 0 on every query, which is arithmetic: the gold facts are at
-sessions 2 to 4 and the window holds sessions 92 to 99. It cannot reach them.
+The window result is structural: the gold facts are at sessions 2 to 4 and the
+window holds sessions 92 to 99, so they are outside it.
 
-The GrayMatter side is the part that was a real prediction, and it cleared the
-threshold. The stated primary suspicion — that recency dominates the RRF fusion
-at its default weight of 0.5 — is **refuted** by the ablation in the same
-table: `graymatter-recency-only` scores 0%, identical to the window, while the
-default configuration scores 83%. Recency is not driving the default ranking.
+The stated candidate explanation for a low GrayMatter result — recency
+dominating the RRF fusion at its default weight of 0.5 — is not supported by
+the measurement. `graymatter-recency-only` scores 0%, identical to the window,
+while the default configuration scores 83%, so recency is not determining the
+default ranking.
 
 The one miss is q2, *"how do i roll back a bad deploy"*, whose gold fact reads
-*"Rollbacks are performed with argo rollouts undo…"*. The query says "roll
-back"; the fact says "Rollbacks". The keyword scorer has no stemming, so the
-two do not match, and the fact is reachable only through terms the query does
-not use. That is a concrete, actionable retrieval limitation rather than a
-mystery, and it is the single reason this is 83% instead of 100%.
+*"Rollbacks are performed with argo rollouts undo…"*. The query contains "roll
+back"; the fact contains "Rollbacks". The keyword scorer applies no stemming,
+so the two do not match, and the fact is reachable only through terms the query
+does not use. This accounts for the difference between 83% and 100%.
 
-### P3 — Contradictions: zero dead facts after supersede — **HELD**
+### P3 — superseded facts after tombstoning
 
 Predicted: 0 queries returning the superseded fact.
 Measured: **0**, against **17% for `full-history`**.
 
-`full-history` hands the agent the dead fact on the one query that asks about
-it, which is the failure mode the tombstone exists to prevent. `window-8` also
-scores 0 here, and it is worth being precise about why: not because a window
-knows the fact is dead, but because the dead fact is at session 8 and falls
-outside the window entirely. It avoids the contradiction by having forgotten
-everything, which is the same reason it scores 0% on HitRate. Those two numbers
-are the same fact about a window, read twice.
+`full-history` returns the superseded fact on the one query that asks about it.
+`window-8` also measures 0 here, for a structural reason rather than a
+supersede mechanism: the superseded fact is at session 8 and falls outside the
+window. The same property produces its 0% HitRate.
 
 ---
 
-## Bonus: ADR-006 checked empirically
+## ADR-006 cross-check
 
-ADR-006 claims a sliding window is the special case of this ranking with all
-weight on recency. The benchmark tests it: `window-8` is implemented
-independently, and for **every query**, `SignalWeights{0,0,1}` returned exactly
-the same set of facts.
+ADR-006 states that a sliding window is the special case of this ranking with
+all weight on recency. `window-8` is implemented independently, and for **every
+query** `SignalWeights{0,0,1}` returned exactly the same set of facts.
 
 ```
 CONFIRMED: for every query, SignalWeights{0,0,1} returns exactly the
 facts an independently implemented sliding window returns.
 ```
 
-Identical HitRate, identical dead rate, identical token count, identical facts.
-The claim in ADR-006 is now demonstrated rather than asserted, and the check
-runs on every invocation, so it will start failing if that stops being true.
+Identical HitRate, dead rate, token count and fact set. The check runs on every
+invocation, so it fails if that stops holding.
 
 ---
 
-## What this benchmark does not measure
+## Out of scope for this benchmark
 
-- **Vector retrieval.** Keyword embedder only, so the numbers are reproducible
-  without an API key. Vector recall would likely fix q2, since "roll back" and
-  "rollbacks" are close in embedding space and far apart in token space. That
-  is a hypothesis, not a result.
+- **Vector retrieval.** Keyword embedder only, so results are reproducible
+  without an API key. Whether vector recall resolves q2 — "roll back" and
+  "rollbacks" being close in embedding space and distant in token space — is
+  untested.
 - **Consolidation.** Runs with summarisation disabled.
-- **Scale.** 78 facts. Latency at 78 facts says nothing about 100k.
+- **Scale.** 78 facts. Latency at this size does not extrapolate.
 - **Multi-hop questions.** Every query is answerable from a single fact.
-- **Query realism.** Six queries written by the same person who planted the
-  facts. That is the most obvious weakness in this design, and the reason the
-  corpus is versioned: a v2 written by someone else, or drawn from real
-  sessions, would be worth more than any amount of tuning against v1.
+- **Query provenance.** The six queries were written alongside the corpus. A
+  v2 corpus with queries drawn from recorded sessions would test generalisation
+  that v1 cannot.
 
-Latency figures are coarse: the measurements run on Windows, where the timer
-granularity is around 1ms, and every value here is within a few multiples of
-that floor. They establish that recall is sub-millisecond-ish at this scale and
-nothing finer.
+Latency figures are coarse: measurements ran on Windows, where timer
+granularity is about 1ms, and every value is within a small multiple of that
+floor. They establish sub-millisecond recall at this corpus size and no finer
+resolution than that.

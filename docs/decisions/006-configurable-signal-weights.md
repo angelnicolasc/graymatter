@@ -12,10 +12,11 @@ ranking.
 That blocked a claim worth being able to make honestly.
 
 The natural comparison for this kind of system is a **sliding window**: keep
-the last K observations, drop the rest. It is what production systems actually
-do, it costs nothing to implement, and it is the baseline a sceptical reader
-has in mind. The appealing framing is that a sliding window is a *special case*
-of this ranking — the one where all the weight sits on recency.
+the last K observations, drop the rest. It is what production systems do, it
+costs nothing to implement, and it is therefore the reference point any
+retrieval claim has to be measured against. The framing worth testing is that a
+sliding window is a *special case* of this ranking — the one where all the
+weight sits on recency.
 
 With hardcoded weights that framing was false. Not an overstatement: false.
 There was no configuration of GrayMatter that ranked by recency alone, so the
@@ -71,8 +72,8 @@ when it is turned up to 1.0 alone.
 ## Consequences
 
 - A window baseline can be measured without writing one. Any comparison
-  against truncation reconfigures the same code path, so there is no second
-  implementation whose fairness a reader has to take on trust.
+  against truncation reconfigures the same code path, so its fairness is a
+  property of the configuration rather than of a second implementation.
 - Weights are a supported surface now, so a bad combination is a supported way
   to get bad results. `{0, 0, 0}` scores everything zero and returns an
   arbitrary K. Nothing validates this, and nothing should — a caller asking
@@ -98,11 +99,11 @@ rather than implied.
 
 ## Alternatives rejected
 
-- **Keep them hardcoded and make the claim anyway.** Marketing. The exact
-  failure this release exists to remove.
-- **Keep them hardcoded and write a separate window baseline.** Honest and
-  worse: two retrieval paths to keep in step, and a reader still has to trust
-  that the baseline was implemented fairly.
+- **Keep them hardcoded and make the claim anyway.** The claim would describe
+  a configuration that cannot be reached, so it would be untestable.
+- **Keep them hardcoded and write a separate window baseline.** Correct but
+  costlier: two retrieval paths to keep in step, and the baseline's fairness
+  becomes a property of a second implementation rather than of configuration.
 - **A plain struct instead of a pointer.** Ambiguous zero value; see above.
 - **Expose k too.** A knob that cannot change a single-signal ordering.
 - **Presets (`ModeRecent`, `ModeRelevant`) instead of numbers.** Friendlier,

@@ -225,13 +225,13 @@ func clone3(fs []fact) []fact {
 	return out
 }
 
-// TestReadmeQualityTableMatchesMeasurement gates the numbers README.md
-// publishes from this benchmark.
+// TestReadmeQualityTableMatchesMeasurement gates every number README.md
+// publishes from this benchmark, including the adaptive column.
 //
-// The previous round of work removed a five-fold-wrong token table from
+// An earlier round removed a five-fold-wrong token table from
 // docs/benchmarks.md that had survived several releases because nothing
-// compared it against a run. Publishing a quality table in README.md without
-// gating it would recreate exactly that, one release later.
+// compared it against a run. Publishing a quality table without gating it
+// would recreate that.
 func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 	raw, err := os.ReadFile("../../README.md")
 	if err != nil {
@@ -239,17 +239,21 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 	}
 	readme := string(raw)
 
-	suite, err := runAll(fixtureDir)
+	measured, err := runAll(fixtureDir)
 	if err != nil {
 		t.Fatalf("runAll: %v", err)
 	}
-	window, ok := suite.byName("window-8")
+	window, ok := measured.byName("window-8")
 	if !ok {
 		t.Fatal("window-8 missing from the measured suite")
 	}
-	gm, ok := suite.byName("graymatter-fixed-k")
+	gm, ok := measured.byName("graymatter-fixed-k")
 	if !ok {
 		t.Fatal("graymatter-fixed-k missing from the measured suite")
+	}
+	adaptive, ok := measured.byName("graymatter-adaptive")
+	if !ok {
+		t.Fatal("graymatter-adaptive missing from the measured suite")
 	}
 
 	// Each published row, as it appears in README.md, against the measurement.
@@ -259,18 +263,23 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 	}{
 		{
 			label: "HitRate on the planted old fact",
-			row: fmt.Sprintf("| Finds a fact planted 96 sessions ago | %.0f%% | %.0f%% |",
-				window.HitRate, gm.HitRate),
+			row: fmt.Sprintf("| Finds a fact planted 96 sessions ago | %.0f%% | %.0f%% | %.0f%% |",
+				window.HitRate, gm.HitRate, adaptive.HitRate),
 		},
 		{
 			label: "dead-fact rate",
-			row: fmt.Sprintf("| Returns a fact known to be superseded | %.0f%% | %.0f%% |",
-				window.DeadRate, gm.DeadRate),
+			row: fmt.Sprintf("| Returns a fact known to be superseded | %.0f%% | %.0f%% | %.0f%% |",
+				window.DeadRate, gm.DeadRate, adaptive.DeadRate),
 		},
 		{
 			label: "tokens per query",
-			row: fmt.Sprintf("| Tokens per query | %.0f | %.0f |",
-				window.AvgTokens, gm.AvgTokens),
+			row: fmt.Sprintf("| Tokens per query | %.0f | %.0f | %.0f |",
+				window.AvgTokens, gm.AvgTokens, adaptive.AvgTokens),
+		},
+		{
+			label: "facts per query",
+			row: fmt.Sprintf("| Facts per query | %.0f | %.0f | %.0f |",
+				window.AvgReturned, gm.AvgReturned, adaptive.AvgReturned),
 		},
 	} {
 		if !strings.Contains(readme, tc.row) {
@@ -281,13 +290,24 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 		}
 	}
 
-	// The README states GrayMatter costs more per query than a window. That is
-	// a claim about the direction of the result, so it gets checked too: if it
-	// ever reverses, the sentence has to change with it.
+	// The prose around the table states two directional relationships. Both are
+	// checked, so a reversal fails here instead of leaving a stale sentence
+	// standing next to a correct table.
 	if gm.AvgTokens <= window.AvgTokens {
-		t.Errorf("README.md says GrayMatter costs more per query than a window, but "+
-			"the benchmark now measures GrayMatter at %.0f and the window at %.0f. "+
-			"The claim has reversed and the README must be rewritten.",
+		t.Errorf("README.md states GrayMatter costs more per query than a window at "+
+			"equal fact count, but the measurement is GrayMatter %.0f, window %.0f. "+
+			"The relationship reversed; update the sentence.",
 			gm.AvgTokens, window.AvgTokens)
+	}
+	if adaptive.AvgTokens >= window.AvgTokens {
+		t.Errorf("README.md states MinRelevance drops below the window on tokens, but "+
+			"the measurement is adaptive %.0f, window %.0f. "+
+			"The relationship reversed; update the sentence.",
+			adaptive.AvgTokens, window.AvgTokens)
+	}
+	if adaptive.HitRate != gm.HitRate {
+		t.Errorf("README.md states MinRelevance keeps the same recall, but the "+
+			"measurement is adaptive %.0f%% against fixed-K %.0f%%. "+
+			"Update the sentence.", adaptive.HitRate, gm.HitRate)
 	}
 }
