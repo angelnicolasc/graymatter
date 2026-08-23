@@ -1,0 +1,12 @@
+# Multi-hop queries for corpus-v1, asked at session 100 (P1.2).
+#
+# These queries deliberately share NO surface terms with their gold facts:
+# plain keyword ranking cannot reach them. They are answerable only through a
+# bridge — another retrieved fact that mentions an entity the gold fact also
+# contains. A system that answers them proves the graph adds retrieval value;
+# a system that cannot says the graph is decoration.
+#
+# Frozen like queries-v1: never edit; supersede with queries-multihop-v2.
+{"asked_at_session": 100, "domain": "infra", "forbidden": [], "gold": ["f002"], "id": "q7", "text": "how did someone break prod by doing things backwards"}
+{"asked_at_session": 100, "domain": "product", "forbidden": [], "gold": ["f031"], "id": "q8", "text": "why do big accounts stall at contract time"}
+{"asked_at_session": 100, "domain": "team", "forbidden": [], "gold": ["f055"], "id": "q9", "text": "is one reviewer enough for payment logic work"}
