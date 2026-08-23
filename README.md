@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.10.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/coverage-77.0%25-brightgreen" alt="Coverage 77.0%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
@@ -110,9 +110,8 @@ embeddable, zero-dependency memory layer for agents.
 That gap is GrayMatter.
 
 <p align="center">
-  <img src=".github/assets/token-reduction-chart1.jpg" alt="GrayMatter-Chart1" width="800px" style="max-width: 900px;">
+  <img src=".github/assets/token-reduction.svg" alt="Context tokens per query vs full-history injection" width="800px" style="max-width: 900px;">
 </p>
-
 
 <p align="center">
 <strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>

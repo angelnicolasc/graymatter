@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="400" viewBox="0 0 820 400" font-family="ui-sans-serif,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="10" y="30" font-size="19" font-weight="600" fill="#0f172a">Context tokens per query vs full-history injection</text>
+<text x="10" y="50" font-size="12.5" fill="#64748b">Approx tokens = words × 1.33 · lower is better · generated from the gated table in docs/benchmarks.md</text>
+<line x1="70" y1="249.5" x2="796" y2="249.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="253.5" font-size="11" fill="#94a3b8" text-anchor="end">1,740</text>
+<line x1="70" y1="185.0" x2="796" y2="185.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="189.0" font-size="11" fill="#94a3b8" text-anchor="end">3,480</text>
+<line x1="70" y1="120.5" x2="796" y2="120.5" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="124.5" font-size="11" fill="#94a3b8" text-anchor="end">5,220</text>
+<line x1="70" y1="56.0" x2="796" y2="56.0" stroke="#e2e8f0" stroke-width="1"/>
+<text x="62" y="60.0" font-size="11" fill="#94a3b8" text-anchor="end">6,960</text>
+<rect x="122.8" y="311.0" width="52" height="3.0" rx="3" fill="#cbd5e1"/>
+<text x="148.8" y="304.0" font-size="11.5" fill="#64748b" text-anchor="middle">80</text>
+<rect x="166.8" y="311.0" width="52" height="3.0" rx="3" fill="#2563eb"/>
+<text x="192.8" y="304.0" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">80</text>
+<text x="160.8" y="336.0" font-size="12" fill="#0f172a" text-anchor="middle">1 session</text>
+<rect x="304.2" y="290.6" width="52" height="23.4" rx="3" fill="#cbd5e1"/>
+<text x="330.2" y="283.6" font-size="11.5" fill="#64748b" text-anchor="middle">630</text>
+<rect x="348.2" y="293.6" width="52" height="20.4" rx="3" fill="#2563eb"/>
+<text x="374.2" y="286.6" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">550 (−12%)</text>
+<text x="342.2" y="336.0" font-size="12" fill="#0f172a" text-anchor="middle">10 sessions</text>
+<rect x="485.8" y="244.3" width="52" height="69.7" rx="3" fill="#cbd5e1"/>
+<text x="511.8" y="237.3" font-size="11.5" fill="#64748b" text-anchor="middle">1,880</text>
+<rect x="529.8" y="293.6" width="52" height="20.4" rx="3" fill="#2563eb"/>
+<text x="555.8" y="286.6" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">550 (−71%)</text>
+<text x="523.8" y="336.0" font-size="12" fill="#0f172a" text-anchor="middle">30 sessions</text>
+<rect x="667.2" y="56.0" width="52" height="258.0" rx="3" fill="#cbd5e1"/>
+<text x="693.2" y="49.0" font-size="11.5" fill="#64748b" text-anchor="middle">6,960</text>
+<rect x="711.2" y="289.2" width="52" height="24.8" rx="3" fill="#2563eb"/>
+<text x="737.2" y="282.2" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">670 (−90%)</text>
+<text x="705.2" y="336.0" font-size="12" fill="#0f172a" text-anchor="middle">100 sessions</text>
+<rect x="70" y="354.0" width="12" height="12" rx="2" fill="#cbd5e1"/>
+<text x="88" y="364.0" font-size="12" fill="#475569">full history</text>
+<rect x="180" y="354.0" width="12" height="12" rx="2" fill="#2563eb"/>
+<text x="198" y="364.0" font-size="12" fill="#475569">GrayMatter top-8</text>
+</svg>
