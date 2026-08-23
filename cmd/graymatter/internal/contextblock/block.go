@@ -220,6 +220,11 @@ func spanScanner(content string) [][2]int {
 // content. found=false means the file carries no context block at all;
 // found=true with an unparsable or missing header still yields the raw body
 // so Verify can report the mismatch instead of silently losing it.
+//
+// The returned body is normalised to LF regardless of the file's dominant
+// line endings. This is what makes hashes portable across platforms: the
+// digest recorded by a Linux sync must still verify inside a checkout that
+// hands the file back as CRLF, so both sides hash the canonical form.
 func Parse(content string) (body string, meta SyncMeta, verified, found bool) {
 	spans := spanScanner(content)
 	if len(spans) == 0 {
@@ -228,7 +233,11 @@ func Parse(content string) (body string, meta SyncMeta, verified, found bool) {
 	// Span ends are exclusive past the END MARKER; the body lives strictly
 	// before that marker, so cut at its start, not its end.
 	inner := content[spans[0][0]+len(BeginMarker) : spans[0][1]-len(EndMarker)]
+	// Canonicalise line endings BEFORE any structural cut: a CRLF host file
+	// must parse identically to an LF one, or hashes stop being portable.
+	inner = strings.ReplaceAll(inner, "\r\n", "\n")
 	inner = strings.TrimPrefix(inner, "\n")
+	inner = strings.TrimPrefix(inner, "\r")
 	// The trailing newline is part of the body and must survive: hashes are
 	// taken over the body exactly as written, and trimming here would fail
 	// verification on an untouched round trip.
@@ -243,6 +252,7 @@ func Parse(content string) (body string, meta SyncMeta, verified, found bool) {
 	} else {
 		body = ""
 	}
+	header = strings.TrimSuffix(header, "\r")
 
 	meta, ok := parseHeader(header)
 	if !ok {

@@ -147,6 +147,24 @@ func TestParse_DetectsManualEdit(t *testing.T) {
 	}
 }
 
+// TestParse_CRLFBlockVerifies pins cross-platform hash portability: a block
+// written into a CRLF host file must verify against the digest recorded from
+// its LF form, or every Windows checkout would read as "edited by hand".
+func TestParse_CRLFBlockVerifies(t *testing.T) {
+	sel, _ := Select([]memory.Fact{fact("a", 1, 0, "alpha")}, DefaultBudgetTokens)
+	body := RenderBody(sel)
+	block := RenderBlock(body, SyncMeta{SHA256: HashBody(body), Facts: len(sel), SyncedAt: time.Now().UTC()})
+	crlfFile := strings.ReplaceAll(block, "\n", "\r\n")
+
+	gotBody, _, verified, found := Parse(crlfFile)
+	if !found || !verified {
+		t.Fatalf("CRLF block failed verification (found=%v verified=%v)", found, verified)
+	}
+	if gotBody != body {
+		t.Fatalf("normalised body differs:\n got %q\nwant %q", gotBody, body)
+	}
+}
+
 func TestParse_MissingHeaderIsUnverifiedButVisible(t *testing.T) {
 	orphan := BeginMarker + "\n- someone deleted the header\n" + EndMarker + "\n"
 	_, _, verified, found := Parse(orphan)
