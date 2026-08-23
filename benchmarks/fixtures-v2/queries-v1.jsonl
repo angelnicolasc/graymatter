@@ -1,0 +1,7 @@
+# Standard queries for corpus-v2 (asked at session 60).
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f101"], "id": "v2q1", "text": "when did the client sign off on rollout scope"}
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f102"], "id": "v2q2", "text": "who owns the capstone rubric"}
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f103"], "id": "v2q3", "text": "what margin did the pricing review lock"}
+{"asked_at_session": 60, "domain": "infra", "forbidden": [], "gold": ["f133"], "id": "v2q4", "text": "which incidents get paged to a human"}
+{"asked_at_session": 60, "domain": "team", "forbidden": [], "gold": ["f145"], "id": "v2q5", "text": "how many people must agree before hiring proceeds"}
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f105"], "id": "v2q6", "text": "which milestones got approved at the steering call"}

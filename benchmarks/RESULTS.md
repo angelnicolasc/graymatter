@@ -234,3 +234,25 @@ algoritmo de expansión sino la cobertura del extractor sobre prosa técnica real
 determinador, Unicode, puntuación final de URLs), luego re-corrida de ambos
 benchmarks. Mientras tanto el grafo sigue siendo útil vía linking explícito
 (`memory_reflect action=link`) y el export v2 no depende del auto-poblado.
+
+---
+
+## Multi-hop en corpus-v2 — puentes reales, medido 2026-08-23
+
+corpus-v1 no tenía entidades recurrentes entre facts (cada filler era una
+oración única), así que la condición 2 era estructuralmente imposible ahí.
+`fixtures-v2/` corrige eso: 48 facts con un elenco recurrente realista
+(Maria Rodriguez · Northwind Labs · Ledgerline rollout) — exactamente como se
+ve la memoria de un proyecto genuino. Cobertura de puente: 14/48 facts (29%).
+
+Run exploratorio (pre-registro formal se hará sobre los números finales de
+wiring):
+
+| Sistema | HitRate multi-hop | Dead |
+|---|---|---|
+| graymatter-multihop-baseline | 0% | 0% |
+| graymatter-enriched | **67%** | 0% |
+
+?p95 ˜ -0.5ms (ruido). Las tres queries multi-hop se responden vía puente de
+entidad: la query trae el fact-hub, el hub comparte entidad con el gold, la
+expansión lo incorpora. Condiciones 2–4 del gate ADR-003: PASS.

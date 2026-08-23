@@ -1,0 +1,7 @@
+# Multi-hop queries for corpus-v2 (asked at session 60).
+#
+# Gold facts share zero surface terms with their queries; the intended path
+# is: query matches a hub fact, hub fact shares an entity with the gold.
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f101"], "id": "v2q7", "text": "status of the approved milestone list for the fourth quarter"}
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f102"], "id": "v2q8", "text": "who presented findings to the faculty panel lately"}
+{"asked_at_session": 60, "domain": "mba", "forbidden": [], "gold": ["f103"], "id": "v2q9", "text": "what numbers were frozen ahead of the board session"}

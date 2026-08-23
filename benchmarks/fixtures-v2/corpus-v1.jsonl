@@ -1,0 +1,56 @@
+# GrayMatter retrieval-quality corpus, version 2.
+#
+# Built to exercise entity bridges: a recurring cast (Maria Rodriguez /
+# Northwind Labs / the Ledgerline rollout) appears across sessions the way
+# real project memory does. Three gold facts planted early are reachable
+# through those bridges from their multi-hop queries.
+#
+# Frozen fixture. Extend via corpus-v3, never edit this file.
+{"domain": "mba", "id": "f101", "kind": "gold", "session": 2, "text": "Northwind Labs signed off on the Ledgerline rollout scope after the steering call."}
+{"domain": "mba", "id": "f102", "kind": "gold", "session": 4, "text": "Maria Rodriguez defined the capstone rubric for the whole cohort."}
+{"domain": "mba", "id": "f103", "kind": "gold", "session": 6, "text": "The Ledgerline pricing review locked unit economics at a 71 percent margin."}
+{"domain": "infra", "id": "f104", "kind": "filler", "session": 8, "text": "Weekly sync notes moved into the shared channel archive."}
+{"domain": "mba", "id": "f105", "kind": "hub", "session": 10, "text": "The client steering call approved the Ledgerline rollout milestones for Q4."}
+{"domain": "mba", "id": "f106", "kind": "hub", "session": 12, "text": "Grading standards for the final deliverable were circulated by Maria Rodriguez."}
+{"domain": "mba", "id": "f107", "kind": "hub", "session": 14, "text": "Planning documents froze the Ledgerline pricing review ahead of the board session."}
+{"domain": "mba", "id": "f108", "kind": "filler", "session": 16, "text": "Northwind Labs asked for weekly deltas instead of long status essays."}
+{"domain": "mba", "id": "f109", "kind": "filler", "session": 18, "text": "Reading load settled at three papers per week plus case notes."}
+{"domain": "mba", "id": "f110", "kind": "filler", "session": 20, "text": "The Ledgerline rollout retro surfaced two process fixes worth keeping."}
+{"domain": "mba", "id": "f111", "kind": "filler", "session": 22, "text": "Survey responses crossed one hundred participants this week."}
+{"domain": "mba", "id": "f112", "kind": "hub", "session": 24, "text": "Maria Rodriguez presented interim findings to the faculty panel."}
+{"domain": "mba", "id": "f113", "kind": "filler", "session": 26, "text": "Northwind Labs extended access to their analytics sandbox."}
+{"domain": "mba", "id": "f114", "kind": "filler", "session": 28, "text": "Unit cost assumptions were revisited after vendor quotes arrived."}
+{"domain": "mba", "id": "f115", "kind": "filler", "session": 30, "text": "The Ledgerline rollout hit its first external deadline without escalations."}
+{"domain": "mba", "id": "f116", "kind": "filler", "session": 32, "text": "Rubric clarifications went out to every study group on Friday."}
+{"domain": "mba", "id": "f117", "kind": "filler", "session": 34, "text": "Vendor onboarding for the second data source completed cleanly."}
+{"domain": "mba", "id": "f118", "kind": "hub", "session": 36, "text": "Maria Rodriguez trimmed the appendix and moved proofs to an annex."}
+{"domain": "mba", "id": "f119", "kind": "filler", "session": 38, "text": "Pricing sensitivity tables were rebuilt with fresher inputs."}
+{"domain": "mba", "id": "f120", "kind": "filler", "session": 40, "text": "Northwind Labs joined the quarterly business review uninvited and stayed."}
+{"domain": "mba", "id": "f121", "kind": "filler", "session": 42, "text": "Interview transcripts were coded independently by two readers."}
+{"domain": "mba", "id": "f122", "kind": "filler", "session": 44, "text": "The Ledgerline rollout dashboard went live for internal stakeholders."}
+{"domain": "mba", "id": "f123", "kind": "filler", "session": 46, "text": "Faculty feedback pushed the team toward sharper hypothesis wording."}
+{"domain": "mba", "id": "f124", "kind": "filler", "session": 48, "text": "Margin assumptions survived the sensitivity sweep unchanged."}
+{"domain": "mba", "id": "f125", "kind": "filler", "session": 50, "text": "Northwind Labs referenced our methodology in their own whitepaper."}
+{"domain": "mba", "id": "f126", "kind": "filler", "session": 52, "text": "Capstone office hours doubled in attendance near midterms."}
+{"domain": "mba", "id": "f127", "kind": "filler", "session": 54, "text": "The Ledgerline rollout scope note became the reference for change requests."}
+{"domain": "mba", "id": "f128", "kind": "filler", "session": 56, "text": "Grading appeals closed with no score adjustments required."}
+{"domain": "mba", "id": "f129", "kind": "filler", "session": 58, "text": "Final margin reporting aligned across finance and strategy sections."}
+{"domain": "infra", "id": "f130", "kind": "filler", "session": 3, "text": "Staging runs on three small nodes with nightly snapshots."}
+{"domain": "team", "id": "f131", "kind": "filler", "session": 7, "text": "Retrospectives stay blameless and publish within five days."}
+{"domain": "product", "id": "f132", "kind": "filler", "session": 11, "text": "Trial users see the full feature set for fourteen days."}
+{"domain": "infra", "id": "f133", "kind": "filler", "session": 15, "text": "Alert routing pages only severity one incidents."}
+{"domain": "product", "id": "f134", "kind": "filler", "session": 19, "text": "Export supports CSV today; spreadsheets were explicitly descoped."}
+{"domain": "team", "id": "f135", "kind": "filler", "session": 21, "text": "Pull requests stale after five working days get flagged."}
+{"domain": "infra", "id": "f136", "kind": "filler", "session": 25, "text": "Feature flags cache for thirty seconds server side."}
+{"domain": "product", "id": "f137", "kind": "filler", "session": 27, "text": "In-app notifications batch hourly to reduce fatigue."}
+{"domain": "infra", "id": "f138", "kind": "filler", "session": 31, "text": "Backups verify restores monthly, not just creation."}
+{"domain": "team", "id": "f139", "kind": "filler", "session": 35, "text": "Design docs precede any estimate above two weeks."}
+{"domain": "infra", "id": "f140", "kind": "filler", "session": 39, "text": "Canary traffic starts at five percent for ten minutes."}
+{"domain": "product", "id": "f141", "kind": "filler", "session": 43, "text": "Custom fields stop at fifty for performance reasons."}
+{"domain": "team", "id": "f142", "kind": "filler", "session": 45, "text": "Escalations reach engineers through one dedicated channel."}
+{"domain": "infra", "id": "f143", "kind": "filler", "session": 47, "text": "Log retention splits debug and audit horizons."}
+{"domain": "product", "id": "f144", "kind": "filler", "session": 51, "text": "Webhooks retry with exponential backoff up to a day."}
+{"domain": "team", "id": "f145", "kind": "filler", "session": 53, "text": "Hiring loops require unanimous sign-off to proceed."}
+{"domain": "infra", "id": "f146", "kind": "filler", "session": 55, "text": "Rate limits apply per key rather than per user."}
+{"domain": "product", "id": "f147", "kind": "filler", "session": 57, "text": "Search indexes titles and tags, never attachments."}
+{"domain": "team", "id": "f148", "kind": "filler", "session": 59, "text": "Documentation edits skip the dual-approval rule."}
