@@ -166,17 +166,3 @@ func writePIDFile(t *testing.T, dataDir, sessionID string, pid int) {
 		t.Fatalf("write pid file: %v", err)
 	}
 }
-
-// processAlive reports whether pid still exists. Signal 0 is the portable-ish
-// probe on Unix; on Windows FindProcess alone does not prove liveness, so this
-// stays a best-effort check that never fails the test spuriously.
-func processAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true // cannot probe cheaply; the assertions above carry the test
-	}
-	return p.Signal(nil) == nil
-}

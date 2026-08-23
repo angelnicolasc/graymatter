@@ -88,11 +88,14 @@ func checkPrivateDir(dir string, uid int) error {
 	if err != nil {
 		return fmt.Errorf("rpc: stat runtime dir %s: %w", dir, err)
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("rpc: runtime path %s is not a directory", dir)
-	}
+	// Symlink first: Lstat on a link reports IsDir() false, so checking that
+	// ahead of this would answer "not a directory" for what is really someone
+	// redirecting the socket somewhere they control.
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("rpc: runtime dir %s is a symlink; refusing to use it", dir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("rpc: runtime path %s is not a directory", dir)
 	}
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf(

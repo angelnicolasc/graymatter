@@ -10,10 +10,26 @@ import (
 	"testing"
 )
 
+// shortTempDir returns a temp directory with a deliberately short path.
+//
+// t.TempDir() embeds the test name, and on macOS $TMPDIR is already around 45
+// characters before that — together they blow past sun_path before a socket
+// name is even appended, which is the exact budget these tests are about. /tmp
+// exists on every platform this file builds for.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "gm")
+	if err != nil {
+		t.Skipf("cannot create a short temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // TestSocketPath_PrefersTheDataDir keeps the common case intact: a socket
 // beside the store, where `ls .graymatter` shows it.
 func TestSocketPath_PrefersTheDataDir(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	got, err := socketPath(dir)
 	if err != nil {
 		t.Fatalf("socketPath: %v", err)
@@ -40,7 +56,7 @@ func longDataDir(t *testing.T) string {
 // name, so any local user could bind there first — denying the daemon its
 // socket, or standing in for it long enough to be handed a client's token.
 func TestSocketPath_FallbackLivesInAPrivateDir(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", shortTempDir(t))
 
 	got, err := socketPath(longDataDir(t))
 	if err != nil {
@@ -102,15 +118,19 @@ func TestSocketPath_RefusesASymlinkedRuntimeDir(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := socketPath(longDataDir(t)); err == nil {
-		t.Error("socketPath accepted a symlinked runtime dir")
+	_, err := socketPath(longDataDir(t))
+	if err == nil {
+		t.Fatal("socketPath accepted a symlinked runtime dir")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error = %v, want it to name the symlink rather than the shape of it", err)
 	}
 }
 
 // TestSocketPath_FallbackIsStable — the discovery file records the path, but a
 // path that changed between calls would still be a bug worth catching.
 func TestSocketPath_FallbackIsStable(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", shortTempDir(t))
 	dataDir := longDataDir(t)
 
 	first, err := socketPath(dataDir)
