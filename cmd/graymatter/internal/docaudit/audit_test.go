@@ -395,12 +395,191 @@ func TestPrecisionHarness_TwentyDocuments(t *testing.T) {
 	}
 }
 
+func TestFindDuplicates_NearBoundaryThreshold(t *testing.T) {
+	// Pins the declared Jaccard threshold from both sides: a pair scoring
+	// between DupThreshold and 1.0 must warn, a pair below it must stay
+	// silent. Identical paragraphs alone cannot pin the threshold because
+	// they score 1.0 against any bar.
+	words := func(prefix string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("%s%03d", prefix, i)
+		}
+		return out
+	}
+	base := words("w", 34)
+	near := append(words("w", 32), words("x", 2)...) // J = 28/32 = 0.875 → warn
+	far := append(words("w", 29), words("y", 5)...)  // J = 25/35 = 0.714 → silent
+	lines := []string{
+		strings.Join(base, " "),
+		"",
+		strings.Join(near, " "),
+		"",
+		strings.Join(far, " "),
+	}
+	pairs := findDuplicates(lines)
+	if len(pairs) != 1 {
+		t.Fatalf("got %d duplicate pairs, want exactly 1 (the ≥%.2f one): %+v", len(pairs), DupThreshold, pairs)
+	}
+	if pairs[0].Score < DupThreshold {
+		t.Errorf("reported pair scores %.2f, below threshold", pairs[0].Score)
+	}
+}
+
+func TestAudit_StalenessMixedAgesWithFixedClock(t *testing.T) {
+	// Exercises every bucket plus the median with controlled commit dates and
+	// an injected clock: six lines per committed band and two uncommitted.
+	dir, commit := gitInitRepo(t)
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	dateAt := func(daysAgo int) string { return now.AddDate(0, 0, -daysAgo).Format(time.RFC3339) }
+
+	band := func(tag string) string {
+		var b strings.Builder
+		for i := 1; i <= 6; i++ {
+			fmt.Fprintf(&b, "Band %s line %d carries ordinary words for blame purposes.\n", tag, i)
+		}
+		return b.String()
+	}
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), "# Ages\n\n"+band("old"))
+	commit("AGENTS.md", "# Ages\n\n"+band("old"), dateAt(200))
+
+	f, _ := os.OpenFile(filepath.Join(dir, "AGENTS.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(band("mid"))
+	f.Close()
+	commitAll(t, dir, dateAt(60))
+
+	f, _ = os.OpenFile(filepath.Join(dir, "AGENTS.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(band("new"))
+	f.Close()
+	commitAll(t, dir, dateAt(10))
+
+	f, _ = os.OpenFile(filepath.Join(dir, "AGENTS.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString("Uncommitted line alpha appended just now.\nUncommitted line beta appended just now.\n")
+	f.Close()
+
+	rep, err := AuditPath(filepath.Join(dir, "AGENTS.md"), Options{Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := rep.Files[0].Staleness
+	if st == nil || !st.Available {
+		t.Fatalf("staleness unavailable: %+v", st)
+	}
+	// Eight, not six: the heading and its blank line were committed with the
+	// oldest band and blame keeps them there.
+	if st.Recent != 6 || st.Aging != 6 || st.Stale != 8 || st.Uncommitted != 2 {
+		t.Errorf("buckets recent=%d aging=%d stale=%d uncommitted=%d, want 6/6/8/2",
+			st.Recent, st.Aging, st.Stale, st.Uncommitted)
+	}
+	// Median must sit strictly between the youngest and oldest line ages:
+	// pins the order statistic, not just any single value.
+	if !(st.MedianAgeDays > 11 && st.MedianAgeDays < 199) {
+		t.Errorf("median %.1f outside the open interval (11, 199)", st.MedianAgeDays)
+	}
+	// With a 60-day median no staleness warning may fire: the gate sits at
+	// MedianStaleDays, and this asserts it from the quiet side.
+	for _, fnd := range rep.Findings {
+		if fnd.Check == "staleness" {
+			t.Errorf("60-day median produced a staleness finding: %+v", fnd)
+		}
+	}
+}
+
+// commitAll stages everything and commits with both dates overridden.
+func commitAll(t *testing.T, dir, date string) {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "-A")
+	env := os.Environ()
+	env = append(env, "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	cmd := exec.Command("git", "-c", "user.email=audit@test", "-c", "user.name=auditor", "commit", "-q", "-m", "band")
+	cmd.Dir = dir
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+}
+
 // --- fixtures -----------------------------------------------------------------
 
 func validInstructionsBlock() string {
 	return "<!-- graymatter:instructions:begin — managed by `graymatter init`; edits inside this block are overwritten -->\n" +
 		"Use memory_search before answering; store durable facts after the task.\n" +
 		"<!-- graymatter:instructions:end -->\n"
+}
+
+func TestAudit_MarkerSyntaxInsideFencedCodeIsNotFlagged(t *testing.T) {
+	// Documentation that QUOTES the marker syntax inside fenced code blocks is
+	// common and healthy; none of it is an active managed region. Every
+	// finding here would be a public false positive with exit code 1.
+	dir := t.TempDir()
+	content := "# Guide\n\n" + cleanBody + "\n\n## Marker syntax reference\n\n" +
+		"```\n" +
+		"<!-- graymatter:context:begin — managed by `graymatter context-sync`; edits inside this block are overwritten -->\n" +
+		"- example fact quoted from documentation, never terminated\n" +
+		"```\n\n" +
+		"An orphaned instructions example:\n\n" +
+		"~~~\n" +
+		"<!-- graymatter:instructions:begin — dangling example without terminator\n" +
+		"~~~\n\n" +
+		"A full pair quoted for completeness:\n\n" +
+		"```md\n" + validInstructionsBlock() + "```\n\n" +
+		"Closing prose paragraph so the document ends normally and realistically.\n"
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), content)
+	rep, err := AuditPath(dir, auditOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range rep.Findings {
+		if f.Check == "markers" {
+			t.Errorf("fenced marker documentation produced a markers finding: %+v", f)
+		}
+	}
+}
+
+func TestAudit_StalenessUntrackedReportsReason(t *testing.T) {
+	dir, commit := gitInitRepo(t)
+	commit("TRACKED.md", "# tracked\n\nCommitted so the repository is real.\n", "")
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), "# Untracked guide\n\nNever committed to git at all.\n")
+	rep, err := AuditPath(filepath.Join(dir, "AGENTS.md"), auditOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := rep.Files[0].Staleness
+	if st == nil {
+		t.Fatal("no staleness section")
+	}
+	if st.Available {
+		t.Fatalf("untracked file reported measurable staleness: %+v", st)
+	}
+	if !strings.Contains(st.Reason, "not tracked") {
+		t.Errorf("reason = %q, want it to state the file is not tracked", st.Reason)
+	}
+}
+
+func TestAudit_StalenessOutsideRepoReportsReason(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# Guide\n\nPlain directory, no git anywhere above.\n")
+	rep, err := AuditPath(filepath.Join(dir, "CLAUDE.md"), auditOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := rep.Files[0].Staleness
+	if st == nil {
+		t.Fatal("no staleness section")
+	}
+	if st.Available {
+		t.Fatalf("file outside any repository reported measurable staleness: %+v", st)
+	}
+	if !strings.Contains(st.Reason, "not a git repository") {
+		t.Errorf("reason = %q, want %q", st.Reason, "not a git repository")
+	}
 }
 
 func validInstructionsBlockBeginOnly() string {

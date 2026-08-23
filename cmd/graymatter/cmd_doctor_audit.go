@@ -29,10 +29,23 @@ func runDoctorAudit(cmd *cobra.Command, root string) error {
 	} else {
 		printAuditReport(cmd, rep)
 	}
-	if rep.FailCount > 0 {
-		os.Exit(1)
+	if rc := auditExitCode(rep); rc != 0 {
+		os.Exit(rc)
 	}
 	return nil
+}
+
+// auditExitCode maps the report to the process exit code: 1 only when a
+// failure-level finding exists, warnings stay at 0. Kept pure so the exit
+// contract is unit-testable without spawning a process.
+func auditExitCode(rep *docaudit.Report) int {
+	if rep == nil {
+		return 0
+	}
+	if rep.FailCount > 0 {
+		return 1
+	}
+	return 0
 }
 
 func printAuditReport(cmd *cobra.Command, rep *docaudit.Report) {

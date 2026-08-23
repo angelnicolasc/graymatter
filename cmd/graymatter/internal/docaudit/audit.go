@@ -173,7 +173,10 @@ func auditFile(path string, opts Options) (FileReport, []Finding, error) {
 	rep.Tokens = tokens.Approx(content)
 
 	// --- managed blocks ---------------------------------------------------
-	blocks, markerFinds := auditMarkers(path, content)
+	// Marker scanning runs over a copy with fenced code regions blanked:
+	// documents that quote the marker syntax inside ``` fences are healthy,
+	// and flagging them would be a public false positive with exit code 1.
+	blocks, markerFinds := auditMarkers(path, maskFenced(content))
 	rep.Blocks = blocks
 	finds = append(finds, markerFinds...)
 
@@ -426,8 +429,17 @@ func normalizeWords(s string) string {
 func stalenessReport(path string, lines []string, opts Options) *Staleness {
 	st := &Staleness{}
 	dates, reason, err := blameDates(path)
-	if err != nil {
+	// blameDates signals "cannot measure honestly" through a non-empty
+	// reason with a nil error (git missing, not a repository, untracked
+	// file); a non-nil error means blame itself failed. Both must stop the
+	// report from claiming measurable staleness — an empty bucket set would
+	// read as "everything is fresh", which is exactly the lie this package
+	// exists to prevent.
+	if err != nil || reason != "" {
 		st.Reason = reason
+		if st.Reason == "" {
+			st.Reason = "git blame failed"
+		}
 		return st
 	}
 
