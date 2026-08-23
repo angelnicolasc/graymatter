@@ -150,8 +150,11 @@ func buildGoldenFixture(t *testing.T, withHeader bool) string {
 		b.WriteString("# knobs:     SignalWeights=nil (defaults), MinRelevance=0\n")
 		b.WriteString("#\n")
 		b.WriteString("# Fact IDs are ULIDs seeded from the real clock and random entropy, so\n")
-		b.WriteString("# they cannot be pinned. Facts appear by List position or by text;\n")
-		b.WriteString("# every other value is the stored one, verbatim and unrounded.\n")
+		b.WriteString("# they cannot be pinned. Facts appear by List position or by text.\n")
+		b.WriteString("#\n")
+		b.WriteString("# RRF scores are exact. Weights carry 12 significant digits: math.Exp\n")
+		b.WriteString("# differs by one ulp between arm64 and amd64, which is 1e-16 relative,\n")
+		b.WriteString("# while the smallest change this gate must catch is 1e-1.\n")
 		b.WriteString("\n")
 	}
 
@@ -353,8 +356,29 @@ func factsByID(t *testing.T, s *Store) map[string]string {
 }
 
 // snapshotStore renders every stored field a caller can observe. Fact IDs are
-// omitted because ULIDs are not reproducible; every other field is the stored
-// value at full precision.
+// omitted because ULIDs are not reproducible.
+//
+// Weight is printed at 12 significant digits rather than the full 17, and the
+// reason is architectural rather than cosmetic. Decay calls math.Exp, whose
+// last bit differs between arm64 and amd64. CI caught it:
+//
+//	amd64  weight=0.011571074627238781
+//	arm64  weight=0.011571074627238779
+//
+// a 1-ulp gap, 1.5e-16 relative. Once the clock is controlled that is the only
+// residual variation left, and it is a property of the platform's libm rather
+// than of this code — pinning it would make the fixture assert which CPU ran
+// it.
+//
+// 12 digits is a bound with room on both sides, not a shrug at precision. The
+// noise it absorbs is 1e-16. The smallest change this gate has to catch is the
+// decay half-life moving from 720h to 700h, which shifts weights by 1.2e-1.
+// Four orders of margin above the noise, ten below the signal.
+//
+// Everything else stays exact. The fused RRF scores in Phase A keep full
+// precision: they are sums of w/(k+rank), pure IEEE-754 division of constants
+// by integers, correctly rounded and therefore identical on every
+// architecture.
 func snapshotStore(t *testing.T, s *Store) string {
 	t.Helper()
 	facts, err := s.List(goldenAgent)
@@ -370,7 +394,7 @@ func snapshotStore(t *testing.T, s *Store) string {
 		if f.IsSuperseded() {
 			superseded = "yes"
 		}
-		fmt.Fprintf(&b, "[%02d] created=%s accessed=%s count=%d weight=%.17g superseded=%s embedding=%d\n",
+		fmt.Fprintf(&b, "[%02d] created=%s accessed=%s count=%d weight=%.12g superseded=%s embedding=%d\n",
 			i,
 			f.CreatedAt.UTC().Format(time.RFC3339Nano),
 			f.AccessedAt.UTC().Format(time.RFC3339Nano),
