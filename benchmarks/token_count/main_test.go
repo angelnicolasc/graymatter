@@ -194,3 +194,88 @@ func atoiOrNeg(s string) int {
 	}
 	return n
 }
+
+// chartRows are the four rows drawn into .github/assets/token-reduction.png,
+// which the README shows.
+//
+// A PNG cannot be parsed and compared the way the markdown tables above are,
+// so this is a staleness alarm rather than a gate: it fails when
+// docs/benchmarks.md stops saying what the image says, which is exactly when
+// the image needs redrawing. Without it the chart could sit on the README
+// showing last release's numbers with nothing objecting — the same failure
+// that let a five-fold-wrong table survive several releases.
+//
+// The chart is redrawn from the design canvas, exported at 1600x800, and
+// dropped in at .github/assets/token-reduction.png.
+var chartRows = []docRow{
+	{sessions: 1, fullTokens: 80, recallTokens: 80, reduction: 0},
+	{sessions: 10, fullTokens: 630, recallTokens: 550, reduction: 12},
+	{sessions: 30, fullTokens: 1880, recallTokens: 550, reduction: 71},
+	{sessions: 100, fullTokens: 6960, recallTokens: 670, reduction: 90},
+}
+
+func TestChartImageMatchesPublishedTable(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/benchmarks.md")
+	if err != nil {
+		t.Fatalf("read docs/benchmarks.md: %v", err)
+	}
+	published := parseTokenRows(string(raw))
+
+	bySessions := make(map[int]docRow, len(published))
+	for _, r := range published {
+		bySessions[r.sessions] = r
+	}
+
+	for _, want := range chartRows {
+		got, ok := bySessions[want.sessions]
+		if !ok {
+			t.Errorf("the chart draws a %d-session group that docs/benchmarks.md no longer publishes; "+
+				"redraw .github/assets/token-reduction.png", want.sessions)
+			continue
+		}
+		if got.fullTokens != want.fullTokens || got.recallTokens != want.recallTokens || got.reduction != want.reduction {
+			t.Errorf("the chart is stale at %d sessions.\n"+
+				"  chart shows:   %d full, %d recall, %d%%\n"+
+				"  the table says: %d full, %d recall, %d%%\n"+
+				"Redraw .github/assets/token-reduction.png and update chartRows to match.",
+				want.sessions,
+				want.fullTokens, want.recallTokens, want.reduction,
+				got.fullTokens, got.recallTokens, got.reduction)
+		}
+	}
+
+	// A row added to the table and not to the chart is the same staleness in
+	// the other direction.
+	for _, r := range published {
+		found := false
+		for _, want := range chartRows {
+			if want.sessions == r.sessions {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("docs/benchmarks.md publishes a %d-session row the chart does not draw; "+
+				"redraw .github/assets/token-reduction.png", r.sessions)
+		}
+	}
+}
+
+// TestChartImageExists guards the README reference itself: the file has to be
+// there, be a PNG, and be the size the README is written around.
+func TestChartImageExists(t *testing.T) {
+	const path = "../../.github/assets/token-reduction.png"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("README references %s but it cannot be read: %v", path, err)
+	}
+	// PNG signature, then IHDR width/height as big-endian uint32.
+	if len(data) < 24 || string(data[1:4]) != "PNG" {
+		t.Fatalf("%s is not a PNG", path)
+	}
+	width := int(data[16])<<24 | int(data[17])<<16 | int(data[18])<<8 | int(data[19])
+	height := int(data[20])<<24 | int(data[21])<<16 | int(data[22])<<8 | int(data[23])
+	if width != 1600 || height != 800 {
+		t.Errorf("%s is %dx%d; the README shows it at 800 wide and expects a 1600x800 source",
+			path, width, height)
+	}
+}

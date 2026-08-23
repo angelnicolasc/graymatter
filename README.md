@@ -110,7 +110,7 @@ embeddable, zero-dependency memory layer for agents.
 That gap is GrayMatter.
 
 <p align="center">
-  <img src=".github/assets/token-reduction.svg" alt="Context tokens per query vs full-history injection" width="800px" style="max-width: 900px;">
+  <img src=".github/assets/token-reduction.png" alt="Context tokens per query vs full-history injection" width="800px" style="max-width: 900px;">
 </p>
 
 <p align="center">
