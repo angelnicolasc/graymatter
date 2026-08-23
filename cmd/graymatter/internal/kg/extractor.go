@@ -51,10 +51,30 @@ func NewExtractor(cfg ExtractorConfig) EntityExtractor {
 type regexExtractor struct{}
 
 var (
-	// Capitalized multi-word names: "Maria Rodriguez", "Acme Corp", "VP Sales"
-	reCapNames = regexp.MustCompile(`\b([A-Z][a-z]+(?: [A-Z][a-z]+)+)\b`)
+	// Capitalized multi-word names: "Maria Rodriguez", "Acme Corp", "Sebastián Yañez".
+	// Unicode classes so accented names survive intact instead of fragmenting
+	// at the first non-ASCII letter.
+	reCapNames = regexp.MustCompile(`\b(\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)+)\b`)
 	// Single capitalized words (≥2 occurrences required to be considered significant)
-	reCaps = regexp.MustCompile(`\b([A-Z][a-z]{2,})\b`)
+	reCaps = regexp.MustCompile(`\b(\p{Lu}\p{Ll}{2,})\b`)
+	// All-caps role titles, optionally followed by a capitalized name:
+	// "CTO", "VP Finance". Case-sensitive on purpose: a lowercase token
+	// after the title is a verb ("the CTO approved"), not a name.
+	reRoleTitle = regexp.MustCompile(`\b(VP|CTO|CEO|CFO|COO|CIO)(\s+[A-Z][a-z]+)?\b`)
+	// Sentence-initial determiners glued onto a name: "The Atlas Migration".
+	// Stripped after matching so the entity is the name, not the sentence.
+	determiners = map[string]bool{"the": true, "a": true, "an": true, "and": true, "or": true}
+	// Organizational suffixes — membership of the LAST word marks an organization.
+	orgSuffixes = map[string]bool{
+		"corp": true, "inc": true, "ltd": true, "llc": true, "company": true,
+		"labs": true, "capital": true, "group": true, "partners": true,
+		"retail": true, "manufacturing": true, "consulting": true,
+		"logistics": true, "insurance": true, "media": true, "biotech": true,
+		"systems": true, "analytics": true, "freight": true, "legal": true,
+		"foods": true, "ventures": true, "utilities": true,
+		"semiconductors": true, "health": true,
+	}
+	lowercaseRoles = []string{"director", "manager", "advisor", "registrar"}
 	// URLs
 	reURL = regexp.MustCompile(`https?://[^\s"'<>]+`)
 	// ISO dates: 2026-04-09
@@ -71,7 +91,7 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 
 	add := func(label, entityType string) {
 		id := canonicalID(label)
-		if seen[id] {
+		if id == "" || seen[id] {
 			return
 		}
 		seen[id] = true
@@ -82,9 +102,45 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 		})
 	}
 
-	// Multi-word capitalized names → persons or organizations.
+	// All-caps role titles first, so "VP Finance" is consumed as one role
+	// entity and "Finance" is not left behind as a stray single-cap candidate.
+	for _, m := range reRoleTitle.FindAllString(text, -1) {
+		add(m, "role")
+	}
+
+	// Lowercase contextual roles right after a determiner: "the director",
+	// "our manager". Without this, roles written in prose are invisible.
+	for _, role := range lowercaseRoles {
+		for _, article := range []string{"the ", "The ", "our ", "Our "} {
+			idx := 0
+			needle := article + role
+			for {
+				at := strings.Index(strings.ToLower(text[idx:]), needle)
+				if at < 0 {
+					break
+				}
+				start := idx + at
+				before := byte(' ')
+				if start > 0 {
+					before = text[start-1]
+				}
+				if before == ' ' || start == 0 {
+					add(role, "role")
+				}
+				idx = start + len(needle)
+			}
+		}
+	}
+
+	// Multi-word capitalized names → persons or organizations. Leading
+	// determiners are stripped so "The Atlas Migration" yields the name,
+	// never a sentence fragment.
 	for _, m := range reCapNames.FindAllString(text, -1) {
-		add(m, classifyCapName(m))
+		label := stripDeterminers(m)
+		if label == "" {
+			continue
+		}
+		add(label, classifyCapName(label))
 	}
 
 	// Single capitalized words — require ≥2 occurrences to filter noise.
@@ -100,9 +156,13 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 		}
 	}
 
-	// URLs → reference entity.
+	// URLs → reference entity. Sentence-final punctuation is trimmed so the
+	// reference ID does not carry a period that no other mention shares.
 	for _, m := range reURL.FindAllString(text, -1) {
-		add(m, "reference")
+		url := strings.TrimRight(m, ".,;:!?)")
+		if url != "" && strings.HasPrefix(url, "http") {
+			add(url, "reference")
+		}
 	}
 
 	// ISO dates → date entity.
@@ -133,10 +193,26 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 	return nodes, edges, nil
 }
 
+// stripDeterminers removes leading/trailing articles and conjunctions from a
+// matched name sequence, returning the remaining name ("" if nothing remains).
+func stripDeterminers(seq string) string {
+	tokens := strings.Fields(seq)
+	for len(tokens) > 0 && determiners[strings.ToLower(tokens[0])] {
+		tokens = tokens[1:]
+	}
+	for len(tokens) > 0 && determiners[strings.ToLower(tokens[len(tokens)-1])] {
+		tokens = tokens[:len(tokens)-1]
+	}
+	return strings.Join(tokens, " ")
+}
+
 // classifyCapName heuristically assigns an entity type to a capitalized name.
 func classifyCapName(name string) string {
+	tokens := strings.Fields(name)
 	lc := strings.ToLower(name)
 	switch {
+	case len(tokens) > 0 && orgSuffixes[strings.ToLower(tokens[len(tokens)-1])]:
+		return "organization"
 	case strings.Contains(lc, "corp") || strings.Contains(lc, "inc") ||
 		strings.Contains(lc, "ltd") || strings.Contains(lc, "llc") ||
 		strings.Contains(lc, "company"):

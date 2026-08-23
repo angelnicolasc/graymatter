@@ -142,6 +142,103 @@ func TestParseLLMExtractionJSON_Invalid(t *testing.T) {
 	}
 }
 
+// --- v2 extractor improvements (accent safety, determiners, org suffixes,
+// role titles, URL trimming). Each test pins one fix from the precision
+// bench findings.
+
+func TestRegexExtractor_UnicodeNamesSurvive(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("Sebastián Yañez joined the treasury rotation.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]string{}
+	for _, n := range nodes {
+		found[n.ID] = n.EntityType
+	}
+	if got := found["sebastián yañez"]; got != "person" {
+		t.Errorf("accented name missing or mistyped: %v", found)
+	}
+	if _, broken := found["sebasti"]; broken {
+		t.Error("fragment from accent cut-off still present")
+	}
+}
+
+func TestRegexExtractor_DeterminerStripped(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("The Atlas Migration shipped on time.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, n := range nodes {
+		found[n.ID] = true
+	}
+	if !found["atlas migration"] {
+		t.Errorf("name without determiner missing: %v", nodeLabels(nodes))
+	}
+	if found["the atlas migration"] {
+		t.Error("determiner glued into entity id")
+	}
+}
+
+func TestRegexExtractor_OrgSuffixesRecognized(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("Juniper Labs and Willow Creek Capital co-invested; Vertex Analytics followed.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, n := range nodes {
+		types[n.ID] = n.EntityType
+	}
+	for _, id := range []string{"juniper labs", "willow creek capital", "vertex analytics"} {
+		if types[id] != "organization" {
+			t.Errorf("%s typed %q, want organization (all: %v)", id, types[id], types)
+		}
+	}
+}
+
+func TestRegexExtractor_RoleTitles(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("VP Finance requested the numbers; the CTO approved them.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, n := range nodes {
+		types[n.ID] = n.EntityType
+	}
+	if types["vp finance"] != "role" {
+		t.Errorf("'vp finance' typed %q, want role", types["vp finance"])
+	}
+	if types["cto"] != "role" {
+		t.Errorf("'cto' typed %q, want role", types["cto"])
+	}
+}
+
+func TestRegexExtractor_URLTrailingPunctuationTrimmed(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("Changelog lives at https://example.com/changelog.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, n := range nodes {
+		found[n.ID] = true
+	}
+	if found["https://example.com/changelog."] {
+		t.Error("trailing period captured in reference id")
+	}
+	if !found["https://example.com/changelog"] {
+		t.Error("trimmed URL missing")
+	}
+}
+
+// --- v2 extractor improvements (accent safety, determiners, org suffixes,
+// role titles, URL trimming). Each test pins one fix from the precision
+// bench findings.
+
 // nodeLabels returns a slice of node labels for test output.
 func nodeLabels(nodes []Node) []string {
 	out := make([]string, len(nodes))
