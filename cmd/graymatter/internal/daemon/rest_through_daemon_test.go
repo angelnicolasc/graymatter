@@ -50,7 +50,9 @@ func TestRESTServer_ThroughDaemon(t *testing.T) {
 	// The daemon client backs every route directly; no second bbolt handle is
 	// opened anywhere. Production wraps this in package main's reconnecting
 	// store, which is what supplies Ready there.
-	srv := server.New(ln.Addr().String(), restStore{c}, nil)
+	// This test is about the store plumbing, not the bearer gate, so it opts
+	// out of authentication the way a loopback-only setup does.
+	srv := server.New(ln.Addr().String(), restStore{c}, nil, server.WithAnonymousAccess())
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 

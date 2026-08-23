@@ -19,6 +19,7 @@ func initCmd() *cobra.Command {
 		skipCursor       bool
 		withAntigravity  bool
 		skipInstructions bool
+		noPath           bool
 		only             string
 	)
 
@@ -33,7 +34,12 @@ preserved and graymatter's own entry is upserted (never duplicated).
 
 GrayMatter is a general-purpose MCP server. The clients listed below are
 just the ones we auto-wire; any MCP-compatible client works over stdio
-(` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http :8080`" + `).`,
+(` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http 127.0.0.1:8080`" + `).
+
+On Windows, init appends the executable's directory to your user PATH
+(HKCU\Environment). Pass --no-path to skip that: a PATH entry pointing at a
+directory other people can write is a hijack vector for every process that
+resolves a command through it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if interactive {
 				if err := runInteractiveWizard(dataDir, ".", quiet); err != nil {
@@ -175,6 +181,13 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 				printNextSteps()
 			}
 
+			// Putting the executable's directory on the user PATH means every
+			// later process resolves commands through it. That is fine for a
+			// directory only you can write, and a hijack vector for one you
+			// share — so it has to be refusable.
+			if noPath {
+				return nil
+			}
 			if added, pathErr := addExeDirToUserPath(); pathErr != nil {
 				if !quiet {
 					exe, _ := os.Executable()
@@ -199,6 +212,8 @@ just the ones we auto-wire; any MCP-compatible client works over stdio
 	cmd.Flags().BoolVar(&withAntigravity, "with-antigravity", false, "also wire mcp_config.json for Antigravity")
 	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
 	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
+	cmd.Flags().BoolVar(&noPath, "no-path", false,
+		"do not add the executable's directory to your user PATH")
 	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags, not --skip-instructions): claudecode,cursor,codex,opencode,antigravity")
 	return cmd
 }

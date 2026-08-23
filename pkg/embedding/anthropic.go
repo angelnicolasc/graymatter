@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -83,8 +82,8 @@ func (a *AnthropicProvider) Embed(ctx context.Context, text string) ([]float32, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic embed: status %d: %s", resp.StatusCode, string(data))
+		body := errorBody(resp.Body)
+		return nil, fmt.Errorf("anthropic embed: status %d: %s", resp.StatusCode, body)
 	}
 
 	var result anthropicEmbedResponse

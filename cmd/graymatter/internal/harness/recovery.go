@@ -70,6 +70,9 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 	if hs.PID == 0 {
 		return fmt.Errorf("session %q has no PID — it was not started in background mode", sessionID)
 	}
+	if err := confirmOurProcess(db, sessionID, hs.PID); err != nil {
+		return err
+	}
 
 	if err := killPID(hs.PID); err != nil {
 		return fmt.Errorf("kill session %q (pid %d): %w", sessionID, hs.PID, err)
@@ -80,6 +83,42 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 	hs.Status = "killed"
 	hs.FinishedAt = &now
 	return saveHarnessSession(db, *hs)
+}
+
+// confirmOurProcess checks that pid is one graymatter actually spawned for
+// sessionID, by matching it against the PID file written at spawn time.
+//
+// Without this, the kill target is whatever number happens to sit in a session
+// record — and session records can be written through the authenticated RPC
+// surface (SessionSave). Save a record with someone else's PID and status
+// "running", call SessionKill, and the daemon terminates that process on your
+// behalf. The PID file narrows the primitive to processes this tool started.
+//
+// It is not a defence against a process already running as the same user: that
+// process can write both the record and the file. It is a defence against the
+// RPC surface being a kill primitive on its own, which is a different thing.
+func confirmOurProcess(db *bolt.DB, sessionID string, pid int) error {
+	if pid == os.Getpid() {
+		return fmt.Errorf("session %q names this process (pid %d); refusing to kill it", sessionID, pid)
+	}
+
+	// gray.db sits at the root of the data dir, which is where run/ lives too.
+	dataDir := filepath.Dir(db.Path())
+	pidPath := PIDFilePath(dataDir, sessionID)
+
+	onDisk, err := ReadPIDFile(pidPath)
+	if err != nil {
+		return fmt.Errorf(
+			"session %q: no PID file at %s, so pid %d is recorded only in the database; "+
+				"refusing to kill a process graymatter cannot confirm it started: %w",
+			sessionID, pidPath, pid, err)
+	}
+	if onDisk != pid {
+		return fmt.Errorf(
+			"session %q: the database says pid %d but %s says %d; refusing to kill either",
+			sessionID, pid, pidPath, onDisk)
+	}
+	return nil
 }
 
 // SaveSessionDB persists a HarnessSession record against an already-open db
@@ -156,9 +195,9 @@ func StreamLogs(sessionID, dataDir string, out interface{ Write([]byte) (int, er
 	if hs.LogFile == "" {
 		return fmt.Errorf("session %q was not started in background mode (no log file)", sessionID)
 	}
-	data, err := os.ReadFile(hs.LogFile)
+	data, err := ReadSessionLog(dataDir, hs.LogFile)
 	if err != nil {
-		return fmt.Errorf("read log file %q: %w", hs.LogFile, err)
+		return err
 	}
 	_, err = out.Write(data)
 	return err
@@ -209,6 +248,43 @@ func PIDFilePath(dataDir, sessionID string) string {
 // LogFilePath returns the canonical path for the log file of sessionID.
 func LogFilePath(dataDir, sessionID string) string {
 	return filepath.Join(dataDir, "logs", sessionID+".log")
+}
+
+// ReadSessionLog returns the contents of a session's log file, but only if
+// that file really lives under <dataDir>/logs.
+//
+// The path is read back out of bbolt, where it was put by whichever process
+// launched the session. spawnBackground always writes a path inside logs/, so
+// requiring one here costs nothing — but without the check, anything that can
+// write a session record (the authenticated RPC surface, or a hand-edited
+// database) turns `graymatter sessions logs` into an arbitrary-file reader
+// running with the user's own permissions.
+//
+// Containment is checked on cleaned absolute paths. Symlinks are not resolved:
+// planting one inside logs/ already requires write access to the data dir.
+func ReadSessionLog(dataDir, logFile string) ([]byte, error) {
+	if logFile == "" {
+		return nil, fmt.Errorf("session has no log file")
+	}
+
+	logsDir, err := filepath.Abs(filepath.Join(dataDir, "logs"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve logs dir: %w", err)
+	}
+	abs, err := filepath.Abs(logFile)
+	if err != nil {
+		return nil, fmt.Errorf("resolve log path %q: %w", logFile, err)
+	}
+	if abs == logsDir || !strings.HasPrefix(abs, logsDir+string(os.PathSeparator)) {
+		return nil, fmt.Errorf(
+			"log path %q is outside %s; refusing to read it", logFile, logsDir)
+	}
+
+	data, err := os.ReadFile(abs) //nolint:gosec // contained above
+	if err != nil {
+		return nil, fmt.Errorf("read log file %q: %w", logFile, err)
+	}
+	return data, nil
 }
 
 // ReadPIDFile reads the PID from a PID file written by spawnBackground.

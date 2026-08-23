@@ -8,8 +8,8 @@
 //
 // Usage:
 //
-//	graymatter mcp serve            # stdio (default, used by Claude Code)
-//	graymatter mcp serve --http :8080  # StreamableHTTP
+//	graymatter mcp serve                            # stdio (default, used by Claude Code)
+//	graymatter mcp serve --http 127.0.0.1:8080      # StreamableHTTP, token required
 package mcp
 
 import (
@@ -17,12 +17,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/httpauth"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -30,6 +32,9 @@ import (
 const (
 	serverName    = "graymatter"
 	serverVersion = "0.1.0"
+
+	httpReadHeaderTimeout = 15 * time.Second
+	httpIdleTimeout       = 120 * time.Second
 )
 
 // Backend is the persistence surface the MCP handlers need. Two
@@ -135,8 +140,7 @@ func (b *DirectBackend) AuditWrite(e audit.Entry) error {
 	if store == nil {
 		return nil
 	}
-	audit.Write(store.DB(), e)
-	return nil
+	return audit.Write(store.DB(), e)
 }
 
 func (b *DirectBackend) KGLink(from, to, relation string) error {
@@ -152,11 +156,61 @@ func (s *Server) ServeStdio() error {
 	return server.ServeStdio(s.mcpSrv)
 }
 
-// ServeHTTP starts the MCP server over StreamableHTTP on addr (e.g. ":8080").
-func (s *Server) ServeHTTP(addr string) error {
-	h := server.NewStreamableHTTPServer(s.mcpSrv)
+// HTTPOption customises the HTTP transport. Without WithHTTPAuthToken or
+// WithHTTPAnonymousAccess the server has no credential to match and rejects
+// every request, so a wiring mistake fails closed rather than republishing the
+// store to the network.
+type HTTPOption func(*httpOptions)
+
+type httpOptions struct {
+	token     string
+	anonymous bool
+}
+
+// WithHTTPAuthToken requires callers to present token as an HTTP bearer
+// credential, compared in constant time.
+func WithHTTPAuthToken(token string) HTTPOption {
+	return func(o *httpOptions) { o.token = token }
+}
+
+// WithHTTPAnonymousAccess serves the MCP transport with no credential check.
+// The caller is responsible for keeping the listener loopback-only.
+func WithHTTPAnonymousAccess() HTTPOption {
+	return func(o *httpOptions) { o.anonymous = true }
+}
+
+// ServeHTTP starts the MCP server over StreamableHTTP on addr
+// (e.g. "127.0.0.1:8080").
+//
+// The transport used to mount the mcp-go handler straight onto
+// http.ListenAndServe, so the whole tool surface — memory_add, memory_search,
+// memory_reflect, both checkpoint tools — answered to anyone who could reach
+// the port. The Mcp-Session-Id looked like a barrier, but the server hands one
+// to every caller during initialize. The bearer gate runs first now, so a
+// caller without the token never reaches the handshake.
+//
+// The timeouts are what any exposed listener needs: a slow or idle client
+// should not hold a connection open indefinitely. There is no write timeout
+// because MCP streams responses.
+func (s *Server) ServeHTTP(addr string, opts ...HTTPOption) error {
+	var cfg httpOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	var h http.Handler = server.NewStreamableHTTPServer(s.mcpSrv)
+	if !cfg.anonymous {
+		h = httpauth.Middleware(cfg.token, h)
+	}
+
 	fmt.Printf("graymatter MCP server listening on %s\n", addr)
-	return http.ListenAndServe(addr, h)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
+	}
+	return srv.ListenAndServe()
 }
 
 // Tool annotations. Clients read these hints to decide whether a call needs

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -82,9 +81,9 @@ func (o *OllamaProvider) Embed(ctx context.Context, text string) ([]float32, err
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			data, _ := io.ReadAll(resp.Body)
+			body := errorBody(resp.Body)
 			resp.Body.Close()
-			lastErr = fmt.Errorf("ollama embed: status %d: %s", resp.StatusCode, string(data))
+			lastErr = fmt.Errorf("ollama embed: status %d: %s", resp.StatusCode, body)
 			continue
 		}
 

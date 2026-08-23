@@ -197,9 +197,15 @@ func (h *Host) KGUpsert(req *KGUpsertRequest, resp *KGUpsertResponse) error {
 	return h.adapter.UpsertNode(req.ID, req.Label, req.EntityType)
 }
 
-// AuditWrite records an agent self-edit event. Best-effort by design.
+// AuditWrite records an agent self-edit event.
+//
+// The error reaches the caller now instead of being swallowed here. Callers
+// still treat it as best-effort — the operation being audited has already
+// happened — but a trail going incomplete is no longer invisible.
 func (h *Host) AuditWrite(req *AuditWriteRequest, resp *AuditWriteResponse) error {
-	audit.Write(h.db, req.E)
+	if err := audit.Write(h.db, req.E); err != nil {
+		return err
+	}
 	return nil
 }
 

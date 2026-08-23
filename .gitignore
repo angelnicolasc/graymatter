@@ -6,3 +6,13 @@ dist/
 /vectors/
 *.md.local
 go.work.sum
+
+# Coverage profiles written by the CI commands in CONTRIBUTING.md
+coverage*.out
+
+# Scratch data dirs from manual testing (.graymatter/ is already ignored)
+.graymatter-demo/
+
+# Editor-local MCP wiring. `graymatter init` writes this per machine; there is
+# nothing here worth sharing, and it names absolute paths.
+.cursor/

@@ -391,7 +391,7 @@ Other useful subcommands:
 | Command | Purpose |
 |---------|---------|
 | `graymatter init` | Wire MCP into Claude Code, Cursor, Codex, OpenCode, Antigravity (see [README.md](../README.md)) |
-| `graymatter mcp serve` | Start the MCP server (stdio default, `--http :8080` for HTTP) |
+| `graymatter mcp serve` | Start the MCP server (stdio default, `--http 127.0.0.1:8080` for HTTP; the HTTP transport requires a bearer token) |
 | `graymatter tui` | 4-view terminal dashboard (live observability) |
 | `graymatter export --format obsidian --out vault/` | Dump all memories to a Markdown vault |
 | `graymatter run <skill.md>` | Execute a SKILL.md agent file |
@@ -423,7 +423,7 @@ What happens in v0.5.x:
 - The `graymatter` CLI and TUI auto-detect a held lock and **fall back to read-only mode**. You can still recall, but `remember` / `checkpoint save` will refuse with a clear error rather than block forever.
 - MCP servers spawned by separate clients will fight over the lock. The **second one to start fails fast**, not silently.
 - Workarounds:
-  - Run a single shared `graymatter mcp serve --http :8080` and point all clients at it (most robust)
+  - Run a single shared `graymatter mcp serve --http 127.0.0.1:8080` and point all clients at it (most robust). The HTTP transport requires `Authorization: Bearer <token>`; the token lives in `<data-dir>/graymatter.http-token`
   - Quit one agent's MCP integration before working from the other
   - Use the `tui` in `--read-only` mode explicitly when you only want to inspect
 
