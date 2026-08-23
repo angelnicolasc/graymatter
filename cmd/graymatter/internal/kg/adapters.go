@@ -1,5 +1,9 @@
 package kg
 
+import (
+	"github.com/angelnicolasc/graymatter/pkg/memory"
+)
+
 // GraphAdapter wraps *Graph to satisfy the memory.GraphAccessor interface.
 // This keeps pkg/memory free of a direct dependency on pkg/kg.
 type GraphAdapter struct {
@@ -16,6 +20,12 @@ func (a *GraphAdapter) UpsertNode(id, label, entityType string) error {
 
 // LinkNodes creates an edge between two nodes. Implements mcp.KGLinker.
 func (a *GraphAdapter) LinkNodes(from, to, relation string) error {
+	return a.g.Link(Edge{From: from, To: to, Relation: relation})
+}
+
+// LinkEdges implements memory.EdgeWriter: consolidation links the
+// co-mentioned pairs an extractor produced.
+func (a *GraphAdapter) LinkEdges(from, to, relation string) error {
 	return a.g.Link(Edge{From: from, To: to, Relation: relation})
 }
 
@@ -57,4 +67,26 @@ func (a *ExtractorAdapter) ExtractIDs(text string) ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+// ExtractTyped implements memory.TypedEntityExtractor: it preserves the
+// label and entity type the extractor produced instead of collapsing
+// everything to a bare ID.
+func (a *ExtractorAdapter) ExtractTyped(text string) ([]memory.EntityRef, []memory.EntityLink, error) {
+	nodes, edges, err := a.e.Extract(text)
+	if err != nil {
+		return nil, nil, err
+	}
+	refs := make([]memory.EntityRef, 0, len(nodes))
+	for _, n := range nodes {
+		if n.ID == "" {
+			continue
+		}
+		refs = append(refs, memory.EntityRef{ID: n.ID, Label: n.Label, EntityType: n.EntityType})
+	}
+	links := make([]memory.EntityLink, 0, len(edges))
+	for _, e := range edges {
+		links = append(links, memory.EntityLink{From: e.From, To: e.To, Relation: e.Relation})
+	}
+	return refs, links, nil
 }

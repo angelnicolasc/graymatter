@@ -10,6 +10,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Knowledge-graph auto-population ships gated (`daemon run --kg` / `GRAYMATTER_KG=1`)** —
+  consolidation now consumes a typed extractor capability that preserves each
+  entity's label and classification, and persists co-mention edges between
+  them, so the graph fills itself from ordinary use (issue #24). Recall
+  enrichment is budgeted: at most three neighbour labels appended after the
+  ranked facts, tombstones respected on every path — documented as an explicit
+  exception to exactly-topK in `docs/api-stability.md`. Gated by measured
+  results per [ADR-008](docs/decisions/008-knowledge-graph-wiring.md),
+  amending ADR-003: extraction precision 0.946 on a 105-fact labeled corpus,
+  and entity-bridge enrichment answering 67% of multi-hop queries that plain
+  ranking answers at 0%.
 - **`graymatter export --include-graph`** — the Obsidian export now writes the
   knowledge graph alongside facts: one entity note per node (frontmatter with
   type, first/last seen, weight) plus an Obsidian canvas. Works through the

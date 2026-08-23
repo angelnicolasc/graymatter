@@ -64,6 +64,9 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `ConsolidateConfig` interface | |
 | `GraphAccessor` interface | |
 | `EntityExtractorAccessor` interface | |
+| `TypedEntityExtractor` interface, `EntityRef`, `EntityLink` | Added in v0.12.0 — optional extractor capability preserving label + type and producing co-mention links; consolidation uses it when implemented, legacy ID-only path otherwise |
+| `EdgeWriter` interface | Added in v0.12.0 — optional graph capability used by consolidation to persist co-mention edges |
+| `AdvancedStore.SetKG(...)` | Exposed in v0.12.0 (mirrors `(*Store).SetKG`) |
 
 ### Recall result ordering
 
@@ -78,6 +81,14 @@ ascending, which makes the order total.
 This is a guarantee callers may rely on. It applies to `Recall`, `RecallShared`
 and `RecallAll`, and to every configuration of `SignalWeights` and
 `MinRelevance`.
+
+**Exception, v0.12.0:** when a knowledge graph is wired via `SetKG` (directly,
+via `AdvancedStore.SetKG`, or by enabling the daemon's `--kg` /
+`GRAYMATTER_KG=1`), `Recall` may append **at most three** neighbour labels
+after the ranked facts. The first `topK` entries keep the deterministic order
+above; appended entries are enrichment hints, capped and deduplicated, and
+never displace a ranked fact. Without a wired graph the exception does not
+exist and `Recall` returns exactly `topK`.
 
 Before v0.10.1 the ordering of equal-scoring facts was unspecified in practice:
 the three signal rankings were sorted with a comparator that read only the

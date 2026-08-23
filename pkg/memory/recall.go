@@ -228,19 +228,33 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	s.mu.RUnlock()
 	if graph != nil && extractor != nil && len(result) > 0 {
 		// Extract entity IDs from the top-ranked fact and surface neighbors.
+		//
+		// Budget (ADR-003 condition 2): at most kgMaxNeighbors entries are
+		// appended in total. Enrichment is a hint, not a second result set —
+		// an uncapped append would grow the prompt without bound on hub
+		// entities and defeat the token discipline the rest of the system
+		// enforces.
 		ids, _ := extractor.ExtractIDs(result[0])
+		appended := 0
 		for _, id := range ids {
+			if appended >= kgMaxNeighbors {
+				break
+			}
 			neighborTexts, gErr := graph.NeighborTexts(id, 1)
 			if gErr != nil {
 				break
 			}
 			for _, nt := range neighborTexts {
+				if appended >= kgMaxNeighbors {
+					break
+				}
 				// The graph stores node labels, not fact IDs, so a superseded
 				// fact's text can still be reachable as a neighbour. Skip it:
 				// the tombstone has to hold on every path into the result.
 				if !seen[nt] && !supersededTexts[nt] {
 					seen[nt] = true
 					result = append(result, nt)
+					appended++
 				}
 			}
 		}
@@ -353,3 +367,8 @@ type SignalWeights struct {
 func DefaultSignalWeights() SignalWeights {
 	return SignalWeights{Vector: 1.0, Keyword: 1.0, Recency: 0.5}
 }
+
+// kgMaxNeighbors caps how many knowledge-graph neighbour labels Recall may
+// append after the ranked facts (ADR-003 condition 2). A constant, not a
+// setting: enrichment is a hint with a fixed budget.
+const kgMaxNeighbors = 3

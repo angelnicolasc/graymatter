@@ -132,7 +132,29 @@ func openDirectStore() (*directStore, error) {
 		_ = mem.Close()
 		return nil, fmt.Errorf("store not initialised")
 	}
-	return &directStore{mem: mem, store: store}, nil
+	ds := &directStore{mem: mem, store: store}
+	if os.Getenv("GRAYMATTER_KG") == "1" {
+		if err := maybeWireKG(store); err != nil {
+			_ = mem.Close()
+			return nil, err
+		}
+	}
+	return ds, nil
+}
+
+// maybeWireKG turns on knowledge-graph auto-population for an already-open
+// advanced store: the graph opens on the same bbolt handle and the regex
+// extractor feeds consolidation. Opt-in via GRAYMATTER_KG=1 (direct mode) or
+// daemon --kg.
+func maybeWireKG(adv graymatter.AdvancedStore) error {
+	g, err := kg.Open(adv.DB())
+	if err != nil {
+		return fmt.Errorf("knowledge graph: %w", err)
+	}
+	graphAdapter := kg.NewGraphAdapter(g)
+	extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
+	adv.SetKG(graphAdapter, extractor)
+	return nil
 }
 
 func (d *directStore) Remember(ctx context.Context, agentID, text string) error {

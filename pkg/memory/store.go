@@ -130,6 +130,39 @@ type EntityExtractorAccessor interface {
 	ExtractIDs(text string) ([]string, error) // returns canonical node IDs
 }
 
+// EntityRef carries the identity and classification of one extracted entity.
+type EntityRef struct {
+	ID         string
+	Label      string
+	EntityType string
+}
+
+// EntityLink is a co-mention relationship between two extracted entities.
+type EntityLink struct {
+	From     string
+	To       string
+	Relation string
+}
+
+// TypedEntityExtractor is an optional capability: extractors that preserve
+// the label and entity type of each entity, and produce co-mention links,
+// implement this in addition to EntityExtractorAccessor. Consolidation uses
+// it when present; when absent, the legacy ID-only path runs unchanged.
+//
+// Added in v0.12.0.
+type TypedEntityExtractor interface {
+	ExtractTyped(text string) ([]EntityRef, []EntityLink, error)
+}
+
+// EdgeWriter is an optional graph capability: the ability to create edges.
+// The knowledge-graph adapter implements it; consolidation uses it only when
+// the extractor also implements TypedEntityExtractor.
+//
+// Added in v0.12.0.
+type EdgeWriter interface {
+	LinkEdges(from, to, relation string) error
+}
+
 // Store is the central storage layer. It combines bbolt for durable
 // structured storage with a pluggable VectorStore for similarity search.
 // All public methods are safe for concurrent use.

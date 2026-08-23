@@ -165,13 +165,45 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	}
 
 	// Step 4: run entity extraction on all surviving facts and upsert into graph.
+	//
+	// Two paths, chosen by capability:
+	//   - TypedEntityExtractor + EdgeWriter: nodes keep the extractor's label
+	//     and type, and co-mentioned pairs become edges. This is what makes
+	//     recall enrichment traversable (issue #24).
+	//   - Legacy: ID-only upserts, no edges — preserved verbatim so older
+	//     extractor implementations behave exactly as before.
 	s.mu.RLock()
 	extractor := s.extractor
 	graph := s.graph
 	s.mu.RUnlock()
 	if extractor != nil && graph != nil {
+		typed, typedOK := extractor.(TypedEntityExtractor)
+		writer, writeOK := graph.(EdgeWriter)
+
 		facts, _ = s.List(agentID)
 		for _, f := range facts {
+			if typedOK && writeOK {
+				refs, links, extractErr := typed.ExtractTyped(f.Text)
+				if extractErr != nil {
+					continue
+				}
+				for _, ref := range refs {
+					if upsertErr := graph.UpsertNode(ref.ID, ref.Label, ref.EntityType); upsertErr != nil {
+						if s.cfg.OnConsolidateError != nil {
+							s.cfg.OnConsolidateError(agentID, fmt.Errorf("upsert node %s: %w", ref.ID, upsertErr))
+						}
+					}
+				}
+				for i := 0; i < len(links); i++ {
+					if linkErr := writer.LinkEdges(links[i].From, links[i].To, links[i].Relation); linkErr != nil {
+						if s.cfg.OnConsolidateError != nil {
+							s.cfg.OnConsolidateError(agentID, fmt.Errorf("link edge: %w", linkErr))
+						}
+					}
+				}
+				continue
+			}
+
 			ids, extractErr := extractor.ExtractIDs(f.Text)
 			if extractErr != nil {
 				continue

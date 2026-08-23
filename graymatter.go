@@ -314,6 +314,11 @@ type AdvancedStore interface {
 	// DB exposes the raw bbolt handle for the session/checkpoint subsystems.
 	// New callers should prefer higher-level methods; this is an escape hatch.
 	DB() *bolt.DB
+	// SetKG wires an optional knowledge graph and entity extractor into the
+	// underlying store (pass-through of Store.SetKG). Callers that want the
+	// auto-population behaviour construct the graph and extractor themselves
+	// and hand them in here.
+	SetKG(graph memory.GraphAccessor, extractor memory.EntityExtractorAccessor)
 	// IsReadOnly reports whether the store was opened in read-only mode.
 	// Mutating methods (Put, Delete, UpdateFact) return ErrStoreReadOnly when true.
 	IsReadOnly() bool

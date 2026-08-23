@@ -32,6 +32,11 @@ type RunOptions struct {
 	// setups where systemd/launchd owns the lifecycle).
 	IdleExit time.Duration
 
+	// KG enables knowledge-graph auto-population: consolidation extracts
+	// entities and co-mention edges from stored facts. Also enabled by
+	// GRAYMATTER_KG=1 in the daemon's environment.
+	KG bool
+
 	// Logf receives lifecycle log lines. Defaults to a stderr printer.
 	Logf func(format string, v ...any)
 }
@@ -74,6 +79,15 @@ func Run(opts RunOptions) error {
 	if g, err := kg.Open(db); err == nil {
 		graph = g
 		adapter = kg.NewGraphAdapter(g)
+	}
+
+	// Knowledge-graph auto-population is opt-in (env or --kg). When enabled,
+	// the wired adapter doubles as the store's graph and the regex extractor
+	// feeds consolidation, so nodes AND edges appear without agent effort.
+	if opts.KG || os.Getenv("GRAYMATTER_KG") == "1" {
+		extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
+		adv.SetKG(adapter, extractor)
+		logf("daemon: knowledge graph auto-population enabled")
 	}
 
 	token, err := rpc.GenerateToken()

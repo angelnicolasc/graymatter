@@ -107,3 +107,105 @@ func TestExplicitSetKG_DrivesNodeUpserts_ButNoEdgePathExists(t *testing.T) {
 		}
 	}
 }
+
+// --- v0.12.0 wiring: typed extraction creates edges; recall budget caps ----
+
+type typedFake struct{ plainCalls int }
+
+func (e *typedFake) ExtractIDs(text string) ([]string, error) {
+	e.plainCalls++
+	return []string{"entity-a", "entity-b"}, nil
+}
+
+func (e *typedFake) ExtractTyped(text string) ([]EntityRef, []EntityLink, error) {
+	return []EntityRef{
+			{ID: "entity-a", Label: "Entity A", EntityType: "project"},
+			{ID: "entity-b", Label: "Entity B", EntityType: "person"},
+		}, []EntityLink{
+			{From: "entity-a", To: "entity-b", Relation: "co_mentioned"},
+		}, nil
+}
+
+type edgeWritingGraph struct {
+	upserts []EntityRef
+	links   []EntityLink
+}
+
+func (g *edgeWritingGraph) UpsertNode(id, label, entityType string) error {
+	g.upserts = append(g.upserts, EntityRef{ID: id, Label: label, EntityType: entityType})
+	return nil
+}
+
+func (g *edgeWritingGraph) LinkEdges(from, to, relation string) error {
+	g.links = append(g.links, EntityLink{From: from, To: to, Relation: relation})
+	return nil
+}
+
+func (g *edgeWritingGraph) NeighborTexts(nodeID string, depth int) ([]string, error) {
+	return []string{"n1", "n2", "n3", "n4", "n5"}, nil
+}
+
+// TestConsolidate_TypedPath_CreatesTypedNodesAndEdges pins the P2 core: with
+// a capability-typed extractor wired, consolidation preserves labels and
+// entity types AND produces the co-mention edges that make enrichment
+// traversable. This is the test whose absence let issue #24 ship.
+func TestConsolidate_TypedPath_CreatesTypedNodesAndEdges(t *testing.T) {
+	s := newKGWiringStore(t)
+	g := &edgeWritingGraph{}
+	ex := &typedFake{}
+	s.SetKG(g, ex)
+
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if err := s.Put(ctx, "kg-agent", fmt.Sprintf("Fact %d naming two entities", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Consolidate(ctx, "kg-agent", &testConsolidateCfg{threshold: 100, halfLife: 720 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(g.upserts) != 4 { // 2 facts x 2 refs
+		t.Fatalf("upserts = %d, want 4", len(g.upserts))
+	}
+	for _, u := range g.upserts {
+		if u.EntityType == "" || u.Label == "" {
+			t.Errorf("typed path lost fidelity: %+v", u)
+		}
+	}
+	if len(g.links) != 2 { // one co_mentioned pair per fact
+		t.Fatalf("links = %d, want 2", len(g.links))
+	}
+	if g.links[0].Relation != "co_mentioned" || g.links[0].From != "entity-a" || g.links[0].To != "entity-b" {
+		t.Errorf("unexpected link: %+v", g.links[0])
+	}
+}
+
+// TestRecall_KGNeighborBudgetCapsAtThree pins ADR-003 condition 2's budget:
+// with the graph wired and a hub returning five neighbours, Recall appends
+// exactly three - enrichment is a hint with a fixed budget, not a second
+// result set.
+func TestRecall_KGNeighborBudgetCapsAtThree(t *testing.T) {
+	s := newKGWiringStore(t)
+	s.SetKG(&edgeWritingGraph{}, &idsOnlyExtractor{})
+
+	ctx := context.Background()
+	if err := s.Put(ctx, "kg-agent", "the single seed fact"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Recall(ctx, "kg-agent", "anything at all", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appended := len(res) - 1
+	if appended != 3 {
+		t.Fatalf("enrichment appended %d neighbours, want capped 3 (result len %d)", appended, len(res))
+	}
+}
+
+type idsOnlyExtractor struct{}
+
+func (e *idsOnlyExtractor) ExtractIDs(text string) ([]string, error) {
+	return []string{"hub-entity"}, nil
+}

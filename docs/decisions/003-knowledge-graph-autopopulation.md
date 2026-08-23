@@ -1,6 +1,6 @@
 # 003 — The knowledge graph has a write path, but nothing populates it automatically
 
-**Status:** Accepted, partial · **Date:** 2026-08-22
+**Status:** Accepted, partial — **amended by [008](008-knowledge-graph-wiring.md)**: gated auto-population shipped in v0.12.0 after its reversal conditions (measured precision >= 0.70 and EnrichedHitRate > baseline) were met. **Date:** 2026-08-22
 
 ## Context
 

@@ -28,7 +28,10 @@ managers (systemd/launchd), debugging, and forced restarts.`,
 }
 
 func daemonRunCmd() *cobra.Command {
-	var idleExit time.Duration
+	var (
+		idleExit time.Duration
+		kg       bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -43,11 +46,14 @@ For service-manager setups, run it yourself with --idle-exit 0.`,
 			return daemon.Run(daemon.RunOptions{
 				DataDir:  dataDir,
 				IdleExit: idleExit,
+				KG:       kg,
 			})
 		},
 	}
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", daemon.DefaultIdleExit,
 		"exit after this long with no clients and no traffic (0 = never)")
+	cmd.Flags().BoolVar(&kg, "kg", false,
+		"enable knowledge-graph auto-population (entities and co-mention edges during consolidation)")
 	return cmd
 }
 
