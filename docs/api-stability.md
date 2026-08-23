@@ -52,13 +52,40 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).Close() error` | |
 | `(*Store).SetKG(graph GraphAccessor, extractor EntityExtractorAccessor)` | |
 | `(*Store).DB() *bolt.DB` | |
-| `Fact` struct — all fields present in v0.1.0 | |
+| `Fact` struct — all fields present in v0.1.0 | New fields may be added; `SupersededBy` added in v0.10.0 |
+| `(Fact).IsSuperseded() bool` | Added in v0.10.0 |
+| `SupersededByAgent` constant | Added in v0.10.0 |
 | `MemoryStats` struct | |
-| `StoreConfig` struct — all fields present in v0.1.0 | |
+| `StoreConfig` struct — all fields present in v0.1.0 | New fields may be added; `SignalWeights` and `MinRelevance` added in v0.10.0 |
+| `SignalWeights` struct | Added in v0.10.0 |
+| `DefaultSignalWeights() SignalWeights` | Added in v0.10.0 |
+| `ErrConsolidateLLMUnsupported` | Added in v0.10.0 |
 | `SharedAgentID` constant | |
 | `ConsolidateConfig` interface | |
 | `GraphAccessor` interface | |
 | `EntityExtractorAccessor` interface | |
+
+### Additions in v0.10.0
+
+Three additions, all fields or new identifiers, no signature changes — so the
+compatibility promise above holds and no caller needs to do anything.
+
+Each new field's zero value reproduces the previous behaviour exactly, which is
+enforced rather than asserted:
+
+| Field | Zero value | Behaviour at zero |
+|---|---|---|
+| `Fact.SupersededBy` | `""` | Fact is live. Stores written before v0.10.0 have no `superseded_by` key and load as live — checked against a literal v0.9.0 JSON fact |
+| `StoreConfig.SignalWeights` | `nil` | `DefaultSignalWeights()` — vector 1.0, keyword 1.0, recency 0.5, the values that were hardcoded before v0.10.0. It is a pointer precisely so the zero value cannot be confused with "all signals off" |
+| `StoreConfig.MinRelevance` | `0` | No relevance floor; `Recall` returns exactly `topK`, the pre-v0.10.0 contract |
+
+`TestRankingDefaults_MatchV09Behaviour` is the gate: with the ranking fields
+unset, results must be identical to the v0.9.0 ranking.
+
+One default did change, and it is a behaviour change rather than an addition:
+**the REST server's default `k` moved from 5 to 8**, matching
+`DefaultConfig().TopK` and every other entry point. `GET /recall` with no `k`
+now returns 8 facts. Pass `?k=5` for the old count.
 
 ---
 
