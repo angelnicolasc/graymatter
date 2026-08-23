@@ -6,6 +6,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Recall breaks score ties deterministically (oldest first); previously
+  arbitrary.** The three signal rankings were sorted by score alone, and
+  `sort.Slice` is not stable, so facts that scored equally received arbitrary
+  ranks — and those ranks are what the RRF fusion reads. Six facts written in
+  the same instant produced all six rotations of the result, both across
+  repeated calls on one store and across freshly built stores. The order is now
+  total: descending fused score, then `CreatedAt` ascending, then fact ID.
+  Scores are unchanged; only the resolution of ties. The contract is recorded
+  in [docs/api-stability.md](docs/api-stability.md).
+
+---
+
 ## [0.10.0] - 2026-08-23
 
 A release about claims. Every number this project published, and every

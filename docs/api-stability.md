@@ -43,7 +43,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).ListAgents() ([]string, error)` | |
 | `(*Store).Stats(agentID string) (MemoryStats, error)` | |
 | `(*Store).UpdateFact(agentID string, f Fact) error` | |
-| `(*Store).Recall(ctx, agentID, query string, topK int) ([]string, error)` | |
+| `(*Store).Recall(ctx, agentID, query string, topK int) ([]string, error)` | Result ordering is deterministic — see below |
 | `(*Store).RecallShared(ctx, query string, topK int) ([]string, error)` | |
 | `(*Store).RecallAll(ctx, agentID, query string, topK int) ([]string, error)` | |
 | `(*Store).PutShared(ctx, text string) error` | |
@@ -64,6 +64,26 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `ConsolidateConfig` interface | |
 | `GraphAccessor` interface | |
 | `EntityExtractorAccessor` interface | |
+
+### Recall result ordering
+
+**Recall result ordering is deterministic: descending fused score, oldest
+first, then ID.**
+
+The same query against the same store returns the same facts in the same order,
+on every call, on every platform. Facts that score equally are ordered by
+`CreatedAt` ascending, and facts created in the same instant by fact ID
+ascending, which makes the order total.
+
+This is a guarantee callers may rely on. It applies to `Recall`, `RecallShared`
+and `RecallAll`, and to every configuration of `SignalWeights` and
+`MinRelevance`.
+
+Before v0.10.1 the ordering of equal-scoring facts was unspecified in practice:
+the three signal rankings were sorted with a comparator that read only the
+score, and `sort.Slice` is not stable, so tied facts received arbitrary ranks
+which the fusion then read. Nothing about the scores has changed — only the
+resolution of ties.
 
 ### Additions in v0.10.0
 
