@@ -199,3 +199,38 @@ Latency figures are coarse: measurements ran on Windows, where timer
 granularity is about 1ms, and every value is within a small multiple of that
 floor. They establish sub-millisecond recall at this corpus size and no finer
 resolution than that.
+
+---
+
+## Multi-hop / EnrichedHitRate (P1.2) — medido 2026-08-23
+
+Extensión medida por `go run ./benchmarks/retrieval_quality` sobre las queries
+congeladas `queries-multihop-v1.jsonl` (q7–q9): preguntas cuyo gold fact no
+comparte NINGÚN término superficial con la query — solo alcanzables mediante un
+puente de entidad con otro fact recuperado. Predicciones pre-registradas en
+`PREDICTIONS-multihop.md` antes del run.
+
+| Sistema | HitRate (q7–q9) | Dead | p95 |
+|---|---|---|---|
+| graymatter-multihop-baseline | 0% | 0% | ~3ms |
+| graymatter-enriched | **0%** | 0% | ~1.5ms |
+
+Cobertura de puente: **1/78 facts** producen entidades extraíbles por el
+extractor regex — ninguna adyacente a un gold.
+
+### Gate ADR-003
+
+| Condición | Resultado |
+|---|---|
+| 1. Precision(ID) = 0.70 | PASS (0.928, ver `extraction_precision/RESULTS.md`) |
+| 2. EnrichedHitRate > baseline | **FAIL (0% vs 0%)** |
+| 3. ?p95 = +2ms | PASS |
+| 4. Dead = 0% | PASS |
+
+**Veredicto: NO-GO para wiring este ciclo.** La condición bloqueante no es el
+algoritmo de expansión sino la cobertura del extractor sobre prosa técnica real
+(1.3%). Camino de desbloqueo: mejoras deterministas al extractor listadas en
+`extraction_precision/RESULTS.md` (sufijos organizativos, stopwords de
+determinador, Unicode, puntuación final de URLs), luego re-corrida de ambos
+benchmarks. Mientras tanto el grafo sigue siendo útil vía linking explícito
+(`memory_reflect action=link`) y el export v2 no depende del auto-poblado.

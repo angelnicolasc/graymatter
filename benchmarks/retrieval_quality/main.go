@@ -14,7 +14,7 @@
 //
 // No network, no LLM, no API key. Keyword embedder only, fixtures frozen,
 // insertion order fixed by the corpus file. The predictions this is measured
-// against were committed before it existed — see benchmarks/RESULTS.md and
+// against were committed before it existed ??? see benchmarks/RESULTS.md and
 // `git log --follow benchmarks/RESULTS.md`.
 package main
 
@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -99,6 +100,7 @@ func main() {
 		fail("%v", err)
 	}
 	report(suite)
+	printMultihop(suite.MultiHop)
 }
 
 // suite is everything one full run produces. Returned rather than printed so
@@ -108,6 +110,18 @@ type suite struct {
 	Queries  []query
 	FixedK   []result
 	Adaptive result
+	MultiHop MultiHopSuite
+}
+
+// MultiHopSuite is the P1.2 measurement: whether entity bridges let recall
+// answer queries whose surface terms cannot reach their gold facts. The
+// EnrichedHitRate > baseline comparison is ADR-003 gate condition 2.
+type MultiHopSuite struct {
+	Queries       []query
+	Baseline      result // same fixed-k GrayMatter, no enrichment
+	Enriched      result // entity-bridge expansion, capped at 3 extra facts
+	CoverageFacts int    // corpus facts carrying at least one extractable entity
+	CoverageTotal int    // total corpus facts scanned
 }
 
 // byName returns the measured result for one system, so callers do not index
@@ -164,6 +178,22 @@ func runAll(fixtureDir string) (suite, error) {
 	if err != nil {
 		return suite{}, fmt.Errorf("graymatter adaptive: %w", err)
 	}
+
+	mhQueries, err := loadQueries(filepath.Join(fixtureDir, "queries-multihop-v1.jsonl"))
+	if err != nil {
+		return suite{}, fmt.Errorf("load multihop queries: %w", err)
+	}
+	mhBase, mhEnriched, covF, err := runEnriched(corpus, mhQueries)
+	if err != nil {
+		return suite{}, fmt.Errorf("multihop: %w", err)
+	}
+	out.MultiHop = MultiHopSuite{
+		Queries:       mhQueries,
+		Baseline:      mhBase,
+		Enriched:      mhEnriched,
+		CoverageFacts: covF,
+		CoverageTotal: len(corpus),
+	}
 	return out, nil
 }
 
@@ -207,6 +237,14 @@ func runWindow(corpus []fact, queries []query, k int) result {
 
 // runGrayMatter builds a store from the corpus and measures Recall.
 func runGrayMatter(corpus []fact, queries []query, name, mode string, cfg memory.StoreConfig) (result, error) {
+	return runGrayMatterWith(corpus, queries, name, mode, cfg, nil)
+}
+
+// runGrayMatterWith is runGrayMatter with an optional post-recall expansion
+// hook. The hook receives the recalled fact IDs and may append extra fact IDs;
+// it exists so the multi-hop candidate algorithm can be measured against the
+// identical store and seeding path as every other system.
+func runGrayMatterWith(corpus []fact, queries []query, name, mode string, cfg memory.StoreConfig, expand func([]string) []string) (result, error) {
 	dir, err := os.MkdirTemp("", "graymatter-quality-*")
 	if err != nil {
 		return result{}, err
@@ -247,13 +285,130 @@ func runGrayMatter(corpus []fact, queries []query, name, mode string, cfg memory
 				ids = append(ids, id)
 			}
 		}
+		if expand != nil {
+			ids = expand(ids)
+		}
 		return ids, elapsed
 	}, corpus), nil
 }
 
+// ---- multi-hop candidate algorithm (P1.2) ----------------------------------
+
+// bridgeEntities mirrors the kg regex extractor's entity rules closely enough
+// to stand in for it here: consecutive TitleCase word sequences plus single
+// TitleCase words repeated within the same fact. It is implemented locally
+// because internal/kg cannot be imported from the benchmarks module; if the
+// engine adopts an extractor, precision is re-measured by
+// ./cmd/graymatter/extractionbench against this same rule family.
+func bridgeEntities(text string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, m := range reBridgeSeq.FindAllString(text, -1) {
+		out[strings.ToLower(m)] = struct{}{}
+	}
+	counts := map[string]int{}
+	for _, m := range reBridgeWord.FindAllString(text, -1) {
+		counts[strings.ToLower(m)]++
+	}
+	for w, c := range counts {
+		if c >= 2 {
+			out[w] = struct{}{}
+		}
+	}
+	return out
+}
+
+var (
+	reBridgeSeq  = regexp.MustCompile(`\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b`)
+	reBridgeWord = regexp.MustCompile(`\b([A-Z][a-z]{2,})\b`)
+)
+
+// buildBridgeIndex inverts entities per fact and returns coverage stats.
+func buildBridgeIndex(corpus []fact) (factEnts map[string]map[string]struct{}, entFacts map[string]map[string]bool, covF, covT int) {
+	factEnts = make(map[string]map[string]struct{}, len(corpus))
+	entFacts = make(map[string]map[string]bool)
+	for _, f := range corpus {
+		ents := bridgeEntities(f.Text)
+		if len(ents) == 0 {
+			continue
+		}
+		covF++
+		covT += len(ents)
+		factEnts[f.ID] = ents
+		for e := range ents {
+			if entFacts[e] == nil {
+				entFacts[e] = make(map[string]bool)
+			}
+			entFacts[e][f.ID] = true
+		}
+	}
+	return factEnts, entFacts, covF, covT
+}
+
+// runEnriched measures baseline vs entity-bridge expansion on the multihop
+// query set. Expansion: entities of the recalled facts vote for additional
+// facts sharing them; stale facts are never pulled in; cap 3 extras appended
+// after the ranked base so fixed-K ordering above stays untouched.
+func runEnriched(corpus []fact, queries []query) (result, result, int, error) {
+	factEnts, entFacts, covF, _ := buildBridgeIndex(corpus)
+
+	kindByID := make(map[string]string, len(corpus))
+	sessionByID := make(map[string]int, len(corpus))
+	for _, f := range corpus {
+		kindByID[f.ID] = f.Kind
+		sessionByID[f.ID] = f.Session
+	}
+
+	expand := func(base []string) []string {
+		entSet := map[string]struct{}{}
+		inBase := map[string]bool{}
+		for _, id := range base {
+			inBase[id] = true
+			for e := range factEnts[id] {
+				entSet[e] = struct{}{}
+			}
+		}
+		type cand struct {
+			id      string
+			shared  int
+			session int
+		}
+		var pool []cand
+		seenEntityFact := map[string]bool{}
+		for e := range entSet {
+			for fid := range entFacts[e] {
+				if inBase[fid] || seenEntityFact[fid] || kindByID[fid] == "stale" {
+					continue
+				}
+				seenEntityFact[fid] = true
+				pool = append(pool, cand{id: fid, shared: 1, session: sessionByID[fid]})
+			}
+		}
+		sort.SliceStable(pool, func(i, j int) bool { return pool[i].session < pool[j].session })
+		extra := make([]string, 0, 3)
+		for _, c := range pool {
+			if len(extra) == 3 {
+				break
+			}
+			extra = append(extra, c.id)
+		}
+		return append(append([]string{}, base...), extra...)
+	}
+
+	cfg := memory.StoreConfig{}
+	base, err := runGrayMatterWith(corpus, queries, "graymatter-multihop-baseline", "fixed-K", cfg, nil)
+	if err != nil {
+		return result{}, result{}, covF, err
+	}
+	enr, err := runGrayMatterWith(corpus, queries, "graymatter-enriched", "fixed-K", cfg, expand)
+	if err != nil {
+		return result{}, result{}, covF, err
+	}
+	return base, enr, covF, nil
+}
+
 // seed writes the corpus and backdates each fact to its session on the
-// timeline. Timestamps go through the public API — Put, then List and
-// UpdateFact — so this benchmark needs no access to store internals and makes
+// timeline. Timestamps go through the public API ??? Put, then List and
+// UpdateFact ??? so this benchmark needs no access to store internals and makes
 // no change to the engine.
 func seed(ctx context.Context, store *memory.Store, corpus []fact) (map[string]string, error) {
 	ordered := make([]fact, len(corpus))
@@ -422,6 +577,44 @@ func min(a, b int) int {
 
 // ---- reporting -------------------------------------------------------------
 
+// printMultihop reports the P1.2 measurement and evaluates the ADR-003 gate
+// conditions that this benchmark owns (conditions 2???4; condition 1 ???
+// extraction precision ??? is measured by ./cmd/graymatter/extractionbench).
+func printMultihop(mh MultiHopSuite) {
+	fmt.Println()
+	fmt.Println("?????? multi-hop protocol (P1.2): gold unreachable by surface terms ??????")
+	fmt.Println()
+	fmt.Printf("Bridge coverage: %d/%d facts carry extractable entities\n\n", mh.CoverageFacts, mh.CoverageTotal)
+	header()
+	row(mh.Baseline)
+	row(mh.Enriched)
+	fmt.Println()
+
+	dP95 := mh.Enriched.P95 - mh.Baseline.P95
+	fmt.Println("GATE (ADR-003, conditions this benchmark measures):")
+	cond2 := mh.Enriched.HitRate > mh.Baseline.HitRate
+	cond3 := dP95 <= 2*time.Millisecond
+	cond4 := mh.Enriched.DeadRate == 0 && mh.Baseline.DeadRate == 0
+	mark := func(ok bool) string {
+		if ok {
+			return "PASS"
+		}
+		return "FAIL"
+	}
+	fmt.Printf("  EnrichedHitRate > baseline        : %s (%.0f%% vs %.0f%%)\n",
+		mark(cond2), mh.Enriched.HitRate, mh.Baseline.HitRate)
+	fmt.Printf("  ??p95(enriched???baseline) <= +2ms   : %s (%+v)\n", mark(cond3), dP95)
+	fmt.Printf("  Dead == 0%% on both                : %s\n", mark(cond4))
+	fmt.Println("  extraction precision >= 0.70      : see ./cmd/graymatter/extractionbench")
+	wired := cond2 && cond3 && cond4
+	if wired {
+		fmt.Println("\nVERDICT: conditions met ??? wiring may proceed to PR-D.")
+	} else {
+		fmt.Println("\nVERDICT: NO-GO for wiring this cycle. Unlock path: deterministic")
+		fmt.Println("extractor fixes, then re-run both benches.")
+	}
+}
+
 func report(s suite) {
 	corpus, queries, fixedK, adaptive := s.Corpus, s.Queries, s.FixedK, s.Adaptive
 	var gold, stale int
@@ -443,7 +636,7 @@ func report(s suite) {
 	fmt.Printf("Embedder: keyword (no LLM, no network, no API key)\n")
 	fmt.Println()
 
-	fmt.Println("── fixed-K protocol: equal budget, apples to apples ──")
+	fmt.Println("?????? fixed-K protocol: equal budget, apples to apples ??????")
 	fmt.Println()
 	header()
 	for _, r := range fixedK {
@@ -451,7 +644,7 @@ func report(s suite) {
 	}
 	fmt.Println()
 
-	fmt.Println("── adaptive protocol: reported separately, never compared above ──")
+	fmt.Println("?????? adaptive protocol: reported separately, never compared above ??????")
 	fmt.Println()
 	fmt.Printf("MinRelevance=%.2f returns a variable number of facts, so comparing it\n", adaptiveMinRelevance)
 	fmt.Println("against a fixed-K baseline would measure the budget, not the ranking.")
@@ -463,7 +656,7 @@ func report(s suite) {
 	perQuery(fixedK, queries)
 	ablationCheck(fixedK)
 
-	fmt.Println("Tokens are words × 1.33, the same approximation ./benchmarks/token_count uses.")
+	fmt.Println("Tokens are words ?? 1.33, the same approximation ./benchmarks/token_count uses.")
 	fmt.Println("HitRate: queries where a planted gold fact was returned.")
 	fmt.Println("Dead:    queries that returned a fact the store knows is superseded.")
 	fmt.Println()
@@ -472,7 +665,7 @@ func report(s suite) {
 func header() {
 	fmt.Printf("%-26s  %-9s  %8s  %6s  %9s  %8s  %9s  %9s\n",
 		"System", "Mode", "HitRate", "Dead", "Tokens/q", "Facts/q", "p50", "p95")
-	fmt.Println(strings.Repeat("─", 104))
+	fmt.Println(strings.Repeat("???", 104))
 }
 
 func row(r result) {
@@ -585,20 +778,20 @@ func fail(format string, args ...any) {
 // perQuery prints the hit/miss grid. An aggregate HitRate says something
 // missed; this says which, which is the part that directs engineering.
 func perQuery(results []result, queries []query) {
-	fmt.Println("── per query (· hit, x miss, D returned a superseded fact) ──")
+	fmt.Println("?????? per query (?? hit, x miss, D returned a superseded fact) ??????")
 	fmt.Println()
 	fmt.Printf("%-26s", "System")
 	for _, q := range queries {
 		fmt.Printf("  %-4s", q.ID)
 	}
 	fmt.Println()
-	fmt.Println(strings.Repeat("─", 26+6*len(queries)))
+	fmt.Println(strings.Repeat("???", 26+6*len(queries)))
 	for _, r := range results {
 		fmt.Printf("%-26s", r.System)
 		for _, o := range r.PerQuery {
 			mark := "x"
 			if o.Hit {
-				mark = "·"
+				mark = "??"
 			}
 			if o.Dead {
 				mark += "D"
@@ -617,7 +810,7 @@ func perQuery(results []result, queries []query) {
 // ablationCheck tests ADR-006 empirically. The ADR claims a sliding window is
 // the special case of this ranking with all weight on recency. window-8 is
 // implemented independently, so if the claim holds the two must return the
-// same facts for every query — and if they diverge, the ADR is wrong and says
+// same facts for every query ??? and if they diverge, the ADR is wrong and says
 // so here rather than in prose nobody re-checks.
 func ablationCheck(results []result) {
 	var window, ablation *result
@@ -633,7 +826,7 @@ func ablationCheck(results []result) {
 		return
 	}
 
-	fmt.Println("── ADR-006 check: is a sliding window the recency-only special case? ──")
+	fmt.Println("?????? ADR-006 check: is a sliding window the recency-only special case? ??????")
 	fmt.Println()
 	agree := true
 	for qid, wids := range window.Returned {
@@ -668,3 +861,4 @@ func sameSet(a, b []string) bool {
 	}
 	return true
 }
+
