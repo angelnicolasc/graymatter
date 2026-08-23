@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,5 +273,21 @@ func TestCheckInstructions_StaleBlock(t *testing.T) {
 	}
 	if c := checkInstructions(dir); c.Status != "ok" {
 		t.Errorf("status after re-running init = %s, want ok (%s)", c.Status, c.Detail)
+	}
+}
+
+// TestDoctor_RejectsPathWithoutAudit pins the M-C2 resolution: a positional
+// path only means something under --audit. Taking it silently and auditing
+// the working directory anyway is input that changes nothing and says so to
+// nobody - the failure mode this project fixes everywhere else.
+func TestDoctor_RejectsPathWithoutAudit(t *testing.T) {
+	cmd := doctorCmd()
+	cmd.SilenceUsage = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"some-other-project"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "requires --audit") {
+		t.Fatalf("expected a requires---audit error, got %v", err)
 	}
 }

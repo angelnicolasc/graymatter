@@ -33,6 +33,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`doctor <path>` without `--audit` is now a loud error** instead of
+  silently auditing the working directory while ignoring the path. A
+  positional path only means something under `--audit`; input that changes
+  nothing and says so to nobody is the failure mode this project fixes
+  everywhere else.
 - **`doctor --audit` no longer reports marker syntax quoted inside fenced
   code blocks.** A document that teaches or documents the managed-block
   syntax inside ``` fences — this repository's own docs do it — produced

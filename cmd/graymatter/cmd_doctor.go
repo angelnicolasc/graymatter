@@ -57,6 +57,14 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 				return runDoctorAudit(cmd, root)
 			}
 
+			// A positional path only means something under --audit. Taking it
+			// silently and then auditing the working directory anyway is the
+			// exact failure mode this project fixes elsewhere: input that
+			// changes nothing and says so to nobody.
+			if len(args) > 0 {
+				return fmt.Errorf("unexpected argument %q: a path requires --audit", args[0])
+			}
+
 			checks := []checkResult{
 				checkBinaryOnPath(),
 				checkDataDir(dataDir),
