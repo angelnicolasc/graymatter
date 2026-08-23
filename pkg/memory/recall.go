@@ -50,6 +50,37 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		return nil, nil
 	}
 
+	factByID := make(map[string]*Fact, len(facts))
+	for i := range facts {
+		factByID[facts[i].ID] = &facts[i]
+	}
+
+	// rankBefore is the total order every ranking below uses: score
+	// descending, then oldest first, then fact ID.
+	//
+	// Each of the three signal rankings turns scores into ranks, and those
+	// ranks are what the RRF fusion actually reads. Sorting them with a
+	// comparator that only looks at the score leaves the order of equal
+	// scores unspecified — sort.Slice is not stable — so tied facts received
+	// arbitrary ranks, arbitrary ranks produced different fused scores, and
+	// the same query against the same store returned different facts from one
+	// call to the next. With six facts written in the same instant, all six
+	// rotations of the result were observable.
+	//
+	// CreatedAt comes before ID because it is meaningful: when two facts score
+	// the same, the older one has been in the store longer and is the more
+	// established of the two. ID is the final fallback, so the order is total
+	// even for facts created in the same instant.
+	rankBefore := func(aID string, aScore float64, bID string, bScore float64) bool {
+		if aScore != bScore {
+			return aScore > bScore
+		}
+		if fa, fb := factByID[aID], factByID[bID]; fa != nil && fb != nil && !fa.CreatedAt.Equal(fb.CreatedAt) {
+			return fa.CreatedAt.Before(fb.CreatedAt)
+		}
+		return aID < bID
+	}
+
 	// --- Signal 1: vector similarity ---
 	vectorRank := make(map[string]int, topK*2) // factID → rank (1-based)
 	vecResults, _ := s.vectorSearch(ctx, agentID, query, topK*2)
@@ -67,7 +98,9 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	for id, sc := range kwScores {
 		kwSorted = append(kwSorted, kwEntry{id, sc})
 	}
-	sort.Slice(kwSorted, func(i, j int) bool { return kwSorted[i].score > kwSorted[j].score })
+	sort.Slice(kwSorted, func(i, j int) bool {
+		return rankBefore(kwSorted[i].id, kwSorted[i].score, kwSorted[j].id, kwSorted[j].score)
+	})
 	kwRank := make(map[string]int, len(kwSorted))
 	for i, e := range kwSorted {
 		kwRank[e.id] = i + 1
@@ -93,7 +126,9 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	for id, sc := range recencyScores {
 		recSorted = append(recSorted, recEntry{id, sc})
 	}
-	sort.Slice(recSorted, func(i, j int) bool { return recSorted[i].score > recSorted[j].score })
+	sort.Slice(recSorted, func(i, j int) bool {
+		return rankBefore(recSorted[i].id, recSorted[i].score, recSorted[j].id, recSorted[j].score)
+	})
 	recRank := make(map[string]int, len(recSorted))
 	for i, e := range recSorted {
 		recRank[e.id] = i + 1
@@ -130,7 +165,9 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	for id, sc := range candidates {
 		allScored = append(allScored, scored{id, sc})
 	}
-	sort.Slice(allScored, func(i, j int) bool { return allScored[i].score > allScored[j].score })
+	sort.Slice(allScored, func(i, j int) bool {
+		return rankBefore(allScored[i].id, allScored[i].score, allScored[j].id, allScored[j].score)
+	})
 
 	// Test-only seam. Nil in production; the golden fixture sets it to freeze
 	// the fused scores themselves rather than only their argmax.
@@ -159,12 +196,6 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 			}
 		}
 		allScored = allScored[:cut]
-	}
-
-	// Build fact lookup.
-	factByID := make(map[string]*Fact, len(facts))
-	for i := range facts {
-		factByID[facts[i].ID] = &facts[i]
 	}
 
 	// Collect top-k, updating access metadata along the way.
