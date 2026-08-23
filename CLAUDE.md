@@ -5,7 +5,8 @@
 
 GrayMatter is a single-binary Go memory system for AI agents. Library + CLI +
 MCP server + TUI. Facts persist to bbolt with optional vector embeddings, for
-roughly a 97% cut in context tokens versus re-injecting full history.
+roughly a 90% cut in context tokens versus re-injecting full history — the
+figure `go run ./benchmarks/token_count` actually prints at 100 sessions.
 
 ## A user asked you to set GrayMatter up
 
