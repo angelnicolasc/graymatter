@@ -13,6 +13,19 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
+// ErrConsolidateLLMUnsupported is returned when ConsolidateLLM names a
+// provider that can embed but cannot yet summarise. Today that is "ollama":
+// it is a supported embedding backend, and configuring it as the consolidation
+// LLM is accepted by config but does nothing.
+//
+// It used to do nothing quietly. A store configured this way would run decay
+// and pruning forever and never summarise, with no error and no log line to
+// explain why memory kept growing. It now reaches OnConsolidateError like any
+// other consolidation failure.
+var ErrConsolidateLLMUnsupported = errors.New(
+	"consolidation LLM \"ollama\" is not implemented: Ollama works as an embedding " +
+		"backend but cannot summarise yet; set ConsolidateLLM to \"anthropic\" or \"\"")
+
 // ConsolidateConfig is the subset of configuration used by consolidation.
 // Defined as an interface to avoid a circular import with the root package.
 type ConsolidateConfig interface {
@@ -46,6 +59,15 @@ func (s *Store) LaunchAsyncConsolidate(agentID string, cfg ConsolidateConfig) {
 
 // MaybeConsolidate triggers consolidation only when the fact count for
 // agentID meets or exceeds the threshold. Safe to call concurrently.
+//
+// The threshold is read twice on the way through, with deliberately different
+// comparisons, and the difference is load-bearing rather than an oversight:
+// this function fires at >= N, while the LLM summarisation step inside
+// Consolidate fires at > N. At exactly N facts a cycle therefore runs decay
+// and pruning but does not summarise. Decay and pruning are cheap, local and
+// worth doing at the boundary; summarisation costs an API call and destroys
+// the batch it replaces, so it waits until the store is unambiguously over
+// the line. See docs/decisions/001-decay-half-life.md.
 func (s *Store) MaybeConsolidate(ctx context.Context, agentID string, cfg ConsolidateConfig) error {
 	facts, err := s.List(agentID)
 	if err != nil {
@@ -90,11 +112,21 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	}
 
 	// Step 2: LLM summarisation when enabled and threshold exceeded.
+	// Strictly greater, unlike MaybeConsolidate's >= — see the note there.
 	if len(facts) > cfg.GetConsolidateThreshold() && cfg.GetConsolidateLLM() != "" {
 		sort.Slice(facts, func(i, j int) bool { return facts[i].Weight < facts[j].Weight })
 		batch := facts[:len(facts)/2]
 
 		summary, err := summariseFacts(ctx, batch, cfg)
+		if err != nil && s.cfg.OnConsolidateError != nil {
+			// Report rather than swallow. Summarisation failing is not fatal —
+			// the facts are still there and decay still runs — but a caller
+			// who configured an LLM and is getting no summaries has no other
+			// way to find out. ErrConsolidateLLMUnsupported arrives here too,
+			// which is how a store configured for Ollama summarisation learns
+			// that it is not implemented instead of quietly doing nothing.
+			s.cfg.OnConsolidateError(agentID, err)
+		}
 		if err == nil && summary != "" {
 			// Only delete the batch if Put of the summary succeeds — never lose data.
 			if putErr := s.Put(ctx, agentID, summary); putErr == nil {
@@ -160,9 +192,11 @@ func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (s
 	case "anthropic":
 		return consolidateViaAnthropic(ctx, prompt, cfg)
 	case "ollama":
-		// Ollama text generation not yet implemented; skip silently.
-		return "", nil
+		return "", ErrConsolidateLLMUnsupported
 	default:
+		// Consolidation LLM disabled. Decay and pruning still run; only
+		// summarisation is skipped, and that is the configured behaviour
+		// rather than a failure.
 		return "", nil
 	}
 }

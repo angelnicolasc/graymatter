@@ -2,12 +2,15 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/angelnicolasc/graymatter/pkg/embedding"
 )
 
 // testConsolidateCfg is a minimal ConsolidateConfig for unit tests.
@@ -267,5 +270,85 @@ func TestConsolidate_PutBeforeDelete(t *testing.T) {
 	// Without a real LLM no summarisation fires; original n facts intact.
 	if len(facts) != n {
 		t.Errorf("expected %d facts, got %d", n, len(facts))
+	}
+}
+
+// TestConsolidate_OllamaSummariserReportsUnsupported covers a misconfiguration
+// that used to be invisible. Ollama is a supported embedding backend, so
+// setting ConsolidateLLM="ollama" looks reasonable and is accepted by config —
+// but summarisation via Ollama is not implemented, and the code returned an
+// empty summary and no error. Consolidation then ran forever doing decay and
+// pruning only, with nothing anywhere to explain why memory kept growing.
+func TestConsolidate_OllamaSummariserReportsUnsupported(t *testing.T) {
+	var reported []error
+	dir := t.TempDir()
+	s, err := Open(StoreConfig{
+		DataDir:       dir,
+		Embedder:      embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword}),
+		DecayHalfLife: 720 * time.Hour,
+		OnConsolidateError: func(_ string, err error) {
+			reported = append(reported, err)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	cfg := &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour, llm: "ollama"}
+	for i := 0; i < 5; i++ { // over the threshold, so summarisation is attempted
+		if err := s.Put(ctx, "ollama-agent", fmt.Sprintf("observation number %d", i)); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+	}
+
+	if err := s.Consolidate(ctx, "ollama-agent", cfg); err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+
+	var found bool
+	for _, e := range reported {
+		if errors.Is(e, ErrConsolidateLLMUnsupported) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("configuring an unimplemented consolidation LLM reported nothing; got %v", reported)
+	}
+}
+
+// TestConsolidate_DisabledLLMReportsNothing is the other half: an empty
+// ConsolidateLLM means summarisation is off by choice, not broken, and must
+// stay silent.
+func TestConsolidate_DisabledLLMReportsNothing(t *testing.T) {
+	var reported []error
+	dir := t.TempDir()
+	s, err := Open(StoreConfig{
+		DataDir:       dir,
+		Embedder:      embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword}),
+		DecayHalfLife: 720 * time.Hour,
+		OnConsolidateError: func(_ string, err error) {
+			reported = append(reported, err)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	cfg := &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour, llm: ""}
+	for i := 0; i < 5; i++ {
+		if err := s.Put(ctx, "quiet-agent", fmt.Sprintf("observation number %d", i)); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+	}
+
+	if err := s.Consolidate(ctx, "quiet-agent", cfg); err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if len(reported) != 0 {
+		t.Errorf("consolidation with the LLM disabled reported errors: %v", reported)
 	}
 }

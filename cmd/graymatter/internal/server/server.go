@@ -39,7 +39,12 @@ import (
 )
 
 const (
-	defaultTopK   = 5
+	// defaultTopK must stay equal to graymatter.DefaultConfig().TopK. The REST
+	// surface used to answer with 5 facts while every other entry point
+	// answered with 8, so the same query returned different amounts of context
+	// depending on which door the caller came through. Pinned by
+	// TestDefaultTopK_MatchesLibraryDefault; the ?k= parameter still overrides.
+	defaultTopK   = 8
 	defaultLimit  = 50
 	readTimeout   = 15 * time.Second
 	writeTimeout  = 30 * time.Second

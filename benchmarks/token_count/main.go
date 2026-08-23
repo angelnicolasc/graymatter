@@ -7,10 +7,16 @@
 //
 //	go run ./benchmarks/token_count
 //
-// Model: each "session" stores 5 key observations extracted from a realistic
-// agent interaction. "Full injection" = ALL stored observations concatenated.
+// Model: each "session" stores ONE observation — a paragraph extracted from a
+// realistic agent interaction, ~50-70 words. "30 sessions" means 30 stored
+// observations. "Full injection" = ALL stored observations concatenated.
 // "GrayMatter Recall" = top-8 most relevant observations for the given query.
 // Token counts are approximated at 1.33 tokens/word (matches tiktoken within ±10%).
+//
+// What this does NOT measure is in docs/benchmarks.md and is worth reading
+// before quoting a number from it: relevance is never checked, so a system
+// returning 8 random facts would score the same reduction, and full-history
+// injection is the weakest baseline available.
 package main
 
 import (
