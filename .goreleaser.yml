@@ -60,6 +60,24 @@ release:
   draft: false
   prerelease: auto
   name_template: "GrayMatter {{.Tag}}"
+  # This header is one string for every platform, so it cannot name a
+  # per-platform archive. The version that used to live here tried anyway:
+  #
+  #   curl .../{{.Tag}}/graymatter_{{.Tag}}_$(uname -s)_$(uname -m).tar.gz
+  #
+  # and 404'd on all five builds, because archives are named from
+  # `{{ .Version }}_{{ .Os }}_{{ .Arch }}` (0.9.0_darwin_arm64) while that line
+  # produced Tag plus uname (v0.9.0_Darwin_arm64). It shipped broken from at
+  # least v0.7.1 to v0.9.0. Per-platform curl belongs in the README, where each
+  # command can be written out and checked.
+  #
+  # `go install ...@{{.Tag}}` does not work either, and for a different reason:
+  # cmd/graymatter is its own module, so Go looks for a `cmd/graymatter/v0.9.0`
+  # tag, does not find one, falls back to the root module and reports that it
+  # "does not contain package .../cmd/graymatter". @latest resolves to a
+  # pseudo-version of the default branch and builds. If you ever want @{{.Tag}}
+  # to work, the release process has to push a second, subdirectory-prefixed
+  # tag — a moving part that breaks this again the first time it is forgotten.
   header: |
     ## GrayMatter {{.Tag}}
 
@@ -68,10 +86,9 @@ release:
     ### Quick install
 
     ```bash
-    # macOS / Linux
-    curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/{{.Tag}}/graymatter_{{.Tag}}_$(uname -s)_$(uname -m).tar.gz | tar xz
-    sudo mv graymatter /usr/local/bin/
-
-    # Go install
-    go install github.com/angelnicolasc/graymatter/cmd/graymatter@{{.Tag}}
+    go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
     ```
+
+    Prebuilt binaries for Linux, macOS and Windows are in the assets below,
+    with `checksums.txt` (sha256). Per-platform download commands are in the
+    [README](https://github.com/angelnicolasc/graymatter#install).
