@@ -100,7 +100,7 @@ func TestUpdateFact_NonExistentBucket(t *testing.T) {
 	s, cleanup := openTestStore(t)
 	defer cleanup()
 
-	f := newFact("ghost-agent", "orphan fact", nil)
+	f := newFact("ghost-agent", "orphan fact", nil, time.Now())
 	if err := s.UpdateFact("ghost-agent", f); err != nil {
 		t.Errorf("UpdateFact on missing bucket should not error: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestReadOnlyStore_MutationsReturnErr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write open: %v", err)
 	}
-	f := newFact("mut-agent", "original text", nil)
+	f := newFact("mut-agent", "original text", nil, time.Now())
 	_ = rw.Put(context.Background(), "mut-agent", "original text")
 	_ = rw.Close()
 

@@ -80,8 +80,9 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	}
 	lambda := math.Log(2) / halfLife.Hours()
 	recencyScores := make(map[string]float64, len(facts))
+	nowT := s.now()
 	for _, f := range facts {
-		ageDays := time.Since(f.CreatedAt).Hours()
+		ageDays := nowT.Sub(f.CreatedAt).Hours()
 		recencyScores[f.ID] = math.Exp(-lambda * ageDays)
 	}
 	type recEntry struct {
@@ -171,7 +172,7 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		seen[f.Text] = true
 		// Update access metadata (best-effort, non-blocking).
 		f.AccessCount++
-		f.AccessedAt = time.Now().UTC()
+		f.AccessedAt = nowT.UTC()
 		s.wg.Add(1)
 		go func(fact Fact) {
 			defer s.wg.Done()

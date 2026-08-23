@@ -51,8 +51,11 @@ const SupersededByAgent = "agent"
 func (f Fact) IsSuperseded() bool { return f.SupersededBy != "" }
 
 // newFact creates a Fact with a new ULID and weight=1.0.
-func newFact(agentID, text string, embedding []float32) Fact {
-	now := time.Now().UTC()
+//
+// The timestamp is passed in rather than read here so the caller's clock is
+// the only clock: Store.Put supplies s.now(), which tests can freeze.
+func newFact(agentID, text string, embedding []float32, at time.Time) Fact {
+	now := at.UTC()
 	return Fact{
 		ID:          ulid.Make().String(),
 		AgentID:     agentID,
