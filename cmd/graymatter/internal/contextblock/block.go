@@ -48,6 +48,17 @@ const MinBudgetTokens = 64
 // syncPrefix introduces the machine-readable header line inside the block.
 const syncPrefix = "<!-- graymatter:context:sync"
 
+// The other managed-block family shares the file with the context block.
+// Fact text quoting the instructions briefing verbatim is plausible — agents
+// document what they were told — and if it reached a rendered body intact,
+// every marker-based scanner (doctor --audit, the instructions reader) would
+// see forged managed regions in a file this command owns. Both families are
+// neutralised for the same reason.
+const (
+	instructionsBeginPrefix = "<!-- graymatter:instructions:begin"
+	instructionsEndMarker   = "<!-- graymatter:instructions:end -->"
+)
+
 // heading is the single fixed line of the body. It costs budget like any
 // other line and is part of every golden.
 const heading = "## Memory context (GrayMatter)"
@@ -124,7 +135,8 @@ func bullet(text string) string { return "- " + sanitize(text) }
 
 // sanitize strips everything that would let fact text impersonate block
 // structure: newlines (one fact, one line — also what keeps diff accounting
-// meaningful) and any substring able to close or forge a managed marker.
+// meaningful) and any substring able to close or forge a managed marker of
+// either family (context and instructions).
 func sanitize(text string) string {
 	out := strings.ReplaceAll(text, "\r\n", " ")
 	out = strings.ReplaceAll(out, "\n", " ")
@@ -132,6 +144,8 @@ func sanitize(text string) string {
 	out = strings.ReplaceAll(out, BeginMarker, "[filtered]")
 	out = strings.ReplaceAll(out, EndMarker, "[filtered]")
 	out = strings.ReplaceAll(out, syncPrefix, "[filtered]")
+	out = strings.ReplaceAll(out, instructionsBeginPrefix, "[filtered]")
+	out = strings.ReplaceAll(out, instructionsEndMarker, "[filtered]")
 	return strings.TrimSpace(out)
 }
 

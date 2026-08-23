@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/contextblock"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 var auditOpts = Options{Now: time.Now()}
@@ -579,6 +580,34 @@ func TestAudit_StalenessOutsideRepoReportsReason(t *testing.T) {
 	}
 	if !strings.Contains(st.Reason, "not a git repository") {
 		t.Errorf("reason = %q, want %q", st.Reason, "not a git repository")
+	}
+}
+
+func TestAudit_QuoteMarkersInContextBlockNoFindings(t *testing.T) {
+	// A stored fact that quotes the instructions briefing verbatim gets
+	// projected into the managed context block. The file is structurally
+	// sound; auditing it must produce zero findings.
+	dir := t.TempDir()
+	facts := []memory.Fact{{
+		ID: "f1", AgentID: "demo", Weight: 1,
+		CreatedAt: time.Now().UTC(),
+		Text:      "Always quote the briefing verbatim: " + validInstructionsBlock() + " when documenting",
+	}}
+	body := contextblock.RenderBody(facts)
+	block := contextblock.RenderBlock(body, contextblock.SyncMeta{
+		SHA256:   contextblock.HashBody(body),
+		Facts:    len(facts),
+		SyncedAt: time.Now().UTC(),
+	})
+	writeFile(t, filepath.Join(dir, "AGENTS.md"), block)
+	rep, err := AuditPath(dir, auditOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range rep.Findings {
+		if f.Severity == SevWarn || f.Severity == SevFail {
+			t.Errorf("healthy file with quoted markers produced %s finding: %+v", f.Severity, f)
+		}
 	}
 }
 

@@ -22,6 +22,7 @@ func FuzzRenderBlock(f *testing.F) {
 		BeginMarker,
 		syncPrefix + " v1 sha256=0",
 		"<!-- graymatter:context:end --> trailing comment -->",
+		"<!-- graymatter:instructions:begin — managed by `graymatter init`; edits inside this block are overwritten --> quoted <!-- graymatter:instructions:end -->",
 		"unicode \xc3\x28 broken utf8 \x00 nulls \t\ttabs",
 		strings.Repeat("long ", 500),
 	}
