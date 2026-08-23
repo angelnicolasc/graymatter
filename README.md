@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.9.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/coverage-74.8%25-brightgreen" alt="Coverage 74.8%">
+  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.10.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/coverage-77.0%25-brightgreen" alt="Coverage 77.0%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 <div align="center">
@@ -157,22 +157,22 @@ The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 
 ```bash
 # Linux (x86_64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_amd64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_linux_amd64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Linux (ARM64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_linux_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_darwin_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
@@ -819,4 +819,4 @@ GrayMatter saves you conversation history. They stack.
 
 ---
 
-*GrayMatter — v0.9.0 — August 2026*
+*GrayMatter — v0.10.0 — August 2026*
