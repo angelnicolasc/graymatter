@@ -1,0 +1,196 @@
+# GrayMatter engine golden fixture
+#
+# Regenerate: go test ./pkg/memory/ -run TestGolden -update
+# A diff here means the default-configuration output of the engine
+# changed. That is either a bug or a decision; it is never noise.
+#
+# epoch:     2026-01-01T00:00:00Z
+# half-life: 720h0m0s
+# knobs:     SignalWeights=nil (defaults), MinRelevance=0
+#
+# Fact IDs are ULIDs seeded from the real clock and random entropy, so
+# they cannot be pinned. Facts appear by List position or by text;
+# every other value is the stored one, verbatim and unrounded.
+
+== PHASE A: fused ranking (all candidates, scores verbatim) ==
+
+-- query "deployment pipeline release"
+  rank=01 score=0.024193548387096774  release tags are signed with the team gpg key before publishing
+  rank=02 score=0.023581336696090797  the deployment freeze window runs from december 20th to january 2nd
+  rank=03 score=0.023536299765807962  the deployment pipeline runs on kubernetes with argo rollouts
+  rank=04 score=0.023119392684610076  database migrations are applied by atlas during deployment
+  rank=05 score=0.02297794117647059  the staging deployment cluster is shared between all teams
+  rank=06 score=0.0079365079365079361  the coffee machine on floor two takes whole beans only
+  rank=07 score=0.0078125  parking permits are renewed through the facilities portal
+  rank=08 score=0.0076923076923076927  lunch is catered on fridays in the office kitchen
+  rank=09 score=0.007575757575757576  the oncall rotation is two weeks per engineer
+  rank=10 score=0.007462686567164179  incident retrospectives happen every thursday afternoon
+  returned at topK=5: 5
+    01 release tags are signed with the team gpg key before publishing
+    02 the deployment freeze window runs from december 20th to january 2nd
+    03 the deployment pipeline runs on kubernetes with argo rollouts
+    04 database migrations are applied by atlas during deployment
+    05 the staging deployment cluster is shared between all teams
+
+-- query "office facilities and food"
+  rank=01 score=0.024085750315258513  lunch is catered on fridays in the office kitchen
+  rank=02 score=0.023941532258064516  parking permits are renewed through the facilities portal
+  rank=03 score=0.0081967213114754103  the deployment freeze window runs from december 20th to january 2nd
+  rank=04 score=0.0080645161290322578  release tags are signed with the team gpg key before publishing
+  rank=05 score=0.0079365079365079361  the coffee machine on floor two takes whole beans only
+  rank=06 score=0.007575757575757576  the oncall rotation is two weeks per engineer
+  rank=07 score=0.007462686567164179  incident retrospectives happen every thursday afternoon
+  rank=08 score=0.0073529411764705881  the staging deployment cluster is shared between all teams
+  rank=09 score=0.007246376811594203  database migrations are applied by atlas during deployment
+  rank=10 score=0.0071428571428571426  the deployment pipeline runs on kubernetes with argo rollouts
+  returned at topK=5: 5
+    01 lunch is catered on fridays in the office kitchen
+    02 parking permits are renewed through the facilities portal
+    03 the deployment freeze window runs from december 20th to january 2nd
+    04 release tags are signed with the team gpg key before publishing
+    05 the coffee machine on floor two takes whole beans only
+
+-- query "oncall rotation and incident handling"
+  rank=01 score=0.023969200198708396  the oncall rotation is two weeks per engineer
+  rank=02 score=0.023591718825228696  incident retrospectives happen every thursday afternoon
+  rank=03 score=0.0081967213114754103  the deployment freeze window runs from december 20th to january 2nd
+  rank=04 score=0.0080645161290322578  release tags are signed with the team gpg key before publishing
+  rank=05 score=0.0079365079365079361  the coffee machine on floor two takes whole beans only
+  rank=06 score=0.0078125  parking permits are renewed through the facilities portal
+  rank=07 score=0.0076923076923076927  lunch is catered on fridays in the office kitchen
+  rank=08 score=0.0073529411764705881  the staging deployment cluster is shared between all teams
+  rank=09 score=0.007246376811594203  database migrations are applied by atlas during deployment
+  rank=10 score=0.0071428571428571426  the deployment pipeline runs on kubernetes with argo rollouts
+  returned at topK=5: 5
+    01 the oncall rotation is two weeks per engineer
+    02 incident retrospectives happen every thursday afternoon
+    03 the deployment freeze window runs from december 20th to january 2nd
+    04 release tags are signed with the team gpg key before publishing
+    05 the coffee machine on floor two takes whole beans only
+
+-- query "gpg"
+  rank=01 score=0.024457958751983078  release tags are signed with the team gpg key before publishing
+  rank=02 score=0.0081967213114754103  the deployment freeze window runs from december 20th to january 2nd
+  rank=03 score=0.0079365079365079361  the coffee machine on floor two takes whole beans only
+  rank=04 score=0.0078125  parking permits are renewed through the facilities portal
+  rank=05 score=0.0076923076923076927  lunch is catered on fridays in the office kitchen
+  rank=06 score=0.007575757575757576  the oncall rotation is two weeks per engineer
+  rank=07 score=0.007462686567164179  incident retrospectives happen every thursday afternoon
+  rank=08 score=0.0073529411764705881  the staging deployment cluster is shared between all teams
+  rank=09 score=0.007246376811594203  database migrations are applied by atlas during deployment
+  rank=10 score=0.0071428571428571426  the deployment pipeline runs on kubernetes with argo rollouts
+  returned at topK=5: 5
+    01 release tags are signed with the team gpg key before publishing
+    02 the deployment freeze window runs from december 20th to january 2nd
+    03 the coffee machine on floor two takes whole beans only
+    04 parking permits are renewed through the facilities portal
+    05 lunch is catered on fridays in the office kitchen
+
+-- query "nonexistent"
+  rank=01 score=0.0081967213114754103  the deployment freeze window runs from december 20th to january 2nd
+  rank=02 score=0.0080645161290322578  release tags are signed with the team gpg key before publishing
+  rank=03 score=0.0079365079365079361  the coffee machine on floor two takes whole beans only
+  rank=04 score=0.0078125  parking permits are renewed through the facilities portal
+  rank=05 score=0.0076923076923076927  lunch is catered on fridays in the office kitchen
+  rank=06 score=0.007575757575757576  the oncall rotation is two weeks per engineer
+  rank=07 score=0.007462686567164179  incident retrospectives happen every thursday afternoon
+  rank=08 score=0.0073529411764705881  the staging deployment cluster is shared between all teams
+  rank=09 score=0.007246376811594203  database migrations are applied by atlas during deployment
+  rank=10 score=0.0071428571428571426  the deployment pipeline runs on kubernetes with argo rollouts
+  returned at topK=5: 5
+    01 the deployment freeze window runs from december 20th to january 2nd
+    02 release tags are signed with the team gpg key before publishing
+    03 the coffee machine on floor two takes whole beans only
+    04 parking permits are renewed through the facilities portal
+    05 lunch is catered on fridays in the office kitchen
+
+== PHASE B: store state after one recall ==
+[00] created=2026-01-28T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=1 superseded=- embedding=0
+     text=the deployment freeze window runs from december 20th to january 2nd
+[01] created=2026-01-25T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=1 superseded=- embedding=0
+     text=release tags are signed with the team gpg key before publishing
+[02] created=2026-01-22T00:00:00Z accessed=2026-01-22T00:00:00Z count=0 weight=1 superseded=- embedding=0
+     text=the coffee machine on floor two takes whole beans only
+[03] created=2026-01-19T00:00:00Z accessed=2026-01-19T00:00:00Z count=0 weight=1 superseded=- embedding=0
+     text=parking permits are renewed through the facilities portal
+[04] created=2026-01-16T00:00:00Z accessed=2026-01-16T00:00:00Z count=0 weight=1 superseded=- embedding=0
+     text=lunch is catered on fridays in the office kitchen
+[05] created=2026-01-13T00:00:00Z accessed=2026-01-13T00:00:00Z count=0 weight=1 superseded=- embedding=0
+     text=the oncall rotation is two weeks per engineer
+[06] created=2026-01-10T00:00:00Z accessed=2026-01-10T00:00:00Z count=0 weight=1 superseded=- embedding=0
+     text=incident retrospectives happen every thursday afternoon
+[07] created=2026-01-07T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=1 superseded=- embedding=0
+     text=the staging deployment cluster is shared between all teams
+[08] created=2026-01-04T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=1 superseded=- embedding=0
+     text=database migrations are applied by atlas during deployment
+[09] created=2026-01-01T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=1 superseded=- embedding=0
+     text=the deployment pipeline runs on kubernetes with argo rollouts
+
+== PHASE B: after 4320h0m0s idle, then consolidate ==
+[00] created=2026-01-28T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment freeze window runs from december 20th to january 2nd
+[01] created=2026-01-25T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=release tags are signed with the team gpg key before publishing
+[02] created=2026-01-22T00:00:00Z accessed=2026-01-22T00:00:00Z count=0 weight=0.011571074627238781 superseded=- embedding=0
+     text=the coffee machine on floor two takes whole beans only
+[03] created=2026-01-19T00:00:00Z accessed=2026-01-19T00:00:00Z count=0 weight=0.010796194374748247 superseded=- embedding=0
+     text=parking permits are renewed through the facilities portal
+[04] created=2026-01-16T00:00:00Z accessed=2026-01-16T00:00:00Z count=0 weight=0.010073205534684219 superseded=- embedding=0
+     text=lunch is catered on fridays in the office kitchen
+[05] created=2026-01-07T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the staging deployment cluster is shared between all teams
+[06] created=2026-01-04T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=database migrations are applied by atlas during deployment
+[07] created=2026-01-01T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment pipeline runs on kubernetes with argo rollouts
+
+== PHASE C: consolidate with half-life 0 (uses the 720h fallback) ==
+[00] created=2026-01-28T00:00:00Z accessed=2026-01-28T00:00:00Z count=0 weight=0.013291674389857117 superseded=- embedding=0
+     text=the deployment freeze window runs from december 20th to january 2nd
+[01] created=2026-01-25T00:00:00Z accessed=2026-01-25T00:00:00Z count=0 weight=0.012401570718501556 superseded=- embedding=0
+     text=release tags are signed with the team gpg key before publishing
+[02] created=2026-01-22T00:00:00Z accessed=2026-01-22T00:00:00Z count=0 weight=0.011571074627238781 superseded=- embedding=0
+     text=the coffee machine on floor two takes whole beans only
+[03] created=2026-01-19T00:00:00Z accessed=2026-01-19T00:00:00Z count=0 weight=0.010796194374748247 superseded=- embedding=0
+     text=parking permits are renewed through the facilities portal
+[04] created=2026-01-16T00:00:00Z accessed=2026-01-16T00:00:00Z count=0 weight=0.010073205534684219 superseded=- embedding=0
+     text=lunch is catered on fridays in the office kitchen
+
+== PHASE D: recall with one fact tombstoned ==
+  01 the deployment freeze window runs from december 20th to january 2nd
+  02 the deployment pipeline runs on kubernetes with argo rollouts
+  03 database migrations are applied by atlas during deployment
+  04 the staging deployment cluster is shared between all teams
+  05 the coffee machine on floor two takes whole beans only
+
+== PHASE D: after consolidate pass 1 ==
+[00] created=2026-01-28T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment freeze window runs from december 20th to january 2nd
+[01] created=2026-01-22T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the coffee machine on floor two takes whole beans only
+[02] created=2026-01-19T00:00:00Z accessed=2026-01-19T00:00:00Z count=0 weight=0.010796194374748247 superseded=- embedding=0
+     text=parking permits are renewed through the facilities portal
+[03] created=2026-01-16T00:00:00Z accessed=2026-01-16T00:00:00Z count=0 weight=0.010073205534684219 superseded=- embedding=0
+     text=lunch is catered on fridays in the office kitchen
+[04] created=2026-01-07T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the staging deployment cluster is shared between all teams
+[05] created=2026-01-04T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=database migrations are applied by atlas during deployment
+[06] created=2026-01-01T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment pipeline runs on kubernetes with argo rollouts
+
+== PHASE D: after consolidate pass 2 ==
+[00] created=2026-01-28T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment freeze window runs from december 20th to january 2nd
+[01] created=2026-01-22T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the coffee machine on floor two takes whole beans only
+[02] created=2026-01-19T00:00:00Z accessed=2026-01-19T00:00:00Z count=0 weight=0.010796194374748247 superseded=- embedding=0
+     text=parking permits are renewed through the facilities portal
+[03] created=2026-01-16T00:00:00Z accessed=2026-01-16T00:00:00Z count=0 weight=0.010073205534684219 superseded=- embedding=0
+     text=lunch is catered on fridays in the office kitchen
+[04] created=2026-01-07T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the staging deployment cluster is shared between all teams
+[05] created=2026-01-04T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=database migrations are applied by atlas during deployment
+[06] created=2026-01-01T00:00:00Z accessed=2026-02-04T00:00:00Z count=1 weight=0.015625000000000007 superseded=- embedding=0
+     text=the deployment pipeline runs on kubernetes with argo rollouts

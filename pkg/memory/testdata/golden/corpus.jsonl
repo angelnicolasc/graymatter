@@ -1,0 +1,10 @@
+{"offset_hours":0,"text":"the deployment pipeline runs on kubernetes with argo rollouts"}
+{"offset_hours":72,"text":"database migrations are applied by atlas during deployment"}
+{"offset_hours":144,"text":"the staging deployment cluster is shared between all teams"}
+{"offset_hours":216,"text":"incident retrospectives happen every thursday afternoon"}
+{"offset_hours":288,"text":"the oncall rotation is two weeks per engineer"}
+{"offset_hours":360,"text":"lunch is catered on fridays in the office kitchen"}
+{"offset_hours":432,"text":"parking permits are renewed through the facilities portal"}
+{"offset_hours":504,"text":"the coffee machine on floor two takes whole beans only"}
+{"offset_hours":576,"text":"release tags are signed with the team gpg key before publishing"}
+{"offset_hours":648,"text":"the deployment freeze window runs from december 20th to january 2nd"}

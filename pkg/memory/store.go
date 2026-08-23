@@ -162,6 +162,12 @@ type Store struct {
 	// clock would report every operation as taking zero.
 	now func() time.Time
 
+	// debugRanking, if non-nil, receives the fused ranking from Recall before
+	// topK truncation. Test-only seam; production never sets it, and nothing
+	// reads it outside pkg/memory. See the call site in recall.go for why the
+	// golden fixture needs the scores and not just the resulting order.
+	debugRanking func(query string, ranked []scored)
+
 	// graph and extractor are set via SetKG after Open().
 	// They are optional; Consolidate and Recall work without them.
 	graph     GraphAccessor
