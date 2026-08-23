@@ -352,3 +352,137 @@ func TestConsolidate_DisabledLLMReportsNothing(t *testing.T) {
 		t.Errorf("consolidation with the LLM disabled reported errors: %v", reported)
 	}
 }
+
+// TestConsolidate_DecayIsIdempotent is the regression test for a decay model
+// that did not decay on the schedule it documented.
+//
+// Consolidate computed weight *= exp(-lambda * hoursSinceAccessed) using the
+// FULL time since last access on every run, rather than the time since the
+// last decay. Nothing tracked that a fact had already been decayed, so each
+// cycle re-applied the whole elapsed period. A fact one half-life stale went
+// 0.5, 0.25, 0.125, 0.0625 across four cycles that ran in the same
+// millisecond — the half-life was effectively "per consolidation run", not
+// per 30 days, and with AsyncConsolidate on a busy agent could prune a
+// month-old fact in minutes.
+func TestConsolidate_DecayIsIdempotent(t *testing.T) {
+	s, cleanup := openTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := s.Put(ctx, "idem", "a fact nobody recalls"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	facts, err := s.List("idem")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	f := facts[0]
+	// Exactly one half-life since last access.
+	f.AccessedAt = time.Now().UTC().Add(-720 * time.Hour)
+	f.CreatedAt = f.AccessedAt
+	if err := s.UpdateFact("idem", f); err != nil {
+		t.Fatalf("UpdateFact: %v", err)
+	}
+
+	cfg := defaultTestCfg()
+	for run := 1; run <= 5; run++ {
+		if err := s.Consolidate(ctx, "idem", cfg); err != nil {
+			t.Fatalf("Consolidate run %d: %v", run, err)
+		}
+		got, err := s.List("idem")
+		if err != nil {
+			t.Fatalf("List run %d: %v", run, err)
+		}
+		if len(got) == 0 {
+			t.Fatalf("fact was pruned after %d consolidation runs; at one half-life "+
+				"stale its weight should be 0.5 no matter how often consolidation runs", run)
+		}
+		if math.Abs(got[0].Weight-0.5) > 0.01 {
+			t.Errorf("after %d consolidation runs weight is %.6f, want ~0.5. "+
+				"Elapsed time has not changed between runs, so the weight must not either.",
+				run, got[0].Weight)
+		}
+	}
+}
+
+// TestConsolidate_DecayStillTracksElapsedTime guards the fix from the obvious
+// overcorrection: making decay idempotent must not make it stop happening.
+func TestConsolidate_DecayStillTracksElapsedTime(t *testing.T) {
+	s, cleanup := openTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := s.Put(ctx, "elapsed", "a fact nobody recalls"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	cfg := defaultTestCfg()
+
+	for _, tc := range []struct {
+		halfLives int
+		want      float64
+	}{{1, 0.5}, {2, 0.25}, {3, 0.125}} {
+		facts, err := s.List("elapsed")
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		f := facts[0]
+		f.AccessedAt = time.Now().UTC().Add(-time.Duration(tc.halfLives) * 720 * time.Hour)
+		if err := s.UpdateFact("elapsed", f); err != nil {
+			t.Fatalf("UpdateFact: %v", err)
+		}
+
+		if err := s.Consolidate(ctx, "elapsed", cfg); err != nil {
+			t.Fatalf("Consolidate: %v", err)
+		}
+		got, err := s.List("elapsed")
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(got) == 0 {
+			t.Fatalf("fact pruned at %d half-lives, expected weight ~%.3f", tc.halfLives, tc.want)
+		}
+		if math.Abs(got[0].Weight-tc.want) > 0.01 {
+			t.Errorf("at %d half-lives stale: weight %.6f, want ~%.3f",
+				tc.halfLives, got[0].Weight, tc.want)
+		}
+	}
+}
+
+// TestConsolidate_DecayNeverRaisesWeight covers the interaction with the
+// tombstones from ADR-007. A superseded fact has its weight zeroed so ordinary
+// pruning collects it; decay recomputing weight from elapsed time must never
+// hand that weight back, or a retired fact would sit in the store forever.
+func TestConsolidate_DecayNeverRaisesWeight(t *testing.T) {
+	s, cleanup := openTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := s.Put(ctx, "retired", "a fact the agent retired"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	facts, err := s.List("retired")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	f := facts[0]
+	f.SupersededBy = SupersededByAgent
+	f.Weight = 0
+	// Freshly accessed: elapsed time alone would compute a weight near 1.0.
+	f.AccessedAt = time.Now().UTC()
+	if err := s.UpdateFact("retired", f); err != nil {
+		t.Fatalf("UpdateFact: %v", err)
+	}
+
+	if err := s.Consolidate(ctx, "retired", defaultTestCfg()); err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+
+	got, err := s.List("retired")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) > 0 && got[0].Weight > 0.01 {
+		t.Errorf("consolidation raised a retired fact's weight from 0 to %.6f; "+
+			"it would never be pruned", got[0].Weight)
+	}
+}

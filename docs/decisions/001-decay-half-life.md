@@ -23,8 +23,25 @@ weight *= exp(-ln(2) / halfLife * hoursSinceAccessed)
 ```
 
 `DecayHalfLife` defaults to **720h (30 days)**. Facts below **0.01** are
-pruned — roughly seven half-lives untouched, about seven months at the
-default.
+pruned — 6.64 half-lives untouched, **199 days** at the default.
+
+Weight is *recomputed* from staleness on each cycle, never multiplied into:
+
+```go
+weight = min(weight, exp(-ln(2)/halfLife * hoursSinceAccessed))
+```
+
+The `min` is load-bearing. Decay must never hand weight back, and a fact whose
+weight was deliberately zeroed — a supersede tombstone,
+[007](007-supersede-tombstones.md) — has to stay collectable by pruning rather
+than be resurrected by its own recent access time.
+
+Until v0.10.0 this line multiplied instead, re-applying the whole elapsed
+period on every run because nothing recorded that a fact had already been
+decayed. The half-life was effectively *per consolidation cycle*: five cycles
+in the same millisecond took a one-half-life-stale fact from 0.5 to 0.03. With
+`AsyncConsolidate` on, a busy agent could prune a month-old fact in minutes.
+Everything below describes the model as it now behaves.
 
 Decay is driven by `AccessedAt`, not `CreatedAt`. A fact recalled regularly
 stays alive indefinitely regardless of age; a fact nothing ever asks for
@@ -55,7 +72,7 @@ over the line; the cheap one does not need to.
 
 ## Consequences
 
-- A fact nobody recalls for ~7 months is deleted. There is no undo, and no
+- A fact nobody recalls for ~199 days is deleted. There is no undo, and no
   archive. Anything that must never be lost does not belong in a decaying
   store — that is what `graymatter export` is for.
 - Decay only advances when `Consolidate` runs. A store that never crosses

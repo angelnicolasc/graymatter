@@ -99,10 +99,23 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	lambda := math.Log(2) / halfLife.Hours()
 
 	// Step 1: decay all facts. Accumulate errors rather than silently dropping.
+	//
+	// Weight is recomputed from staleness, not multiplied into. Multiplying
+	// re-applied the entire elapsed period on every run — nothing recorded
+	// that a fact had already been decayed — so weight halved once per
+	// consolidation cycle rather than once per half-life. Five cycles in the
+	// same millisecond took a one-half-life-stale fact from 0.5 to 0.03, and
+	// with AsyncConsolidate on, a busy agent could prune a month-old fact in
+	// minutes. The half-life was per run, not per 30 days.
+	//
+	// min() rather than plain assignment, for two reasons: decay must never
+	// hand weight back, and a fact whose weight was deliberately zeroed —
+	// a supersede tombstone (ADR-007) — must stay collectable by pruning
+	// instead of being resurrected by its own recent access time.
 	var decayErrs []error
 	for i := range facts {
 		hours := time.Since(facts[i].AccessedAt).Hours()
-		facts[i].Weight *= math.Exp(-lambda * hours)
+		facts[i].Weight = math.Min(facts[i].Weight, math.Exp(-lambda*hours))
 		if err := s.UpdateFact(agentID, facts[i]); err != nil {
 			decayErrs = append(decayErrs, fmt.Errorf("decay fact %s: %w", facts[i].ID, err))
 		}

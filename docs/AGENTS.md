@@ -137,9 +137,20 @@ GrayMatter ranks facts via **Reciprocal Rank Fusion (RRF)** over three independe
 2. **Keyword relevance** (TF-IDF approximation over bbolt facts)
 3. **Recency** (exponential decay from `CreatedAt`)
 
-Each signal produces an independent ranking; RRF fuses the ranks (not the scores) into a single ordered list. Returns top-K, deduplicated by text. Access metadata is updated asynchronously (`AccessCount++`, `AccessedAt = now`). If a knowledge graph is wired, neighbour entities of the top hits are appended.
+Each signal produces an independent ranking; RRF fuses the ranks (not the scores) into a single ordered list. Returns top-K, deduplicated by text. Access metadata is updated asynchronously (`AccessCount++`, `AccessedAt = now`).
 
-> RRF means **rank position matters, not raw scores**. There are no tunable percentage weights to fiddle with — that's the whole point of RRF. If you want stronger recency bias, lower `DecayHalfLife`; for stronger keyword bias, configure `EmbeddingMode = EmbeddingKeyword`.
+Facts marked superseded are dropped before any of this — a fact an agent has corrected or forgotten never competes for a slot. Graph neighbours of the top hit would also be appended, but nothing wires the graph into the store in shipped builds, so in practice that step never runs ([ADR-003](decisions/003-knowledge-graph-autopopulation.md)).
+
+> RRF means **rank position matters, not raw scores** — a fact's contribution
+> depends on where it placed in each ranking, not on how close the numbers
+> were. As an agent you have no per-call control over this: there is no
+> weighting parameter on `memory_search`.
+>
+> A Go caller configuring the store does. `StoreConfig.SignalWeights` sets how
+> much each signal contributes (default vector 1.0, keyword 1.0, recency 0.5)
+> and `MinRelevance` drops results below a fraction of the best score in the
+> same result set. Both default to the behaviour described here. See
+> [ADR-006](decisions/006-configurable-signal-weights.md).
 
 **Query strategies:**
 
@@ -183,7 +194,16 @@ The most powerful tool. Use it to maintain memory quality over time.
 }}
 ```
 
-The old fact is dropped to weight 0; consolidation prunes it on the next pass.
+The old fact is tombstoned and stops being recalled from the very next search
+— not on the next consolidation pass, and not eventually. It is not deleted:
+it stays visible to `graymatter export`, the TUI and any `List` call, with its
+`superseded_by` pointing at the fact that replaced it, so the correction can be
+audited later. Ordinary decay and pruning collect it in due course.
+
+> Before v0.10.0 this action set the old fact's weight to 0 and reported
+> success, and recall does not read weight — so the superseded fact kept
+> coming back alongside its own correction. If you are running an older
+> binary, `update` does not do what this page says.
 
 **Forget workflow:**
 ```jsonc
@@ -198,7 +218,17 @@ The old fact is dropped to weight 0; consolidation prunes it on the next pass.
 
 **Link workflow (knowledge graph):**
 
-> ⚠️ The `link` action only works when the host has wired `SetKGLinker(...)` on the MCP server (`cmd/graymatter/internal/mcp/server.go:55-57`). If the linker isn't wired, the tool returns an error like `knowledge graph not configured`. Agents should call `link` opportunistically and gracefully degrade if it fails — don't make `link` a hard prerequisite for any workflow.
+> ⚠️ `link` writes to the knowledge graph, and it does work in shipped builds:
+> both the daemon and the `--no-daemon` direct store open a real graph and
+> serve the write. It can still fail if the graph cannot be opened, in which
+> case the tool returns `knowledge graph not available`. Call `link`
+> opportunistically and degrade gracefully — never make it a hard
+> prerequisite for a workflow.
+>
+> What does *not* happen is automatic population: nothing extracts entities
+> from stored facts on its own, so the graph contains exactly what agents put
+> in it by calling `link`. See
+> [ADR-003](decisions/003-knowledge-graph-autopopulation.md).
 
 ```jsonc
 { "tool": "memory_reflect", "args": {
@@ -271,7 +301,8 @@ Facts decay. A fact you never recall will eventually be pruned.
 
 **Implications:**
 ```jsonc
-// Anti-pattern: store once, never reference → pruned in ~60 days
+// Anti-pattern: store once, never reference → pruned after ~199 days
+// (6.64 half-lives to fall below the 0.01 floor, at the default 30-day half-life)
 { "tool": "memory_add", "args": { "agent_id": "agent", "text": "Critical security policy: …" }}
 // Then never search for it.
 
@@ -639,7 +670,7 @@ Need to retrieve context?
 - **GrayMatter GitHub**: <https://github.com/angelnicolasc/graymatter>
 - **Go docs**: <https://pkg.go.dev/github.com/angelnicolasc/graymatter>
 - **Releases**: <https://github.com/angelnicolasc/graymatter/releases>
-- **Strategy / why**: [`GRAYMATTER_PLAYBOOK.md`](../GRAYMATTER_PLAYBOOK.md)
+- **Design decisions / why**: [`docs/decisions/`](decisions/README.md)
 - **API stability**: [`docs/api-stability.md`](api-stability.md)
 - **Benchmarks**: [`docs/benchmarks.md`](benchmarks.md)
 - **Plugin protocol**: [`docs/plugin-protocol.md`](plugin-protocol.md)
