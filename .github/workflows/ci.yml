@@ -66,6 +66,16 @@ jobs:
         shell: bash
         run: go test -race -count=1 -timeout=300s .
 
+      # ./benchmarks/... was missing from every step above, so the tests that
+      # guard published numbers never ran in CI at all. They are the gates that
+      # keep README.md and docs/benchmarks.md matching what the benchmarks
+      # actually print, and that reject a corpus whose gold IDs no longer
+      # resolve — both of which fail silently by producing a plausible wrong
+      # number, which is the failure mode they exist to prevent.
+      - name: Test benchmark packages
+        shell: bash
+        run: go test -race -count=1 -timeout=180s ./benchmarks/...
+
       - name: Coverage gate — core library (≥70%)
         shell: bash
         run: |
@@ -149,4 +159,17 @@ jobs:
       - name: Run benchmarks (core)
         shell: bash
         run: go test -bench=. -benchmem -benchtime=3s -run='^$' ./pkg/memory/...
+        continue-on-error: true
+
+      # Printed into the CI log so the quality numbers are visible on every
+      # run rather than only when someone remembers to look. Non-blocking:
+      # the correctness gates for these fixtures live in the test job above.
+      - name: Token efficiency
+        shell: bash
+        run: go run ./benchmarks/token_count
+        continue-on-error: true
+
+      - name: Retrieval quality
+        shell: bash
+        run: go run ./benchmarks/retrieval_quality
         continue-on-error: true

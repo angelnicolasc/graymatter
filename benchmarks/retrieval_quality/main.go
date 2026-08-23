@@ -94,45 +94,77 @@ func main() {
 	fixtures := flag.String("fixtures", "benchmarks/fixtures", "directory holding corpus-v1.jsonl and queries-v1.jsonl")
 	flag.Parse()
 
-	corpus, err := loadCorpus(filepath.Join(*fixtures, "corpus-v1.jsonl"))
+	suite, err := runAll(*fixtures)
 	if err != nil {
-		fail("load corpus: %v", err)
+		fail("%v", err)
 	}
-	queries, err := loadQueries(filepath.Join(*fixtures, "queries-v1.jsonl"))
+	report(suite)
+}
+
+// suite is everything one full run produces. Returned rather than printed so
+// the test that gates the published tables can call it.
+type suite struct {
+	Corpus   []fact
+	Queries  []query
+	FixedK   []result
+	Adaptive result
+}
+
+// byName returns the measured result for one system, so callers do not index
+// into FixedK by position.
+func (s suite) byName(name string) (result, bool) {
+	for _, r := range s.FixedK {
+		if r.System == name {
+			return r, true
+		}
+	}
+	if s.Adaptive.System == name {
+		return s.Adaptive, true
+	}
+	return result{}, false
+}
+
+// runAll loads the fixtures and measures every system.
+func runAll(fixtureDir string) (suite, error) {
+	corpus, err := loadCorpus(filepath.Join(fixtureDir, "corpus-v1.jsonl"))
 	if err != nil {
-		fail("load queries: %v", err)
+		return suite{}, fmt.Errorf("load corpus: %w", err)
+	}
+	queries, err := loadQueries(filepath.Join(fixtureDir, "queries-v1.jsonl"))
+	if err != nil {
+		return suite{}, fmt.Errorf("load queries: %w", err)
 	}
 	if err := validateFixtures(corpus, queries); err != nil {
-		fail("fixtures are inconsistent: %v", err)
+		return suite{}, fmt.Errorf("fixtures are inconsistent: %w", err)
 	}
 
-	results := []result{
+	out := suite{Corpus: corpus, Queries: queries}
+	out.FixedK = []result{
 		runFullHistory(corpus, queries),
 		runWindow(corpus, queries, budget),
 	}
 
 	gm, err := runGrayMatter(corpus, queries, "graymatter-fixed-k", "fixed-K", memory.StoreConfig{})
 	if err != nil {
-		fail("graymatter fixed-k: %v", err)
+		return suite{}, fmt.Errorf("graymatter fixed-k: %w", err)
 	}
-	results = append(results, gm)
+	out.FixedK = append(out.FixedK, gm)
 
 	recency, err := runGrayMatter(corpus, queries, "graymatter-recency-only", "fixed-K", memory.StoreConfig{
 		SignalWeights: &memory.SignalWeights{Vector: 0, Keyword: 0, Recency: 1},
 	})
 	if err != nil {
-		fail("graymatter recency-only: %v", err)
+		return suite{}, fmt.Errorf("graymatter recency-only: %w", err)
 	}
-	results = append(results, recency)
+	out.FixedK = append(out.FixedK, recency)
 
-	adaptive, err := runGrayMatter(corpus, queries, "graymatter-adaptive", "adaptive", memory.StoreConfig{
+	out.Adaptive, err = runGrayMatter(corpus, queries, "graymatter-adaptive", "adaptive", memory.StoreConfig{
 		MinRelevance: adaptiveMinRelevance,
 	})
 	if err != nil {
-		fail("graymatter adaptive: %v", err)
+		return suite{}, fmt.Errorf("graymatter adaptive: %w", err)
 	}
-
-	report(corpus, queries, results, adaptive)
+	return out, nil
 }
 
 // ---- systems ---------------------------------------------------------------
@@ -390,7 +422,8 @@ func min(a, b int) int {
 
 // ---- reporting -------------------------------------------------------------
 
-func report(corpus []fact, queries []query, fixedK []result, adaptive result) {
+func report(s suite) {
+	corpus, queries, fixedK, adaptive := s.Corpus, s.Queries, s.FixedK, s.Adaptive
 	var gold, stale int
 	for _, f := range corpus {
 		switch f.Kind {

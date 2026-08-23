@@ -548,6 +548,32 @@ Reproduce locally:
 go run ./benchmarks/token_count
 ```
 
+### Does it return the *right* facts?
+
+Tokens are half the question. That table would look identical for a system that
+returned eight facts at random, so there is a second benchmark that measures
+whether the facts coming back are the ones that answer the query — against a
+real sliding window, which is what production actually does, rather than
+against full-history injection.
+
+```bash
+go run ./benchmarks/retrieval_quality
+```
+
+Headline, at an equal budget of 8 facts:
+
+| | sliding window | GrayMatter |
+|---|---|---|
+| Finds a fact planted 96 sessions ago | 0% | 83% |
+| Returns a fact known to be superseded | 0% | 0% |
+| Tokens per query | 95 | 114 |
+
+**GrayMatter costs more per query than a window, not less** — it returns the
+facts that answer the question, and those are the longer ones. Three
+predictions were committed before that benchmark was written; one of them
+failed, and [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) reports it in the
+same detail as the two that held.
+
 
 ---
 

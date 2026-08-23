@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,4 +223,71 @@ func clone3(fs []fact) []fact {
 	out := make([]fact, len(fs))
 	copy(out, fs)
 	return out
+}
+
+// TestReadmeQualityTableMatchesMeasurement gates the numbers README.md
+// publishes from this benchmark.
+//
+// The previous round of work removed a five-fold-wrong token table from
+// docs/benchmarks.md that had survived several releases because nothing
+// compared it against a run. Publishing a quality table in README.md without
+// gating it would recreate exactly that, one release later.
+func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
+	raw, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	readme := string(raw)
+
+	suite, err := runAll(fixtureDir)
+	if err != nil {
+		t.Fatalf("runAll: %v", err)
+	}
+	window, ok := suite.byName("window-8")
+	if !ok {
+		t.Fatal("window-8 missing from the measured suite")
+	}
+	gm, ok := suite.byName("graymatter-fixed-k")
+	if !ok {
+		t.Fatal("graymatter-fixed-k missing from the measured suite")
+	}
+
+	// Each published row, as it appears in README.md, against the measurement.
+	for _, tc := range []struct {
+		label string
+		row   string
+	}{
+		{
+			label: "HitRate on the planted old fact",
+			row: fmt.Sprintf("| Finds a fact planted 96 sessions ago | %.0f%% | %.0f%% |",
+				window.HitRate, gm.HitRate),
+		},
+		{
+			label: "dead-fact rate",
+			row: fmt.Sprintf("| Returns a fact known to be superseded | %.0f%% | %.0f%% |",
+				window.DeadRate, gm.DeadRate),
+		},
+		{
+			label: "tokens per query",
+			row: fmt.Sprintf("| Tokens per query | %.0f | %.0f |",
+				window.AvgTokens, gm.AvgTokens),
+		},
+	} {
+		if !strings.Contains(readme, tc.row) {
+			t.Errorf("README.md does not carry the measured %s.\n"+
+				"  expected row: %s\n"+
+				"Update the table in README.md from `go run ./benchmarks/retrieval_quality`.",
+				tc.label, tc.row)
+		}
+	}
+
+	// The README states GrayMatter costs more per query than a window. That is
+	// a claim about the direction of the result, so it gets checked too: if it
+	// ever reverses, the sentence has to change with it.
+	if gm.AvgTokens <= window.AvgTokens {
+		t.Errorf("README.md says GrayMatter costs more per query than a window, but "+
+			"the benchmark now measures GrayMatter at %.0f and the window at %.0f. "+
+			"The claim has reversed and the README must be rewritten.",
+			gm.AvgTokens, window.AvgTokens)
+	}
 }
