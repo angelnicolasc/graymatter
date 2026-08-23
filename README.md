@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.8.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/coverage-74.1%25-brightgreen" alt="Coverage 74.1%">
+  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.9.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/coverage-74.8%25-brightgreen" alt="Coverage 74.8%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 <div align="center">
@@ -115,7 +115,7 @@ That gap is GrayMatter.
 
 
 <p align="center">
-<strong>~97% reduction in context tokens</strong> — versus full-history injection.<br>
+<strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
 Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
 No Docker. No Redis. No API key required for storage.<br><br>
 Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
@@ -157,22 +157,22 @@ The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 
 ```bash
 # Linux (x86_64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.8.0/graymatter_0.8.0_linux_amd64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_amd64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Linux (ARM64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.8.0/graymatter_0.8.0_linux_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.8.0/graymatter_0.8.0_darwin_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.8.0/graymatter_0.8.0_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
@@ -446,7 +446,7 @@ TOKEN=$(cat .graymatter/graymatter.http-token)
 curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/facts?agent=alice"
 ```
 
-The token is 256 bits, generated on first run, printed once, and stored in
+The token is 256 bits, generated on first run and stored in
 `<data-dir>/graymatter.http-token` (`0600` — a real guarantee on POSIX; on
 Windows the file inherits its parent directory's ACL). Set
 `GRAYMATTER_HTTP_TOKEN` or pass `--token` to supply your own instead; neither
@@ -616,7 +616,7 @@ cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
 
 **Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` — each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
 
-**Core library coverage: 74.1%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
+**Core library coverage: 74.8%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
 
 Token-reduction benchmark (also zero deps):
 
@@ -799,4 +799,4 @@ GrayMatter saves you conversation history. They stack.
 
 ---
 
-*GrayMatter — v0.8.0 — August 2026*
+*GrayMatter — v0.9.0 — August 2026*
