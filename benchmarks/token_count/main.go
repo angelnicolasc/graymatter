@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/angelnicolasc/graymatter/benchmarks/internal/tokens"
 	"github.com/angelnicolasc/graymatter/pkg/embedding"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -131,12 +132,12 @@ var corpus = [100]string{
 // ── Token approximation ───────────────────────────────────────────────────────
 
 // approxTokens estimates GPT-4-class token count for text.
-// Each word contributes ~1.33 tokens on average (accounts for subword splits,
-// punctuation tokens, and whitespace). Matches tiktoken empirically within ±10%
-// for English business prose.
+//
+// The approximation lives in benchmarks/internal/tokens so that this benchmark
+// and benchmarks/retrieval_quality cannot drift into meaning different things
+// by the word "tokens" — docs/benchmarks.md publishes figures from both.
 func approxTokens(text string) int {
-	words := strings.Fields(text)
-	return int(float64(len(words)) * 1.33)
+	return tokens.Approx(text)
 }
 
 // ── Benchmark ─────────────────────────────────────────────────────────────────
@@ -165,73 +166,92 @@ type result struct {
 // in sessionCounts. It is separated from main so the reproducibility test can
 // call it and compare the published tables against freshly measured numbers.
 func runBenchmark() ([]result, error) {
+	// Shuffle insertion order so keyword ranking is not biased by the order
+	// the corpus happens to be written in. Fixed seed: the shuffle is part of
+	// the fixture, not a source of variation.
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec
+	perm := rng.Perm(len(corpus))
+
+	results := make([]result, 0, len(sessionCounts))
+	for _, target := range sessionCounts {
+		r, err := measureAt(target, perm)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// measureAt builds a fresh store holding exactly `target` observations and
+// takes one measurement from it.
+//
+// Each row gets its own store on purpose. Reusing one store across rows made
+// the benchmark non-reproducible: Recall updates AccessCount and AccessedAt
+// from detached goroutines, so the writebacks from one row were still in
+// flight while the next row was inserting and backdating, and a late writeback
+// restores the whole Fact as it looked when it was read. Measured rate was
+// about one differing run in twenty-five — often enough to publish a number
+// nobody else can reproduce, rare enough that nobody notices why.
+//
+// Recall itself is deterministic: 300 calls against a fixed store return the
+// same result every time. The variance was entirely in how the store was
+// built, which is why the fix belongs here and not in the engine.
+func measureAt(target int, perm []int) (result, error) {
 	dataDir, err := os.MkdirTemp("", "graymatter-bench-*")
 	if err != nil {
-		return nil, fmt.Errorf("mktemp: %w", err)
+		return result{}, fmt.Errorf("mktemp: %w", err)
 	}
 	defer os.RemoveAll(dataDir)
 
-	// Open store with keyword-only embedder — zero LLM calls, deterministic.
 	emb := embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword})
 	store, err := memory.Open(memory.StoreConfig{
 		DataDir:  dataDir,
 		Embedder: emb,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("open store: %w", err)
+		return result{}, fmt.Errorf("open store: %w", err)
 	}
 	defer store.Close()
 
-	// Shuffle insertion order so keyword ranking isn't biased by recency.
-	rng := rand.New(rand.NewSource(42)) //nolint:gosec
-	perm := rng.Perm(len(corpus))
-
 	ctx := context.Background()
-
-	results := make([]result, 0, len(sessionCounts))
-	inserted := 0
-
-	for _, target := range sessionCounts {
-		// Insert observations up to the target session count.
-		for inserted < target && inserted < len(corpus) {
-			if err := store.Put(ctx, agentID, corpus[perm[inserted]]); err != nil {
-				return nil, fmt.Errorf("put: %w", err)
-			}
-			inserted++
+	for i := 0; i < target && i < len(corpus); i++ {
+		if err := store.Put(ctx, agentID, corpus[perm[i]]); err != nil {
+			return result{}, fmt.Errorf("put: %w", err)
 		}
-
-		// Full injection: ALL stored observations concatenated.
-		allFacts, err := store.List(agentID)
-		if err != nil {
-			return nil, fmt.Errorf("list: %w", err)
-		}
-		var fullTexts []string
-		for _, f := range allFacts {
-			fullTexts = append(fullTexts, f.Text)
-		}
-		fullTokens := approxTokens(strings.Join(fullTexts, "\n"))
-
-		// GrayMatter: recall only top-K most relevant observations.
-		recalled, err := store.Recall(ctx, agentID, query, topK)
-		if err != nil {
-			return nil, fmt.Errorf("recall: %w", err)
-		}
-		recallTokens := approxTokens(strings.Join(recalled, "\n"))
-
-		reduction := 0.0
-		if fullTokens > 0 {
-			reduction = float64(fullTokens-recallTokens) / float64(fullTokens) * 100
-		}
-
-		results = append(results, result{
-			Sessions:     target,
-			FullTokens:   fullTokens,
-			RecallTokens: recallTokens,
-			Reduction:    reduction,
-		})
+	}
+	if err := spreadOverSessions(store); err != nil {
+		return result{}, err
 	}
 
-	return results, nil
+	// Full injection: ALL stored observations concatenated.
+	allFacts, err := store.List(agentID)
+	if err != nil {
+		return result{}, fmt.Errorf("list: %w", err)
+	}
+	fullTexts := make([]string, 0, len(allFacts))
+	for _, f := range allFacts {
+		fullTexts = append(fullTexts, f.Text)
+	}
+	fullTokens := approxTokens(strings.Join(fullTexts, "\n"))
+
+	// GrayMatter: recall only the top-K most relevant observations.
+	recalled, err := store.Recall(ctx, agentID, query, topK)
+	if err != nil {
+		return result{}, fmt.Errorf("recall: %w", err)
+	}
+	recallTokens := approxTokens(strings.Join(recalled, "\n"))
+
+	reduction := 0.0
+	if fullTokens > 0 {
+		reduction = float64(fullTokens-recallTokens) / float64(fullTokens) * 100
+	}
+	return result{
+		Sessions:     target,
+		FullTokens:   fullTokens,
+		RecallTokens: recallTokens,
+		Reduction:    reduction,
+	}, nil
 }
 
 func main() {
@@ -264,4 +284,40 @@ func main() {
 	fmt.Println("Approximation: words × 1.33 ≈ GPT-4 tokens (±10% for English prose).")
 	fmt.Println("With vector embeddings (Ollama / OpenAI / Anthropic) recall precision")
 	fmt.Println("improves further, maintaining similar or better token reduction ratios.")
+}
+
+// spreadOverSessions backdates the stored facts so that session N sits N days
+// before session inserted, one observation per simulated day.
+//
+// Without this the benchmark writes every fact inside the same few
+// milliseconds, and the clock is not that precise: in a 30-fact run, 8 facts
+// routinely share a CreatedAt. Facts with an identical timestamp have an
+// identical recency score, and recall.go turns scores into ranks with
+// sort.Slice, which is not stable — so tied facts receive arbitrary ranks,
+// those ranks feed the fused score, and the final ordering varies between
+// runs. Measured rate on this corpus was roughly one differing run in
+// twenty-five, which is exactly often enough to publish a number nobody can
+// reproduce and rare enough that nobody notices why.
+//
+// One fact per day also matches what the benchmark says it models: a session
+// is a day of agent work, not a microsecond of one.
+//
+// This is a fix to the benchmark, not to the engine. The underlying tie-break
+// in recall.go is still unspecified for facts written in the same instant.
+func spreadOverSessions(store *memory.Store) error {
+	facts, err := store.List(agentID)
+	if err != nil {
+		return fmt.Errorf("list for backdating: %w", err)
+	}
+	now := time.Now().UTC()
+	for i := range facts {
+		// facts is newest-first; index 0 is the most recent session.
+		at := now.Add(-time.Duration(i) * 24 * time.Hour)
+		facts[i].CreatedAt = at
+		facts[i].AccessedAt = at
+		if err := store.UpdateFact(agentID, facts[i]); err != nil {
+			return fmt.Errorf("backdate: %w", err)
+		}
+	}
+	return nil
 }

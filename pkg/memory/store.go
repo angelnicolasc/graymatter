@@ -142,6 +142,32 @@ type Store struct {
 
 	mu sync.RWMutex
 
+	// now reads the wall clock. It exists so tests can freeze time.
+	//
+	// Three things the store computes are functions of "what time is it":
+	// a new fact's CreatedAt/AccessedAt, the recency signal in Recall, and
+	// the decay exponent in Consolidate. On the real clock all three drift
+	// between runs, which makes byte-for-byte comparison of store output
+	// impossible — and the drift is not float noise: decay is 2^(-dt/30d),
+	// so a second of separation between writing a corpus and consolidating
+	// it moves every weight by ~2.7e-7 relative. That is hundreds of times
+	// larger than any plausible rounding tolerance, so a golden test would
+	// flake rather than hold.
+	//
+	// Set to time.Now by Open() and never nil. Assign before any concurrent
+	// use; it is not guarded, because production never writes it.
+	//
+	// Deliberately NOT used for the elapsed-time measurements that feed
+	// OnRecall and OnPut. Those are stopwatches, not clock reads — a frozen
+	// clock would report every operation as taking zero.
+	now func() time.Time
+
+	// debugRanking, if non-nil, receives the fused ranking from Recall before
+	// topK truncation. Test-only seam; production never sets it, and nothing
+	// reads it outside pkg/memory. See the call site in recall.go for why the
+	// golden fixture needs the scores and not just the resulting order.
+	debugRanking func(query string, ranked []scored)
+
 	// graph and extractor are set via SetKG after Open().
 	// They are optional; Consolidate and Recall work without them.
 	graph     GraphAccessor
@@ -201,6 +227,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 		embedder:       cfg.Embedder,
 		cfg:            cfg,
 		readOnly:       readOnly,
+		now:            time.Now,
 		shutdownCtx:    ctx,
 		shutdownCancel: cancel,
 		sema:           make(chan struct{}, cfg.MaxAsyncConsolidations),
@@ -298,7 +325,7 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 		}
 	}
 
-	f := newFact(agentID, text, emb)
+	f := newFact(agentID, text, emb, s.now())
 	hasEmbedding := len(emb) > 0
 
 	if err := s.db.Update(func(tx *bolt.Tx) error {

@@ -51,9 +51,9 @@ This record is why that sentence is a design constraint rather than modesty.
   another store, never at writing to a shared one.
 - No backup, replication, or point-in-time recovery. The store is a file on
   one disk. `graymatter export` is the recovery story, and it is manual.
-- Anyone evaluating this against Mem0 or Zep on tenancy features is comparing
-  it against something it does not attempt to be. That is a positioning cost,
-  paid deliberately.
+- Tenancy features are out of scope by construction, so a feature-by-feature
+  comparison against a multi-tenant service compares against something this
+  project does not attempt to be.
 - The whole surface stays auditable by one person in an afternoon, which is
   the property the project is actually trading for.
 

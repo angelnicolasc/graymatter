@@ -80,8 +80,9 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	}
 	lambda := math.Log(2) / halfLife.Hours()
 	recencyScores := make(map[string]float64, len(facts))
+	nowT := s.now()
 	for _, f := range facts {
-		ageDays := time.Since(f.CreatedAt).Hours()
+		ageDays := nowT.Sub(f.CreatedAt).Hours()
 		recencyScores[f.ID] = math.Exp(-lambda * ageDays)
 	}
 	type recEntry struct {
@@ -110,10 +111,6 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		d := DefaultSignalWeights()
 		w = &d
 	}
-	type scored struct {
-		id    string
-		score float64
-	}
 	candidates := make(map[string]float64, len(facts))
 	for _, f := range facts {
 		rrf := 0.0
@@ -134,6 +131,20 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		allScored = append(allScored, scored{id, sc})
 	}
 	sort.Slice(allScored, func(i, j int) bool { return allScored[i].score > allScored[j].score })
+
+	// Test-only seam. Nil in production; the golden fixture sets it to freeze
+	// the fused scores themselves rather than only their argmax.
+	//
+	// Recording just the returned order proved far too weak: mutation testing
+	// showed a golden built on order alone passing with the default recency
+	// weight changed from 0.5 to 0.6, and with the RRF constant k changed from
+	// 60 to 50. Both alter every score; neither reordered the head of this
+	// corpus. A gate on ranking knobs has to observe the ranking arithmetic.
+	if s.debugRanking != nil {
+		snapshot := make([]scored, len(allScored))
+		copy(snapshot, allScored)
+		s.debugRanking(query, snapshot)
+	}
 
 	// Optional relevance floor, relative to the best score in this result set.
 	// At the default of 0 every score clears the bar and the slice is
@@ -171,7 +182,7 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		seen[f.Text] = true
 		// Update access metadata (best-effort, non-blocking).
 		f.AccessCount++
-		f.AccessedAt = time.Now().UTC()
+		f.AccessedAt = nowT.UTC()
 		s.wg.Add(1)
 		go func(fact Fact) {
 			defer s.wg.Done()
@@ -279,6 +290,13 @@ func tokenize(text string) []string {
 		}
 	}
 	return result
+}
+
+// scored is one fact's fused RRF score. Package-level so the debugRanking
+// seam can hand it to a test without exporting anything.
+type scored struct {
+	id    string
+	score float64
 }
 
 // SignalWeights sets the relative contribution of each retrieval signal to the

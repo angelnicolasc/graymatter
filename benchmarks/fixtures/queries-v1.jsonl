@@ -1,0 +1,13 @@
+# Queries for corpus-v1, all asked at session 100.
+#
+# gold      = facts that answer the query; HitRate counts a hit when at
+#             least one gold fact is in the returned set.
+# forbidden = facts known to be stale, superseded by a later fact. A system
+#             that returns one of these is handing the agent a fact the
+#             store already knows is wrong.
+{"asked_at_session": 100, "domain": "infra", "forbidden": [], "gold": ["f002"], "id": "q1", "text": "what order do migrations and the api rollout go in"}
+{"asked_at_session": 100, "domain": "infra", "forbidden": [], "gold": ["f004"], "id": "q2", "text": "how do i roll back a bad deploy"}
+{"asked_at_session": 100, "domain": "infra", "forbidden": [], "gold": ["f003"], "id": "q3", "text": "are release tags required to be signed for deploy"}
+{"asked_at_session": 100, "domain": "product", "forbidden": [], "gold": ["f031"], "id": "q4", "text": "what blocks enterprise customers from signing"}
+{"asked_at_session": 100, "domain": "team", "forbidden": [], "gold": ["f055"], "id": "q5", "text": "how many approvals does a billing change need"}
+{"asked_at_session": 100, "domain": "infra", "forbidden": ["f006"], "gold": ["f024"], "id": "q6", "text": "where are production secrets stored"}

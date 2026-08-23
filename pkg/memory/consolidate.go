@@ -113,8 +113,9 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	// a supersede tombstone (ADR-007) — must stay collectable by pruning
 	// instead of being resurrected by its own recent access time.
 	var decayErrs []error
+	nowT := s.now()
 	for i := range facts {
-		hours := time.Since(facts[i].AccessedAt).Hours()
+		hours := nowT.Sub(facts[i].AccessedAt).Hours()
 		facts[i].Weight = math.Min(facts[i].Weight, math.Exp(-lambda*hours))
 		if err := s.UpdateFact(agentID, facts[i]); err != nil {
 			decayErrs = append(decayErrs, fmt.Errorf("decay fact %s: %w", facts[i].ID, err))

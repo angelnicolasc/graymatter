@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // FuzzTokenize ensures tokenize never panics on arbitrary Unicode input.
@@ -47,7 +48,7 @@ func FuzzTokenize(f *testing.F) {
 // Run the fuzzer: go test -fuzz=FuzzUnmarshalFact ./pkg/memory/
 func FuzzUnmarshalFact(f *testing.F) {
 	// Seed corpus: valid JSON, truncated JSON, empty, binary garbage.
-	validFact, _ := json.Marshal(newFact("agent", "some text", nil))
+	validFact, _ := json.Marshal(newFact("agent", "some text", nil, time.Now()))
 	seeds := [][]byte{
 		validFact,
 		[]byte(`{}`),

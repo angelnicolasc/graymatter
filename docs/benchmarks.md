@@ -43,18 +43,20 @@ is nothing to cut and the number is 0%. The curve is the result, not the
 
 Stated plainly, because the omissions are larger than the result:
 
-- **Relevance.** The benchmark never checks whether the 8 recalled
+- **Relevance.** This benchmark never checks whether the 8 recalled
   observations are the *right* 8. A system that returned 8 facts at random
-  would score an identical 90% reduction here. Retrieval quality is not
-  measured anywhere in this repository yet.
+  would score an identical 90% reduction here. That is measured separately now
+  — see [retrieval quality](../benchmarks/RESULTS.md).
 - **A realistic baseline.** Full-history injection is the weakest possible
-  comparison. Production systems truncate. A sliding window keeping the last 8
-  observations would cost roughly 8 × ~70 ≈ 560 tokens in steady state —
-  statistically indistinguishable from GrayMatter's ~550–670. **Against a
-  sliding window, GrayMatter does not win on tokens**, and the honest
-  differentiator has to be what a window cannot do: recall a fact from session
-  3 at session 90, and stop returning a fact that has been superseded.
-- **Multiple queries or domains.** One fixed query, one domain.
+  comparison. Production systems truncate. **Against a sliding window,
+  GrayMatter does not win on tokens** — measured, not estimated: at an equal
+  budget of 8 facts it costs *more*, because it returns the facts that answer
+  the query and those are the longer ones. The differentiator is what a window
+  cannot do at any price: recall a fact planted 96 sessions ago, and refuse to
+  return a fact that has been superseded. Both are measured in
+  [RESULTS.md](../benchmarks/RESULTS.md).
+- **Multiple queries or domains.** One fixed query, one domain. The quality
+  benchmark uses six queries across three.
 - **Vector embeddings.** Keyword-only, so the numbers are reproducible without
   an API key. Vector recall changes precision; it is not measured here.
 - **Consolidation.** Runs with consolidation untriggered.
@@ -62,6 +64,20 @@ Stated plainly, because the omissions are larger than the result:
 Earlier revisions of this page published a token table nothing produced, and a
 relevance score no code computed. Both are gone. The tests named at the top
 exist so that neither can come back quietly.
+
+## The other benchmark
+
+Token count is half the question. [`benchmarks/RESULTS.md`](../benchmarks/RESULTS.md)
+holds the other half: whether the facts that come back are the right ones,
+measured against a real sliding window rather than against full-history
+injection, with the predictions committed before the run.
+
+```bash
+go run ./benchmarks/retrieval_quality
+```
+
+One of its three pre-registered predictions failed, and it is written up there
+in full.
 
 ## Reproducing
 

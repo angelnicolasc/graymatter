@@ -548,6 +548,33 @@ Reproduce locally:
 go run ./benchmarks/token_count
 ```
 
+### Does it return the *right* facts?
+
+**Recalls facts planted ~100 sessions ago: 83% vs 0% for a sliding window, at
+comparable cost.**
+
+Tokens are only half the question — the table above would look the same for a
+system that returned eight facts at random. A second benchmark measures whether
+the facts coming back are the ones that answer the query, against a real
+sliding window rather than against full-history injection.
+
+| | sliding window | GrayMatter | GrayMatter + `MinRelevance` |
+|---|---|---|---|
+| Finds a fact planted 96 sessions ago | 0% | 83% | 83% |
+| Returns a fact known to be superseded | 0% | 0% | 0% |
+| Tokens per query | 95 | 114 | 64 |
+| Facts per query | 8 | 8 | 4 |
+
+```bash
+go run ./benchmarks/retrieval_quality
+```
+
+At equal fact count GrayMatter returns the most relevant facts, which are the
+longer ones — 114 tokens/query against 95 for a window; with relevance trimming
+(`MinRelevance`) it returns 4 facts instead of 8 and drops to 64 tokens/query
+while keeping the same recall. Method, per-query detail and the full comparison
+are in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+
 
 ---
 
