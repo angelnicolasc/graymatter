@@ -8,8 +8,8 @@
 <p align="center">
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.9.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/coverage-74.8%25-brightgreen" alt="Coverage 74.8%">
+  <a href="https://github.com/angelnicolasc/graymatter/releases/tag/v0.10.0"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/coverage-77.0%25-brightgreen" alt="Coverage 77.0%">
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 <div align="center">
@@ -157,22 +157,22 @@ The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 
 ```bash
 # Linux (x86_64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_amd64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_linux_amd64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Linux (ARM64)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_linux_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_linux_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_darwin_arm64.tar.gz
+curl -sSL -o graymatter.tar.gz https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_darwin_arm64.tar.gz
 tar -xzf graymatter.tar.gz
 sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.9.0/graymatter_0.9.0_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.10.0/graymatter_0.10.0_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .\graymatter_cli
 ```
 
@@ -551,6 +551,25 @@ go run ./benchmarks/token_count
 
 ---
 
+## Design decisions
+
+The tradeoffs that are not obvious from reading the code, each with the
+condition under which it should be reversed. If you are wondering why decay is
+30 days, or why there is a daemon at all, the answer is written down rather
+than folklore.
+
+| # | Decision |
+|---|---|
+| [001](docs/decisions/001-decay-half-life.md) | Memory decays on a 30-day half-life — and the two classes of fact that model gets wrong |
+| [002](docs/decisions/002-bbolt-single-writer.md) | bbolt with a single writer, and a daemon to share it |
+| [003](docs/decisions/003-knowledge-graph-autopopulation.md) | The knowledge graph has a write path but no automatic population |
+| [004](docs/decisions/004-local-first-single-node.md) | Local-first and single-node, deliberately not multi-tenant |
+| [005](docs/decisions/005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword |
+| [006](docs/decisions/006-configurable-signal-weights.md) | Retrieval signal weights are configurable — and why a sliding window is a special case |
+| [007](docs/decisions/007-supersede-tombstones.md) | Contradictions are resolved by tombstone, never by delete |
+
+---
+
 ## Storage
 
 | Layer | Tech | What it holds |
@@ -739,10 +758,11 @@ classes, files, routes, with `CALLS` / `IMPORTS` edges, derived automatically by
 parsing your code, and it is the primary thing you query. GrayMatter's is a much
 smaller idea: entities named in the facts themselves, typed person / project /
 decision / preference / fact, never derived from source. It is also the least
-finished part of this project — the wiring that would populate it is not
-connected in shipped builds, tracked in
-[#24](https://github.com/angelnicolasc/graymatter/issues/24) — so take the fact
-store, not the graph, as what GrayMatter actually gives you today. The clearest
+finished part of this project — an agent can write to it explicitly, but
+nothing populates it automatically, tracked in
+[#24](https://github.com/angelnicolasc/graymatter/issues/24) and explained in
+[ADR-003](docs/decisions/003-knowledge-graph-autopopulation.md) — so take the
+fact store, not the graph, as what GrayMatter actually gives you today. The clearest
 tell is decay: facts here carry a weight on a 30-day
 half-life and fade when nothing touches them, which a code graph must never do,
 since a stale one is simply wrong.
@@ -769,7 +789,7 @@ GrayMatter saves you conversation history. They stack.
 - [x] Hybrid retrieval (vector + keyword + recency, RRF fusion)
 - [x] CLI: `init remember recall checkpoint export run sessions plugin server`
 - [x] MCP server (Claude Code / Cursor) + `memory_reflect` self-edit tool
-- [ ] Knowledge graph — schema, bbolt storage and the TUI view are in, but nodes have no write path in shipped builds, so entity extraction and the graph's Obsidian export never run ([#24](https://github.com/angelnicolasc/graymatter/issues/24))
+- [ ] Knowledge graph — schema, bbolt storage, the TUI view and the write path are all in: `memory_reflect action=link` creates edges, and the daemon serves `KGUpsert`/`KGLink`. What is missing is *automatic* population — `Store.SetKG` is never called in shipped builds, so entity extraction during consolidation and graph enrichment during recall are implemented, tested, and never run. The graph holds only what an agent puts there explicitly ([#24](https://github.com/angelnicolasc/graymatter/issues/24), [ADR-003](docs/decisions/003-knowledge-graph-autopopulation.md))
 - [x] Shared memory across agents (`--shared`, `--all` flags, `__shared__` namespace)
 - [x] REST API server mode (`graymatter server`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)
@@ -799,4 +819,4 @@ GrayMatter saves you conversation history. They stack.
 
 ---
 
-*GrayMatter — v0.9.0 — August 2026*
+*GrayMatter — v0.10.0 — August 2026*

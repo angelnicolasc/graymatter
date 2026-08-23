@@ -3,6 +3,8 @@ package graymatter
 import (
 	"os"
 	"time"
+
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // EmbeddingMode controls how GrayMatter generates vector embeddings.
@@ -116,6 +118,17 @@ type Config struct {
 	// read-only would break every connected client. StrictWrite wins over
 	// ReadOnly when both are set.
 	StrictWrite bool
+
+	// SignalWeights sets how much vector similarity, keyword relevance and
+	// recency each contribute to the fused ranking.
+	// Default: nil, meaning memory.DefaultSignalWeights() — vector 1.0,
+	// keyword 1.0, recency 0.5, the values hardcoded before v0.10.0.
+	SignalWeights *memory.SignalWeights
+
+	// MinRelevance drops recalled facts scoring below this fraction of the
+	// best score in the same result set.
+	// Default: 0 — no cut, Recall returns exactly TopK as it always has.
+	MinRelevance float64
 }
 
 // DefaultConfig returns a Config with all defaults applied from environment

@@ -6,7 +6,162 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [Unreleased]
+## [0.10.0] - 2026-08-23
+
+A release about claims. Every number this project published, and every
+behaviour it described, checked against what the code does — and where they
+disagreed, the code fixed or the claim withdrawn. Three of the disagreements
+were bugs, and one had been shipping since the feature existed.
+
+Nothing here requires action from a caller. Every addition is a new field whose
+zero value reproduces v0.9.0 exactly, enforced by
+`TestRankingDefaults_MatchV09Behaviour`. One default changes, listed below.
+
+### Fixed
+
+**Forgetting a fact did not stop it being recalled.** `memory_reflect` with
+`action="forget"` or `"update"` set the fact's weight to 0 and answered *"Fact
+suppressed for agent"*. `Recall` never reads weight — it ranks on vector,
+keyword and recency — so the fact came back on the very next search. An agent
+that had just corrected itself received both versions:
+
+```
+Found 2 relevant memories for agent "billing-agent":
+1. Billing runs through Polar
+2. Billing runs through Lemon Squeezy
+```
+
+with nothing to indicate which was current. Nothing cleared it up until a
+consolidation cycle happened to prune the zero-weight fact, and consolidation
+only fires past `ConsolidateThreshold` facts — so on a smaller store, never.
+
+`Fact` gains `SupersededBy`. Non-empty means retired, and `Recall` drops those
+before scoring, so a tombstoned fact cannot even displace a live one from the
+top-k. The value is the replacement fact's ID for `update`, or
+`SupersededByAgent` for `forget`, so a correction can be followed rather than
+merely noticed. Nothing is deleted: `List`, `export` and the TUI still show
+retired facts, and pruning by decay remains the only thing that removes
+anything. Precedence between tombstone, decay and pruning is now stated and
+tested — see [ADR-007](docs/decisions/007-supersede-tombstones.md).
+
+`update` also stopped retiring the old fact before storing the replacement. The
+previous order zeroed the weight first, so a failing `Remember` left an agent
+with a retired fact and nothing in its place.
+
+**Decay ran on a half-life of one consolidation cycle, not 30 days.**
+`Consolidate` computed `weight *= exp(-lambda * hoursSinceAccessed)` using the
+full elapsed time on every run — nothing recorded that a fact had already been
+decayed, so each cycle re-applied the whole period. A fact one half-life stale,
+across five cycles in the same millisecond: 0.5, 0.25, 0.125, 0.0625, 0.031.
+With `AsyncConsolidate` on, consolidation fires after `Remember`, so a busy
+agent could take a month-old fact below the 0.01 prune floor in minutes. Every
+statement this project made about 30-day decay described a model the code did
+not implement.
+
+Weight is now recomputed from staleness rather than multiplied into:
+`weight = min(weight, exp(-lambda * hoursSinceAccessed))`. Idempotent, so
+consolidating more often no longer forgets faster. The `min` keeps decay from
+handing weight back, which also stops a zeroed tombstone being resurrected by
+its own recent access time.
+
+**An unimplemented consolidation LLM failed silently.** Ollama is a supported
+embedding backend, so `ConsolidateLLM = "ollama"` looks reasonable and config
+accepts it — but summarisation through Ollama is not implemented, and the code
+returned an empty summary and a nil error. Such a store ran decay and pruning
+forever, never summarised, and gave no indication why. It now returns
+`ErrConsolidateLLMUnsupported` through `OnConsolidateError`, as do
+summarisation errors in general, which were being discarded at that call site.
+
+### Changed
+
+- **`GET /recall` returns 8 facts by default, not 5.** The REST server had its
+  own constant while the library, CLI, MCP tools and TUI all used
+  `DefaultConfig().TopK`. Same store, same query, a different amount of context
+  depending on which door you came through. `?k=5` restores the old count. The
+  test reads the library default rather than repeating a number, so the two
+  cannot drift apart again.
+- The MCP server announces version `0.10.0`.
+
+### Added
+
+- **`StoreConfig.SignalWeights`** — how much vector similarity, keyword
+  relevance and recency each contribute to the ranking. A pointer: `nil` means
+  `DefaultSignalWeights()` (1.0, 1.0, 0.5 — the values previously hardcoded),
+  and the indirection exists so the zero value cannot be mistaken for "all
+  signals off". Also on the root `Config`.
+
+  This makes available an honest version of a claim that was not previously
+  available at all: with all weight on recency, retrieval degenerates into
+  "return the K most recent facts", which is a sliding window. A test runs it
+  over a corpus where the relevant facts are the old ones and shows the window
+  returning none of them. Before this, no configuration of GrayMatter ranked
+  that way, so the claim described a system that did not exist.
+- **`StoreConfig.MinRelevance`** — drops results below a fraction of the best
+  score in the same result set. Default 0, meaning no cut and exactly `topK`
+  returned, as before. The threshold is relative because RRF scores depend on
+  how many facts were ranked, so an absolute cutoff would change meaning as a
+  store grew.
+- **`Fact.SupersededBy`, `Fact.IsSuperseded()`, `SupersededByAgent`** — see
+  Fixed. `omitempty` and additive: stores written by earlier versions load
+  unchanged, checked against a literal v0.9.0 JSON fact.
+- **[`docs/decisions/`](docs/decisions/README.md)** — seven architecture
+  decision records, each with a measurable condition for reversing it. Why
+  decay is 30 days and which two classes of fact that model gets wrong; why
+  there is a daemon; why not multi-tenant; the embedding chain; the signal
+  weights; the tombstones; and the true state of the knowledge graph.
+
+### Documentation
+
+**`docs/benchmarks.md` published a table nothing produced.** It claimed
+~40,000 tokens of full injection against ~1,200 recalled at 100 sessions;
+`go run ./benchmarks/token_count` measures ~6,959 against ~666. The
+100-session row was 475% off. It also published a "Relevance@8 vs full
+context" score, and no code in this repository measures relevance at all.
+
+The README was correct throughout, which is the uncomfortable part: the v0.9.0
+sweep grepped for "97" and this page never said 97, so a five-fold error
+survived a hygiene pass whose whole purpose was removing indefensible numbers.
+
+The check is now mechanical. `benchmarks/token_count/main_test.go` parses the
+tables out of README.md and docs/benchmarks.md and compares every cell against
+a live benchmark run — 2% tolerance on token counts, none at all on the
+reduction percentage — and rejects any relevance or precision figure in the
+benchmark docs until something computes one.
+
+The rewritten page states what the benchmark does not measure, which is more
+than what it does: it never checks whether the 8 recalled facts are the right
+8, so a system returning 8 at random scores the same 90%; and full-history
+injection is the weakest possible baseline, since a sliding window of the last
+8 observations costs roughly 560 tokens against our ~550–670. **Against the
+baseline production actually uses, this benchmark shows no token win to
+claim.**
+
+**The README described the knowledge graph wrongly in both directions.** It
+said nodes have no write path in shipped builds. They do — `memory_reflect
+action=link` creates edges, the daemon opens a real graph and serves
+`KGUpsert`/`KGLink`, and the direct store does the same. What is missing is
+*automatic* population: `Store.SetKG` is never called outside tests, so entity
+extraction during consolidation and graph enrichment during recall are
+implemented, tested, and have never run. Corrected in the README, the roadmap
+and [ADR-003](docs/decisions/003-knowledge-graph-autopopulation.md) together.
+
+**`docs/AGENTS.md` carried four claims that had stopped being true.** That
+`update` leaves the old fact for consolidation to prune; that RRF has "no
+tunable percentage weights to fiddle with"; that `link` requires a
+`SetKGLinker` that no longer exists, returning an error string that no longer
+exists, citing a line that now holds something else; and that an unreferenced
+fact is pruned in ~60 days, when the arithmetic gives 6.64 half-lives — 199
+days. Also a link to `GRAYMATTER_PLAYBOOK.md`, a file with no history in this
+repository.
+
+Smaller: the benchmark's header described a corpus of 5 observations per
+session where the loop stores 1, and `ConsolidateThreshold`'s two different
+comparisons (`>=` to trigger a cycle, `>` to summarise) are now explained at
+both sites rather than left looking like an off-by-one.
+
+---
+
+## [0.9.0] - 2026-08-22
 
 ### Security
 
@@ -543,6 +698,8 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 
 See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable public identifiers and the compatibility promise for the v0.x series.
 
+[0.10.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.10.0
+[0.9.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.9.0
 [0.2.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.2.1
 [0.2.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.1.0

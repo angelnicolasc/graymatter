@@ -81,6 +81,28 @@ type StoreConfig struct {
 	// with ReadOnly (StrictWrite wins).
 	StrictWrite bool
 
+	// SignalWeights sets how much each retrieval signal contributes to the
+	// fused ranking. nil — the zero value, and what every caller before
+	// v0.10.0 passes — means DefaultSignalWeights(), which is bit-for-bit the
+	// behaviour that was hardcoded until then.
+	//
+	// Set it to run the ranking as something other than a hybrid: all weight
+	// on Recency turns Recall into a sliding window over the K most recent
+	// facts, all weight on Keyword ignores age entirely. See
+	// docs/decisions/006-configurable-signal-weights.md.
+	SignalWeights *SignalWeights
+
+	// MinRelevance drops results scoring below this fraction of the best
+	// score in the same result set. 0 — the zero value — disables the cut
+	// and returns exactly topK, which is the pre-v0.10.0 contract.
+	//
+	// The threshold is relative because RRF scores are not comparable across
+	// stores: the same fact scores differently depending on how many facts
+	// were ranked alongside it, so an absolute cutoff would quietly mean
+	// something different as a store grows. 0.5 keeps results at least half as
+	// strong as the best match; the best match always survives.
+	MinRelevance float64
+
 	// OnRecall, if non-nil, is called after each Recall with timing and count.
 	OnRecall func(agentID, query string, resultCount int, duration time.Duration)
 

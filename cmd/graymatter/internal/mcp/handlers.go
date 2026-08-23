@@ -11,6 +11,7 @@ import (
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -153,50 +154,58 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the corrected fact) is required for update")
 		}
-		facts, err := s.backend.List(agentID)
+		before, err := s.backend.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		for _, f := range facts {
-			if f.Text == target {
-				oldText = f.Text
-				f.Weight = 0
-				_ = s.backend.UpdateFact(agentID, f)
-				break
-			}
-		}
-		if oldText == "" {
+		victim, ok := findByText(before, target)
+		if !ok {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
+		oldText = victim.Text
+
+		// Write the correction before retiring what it corrects. The previous
+		// order zeroed the old fact's weight first, so a failing Remember left
+		// the agent with a retired fact and no replacement.
 		if err := s.backend.Remember(ctx, agentID, text); err != nil {
 			return toolError(fmt.Sprintf("add updated fact: %v", err))
+		}
+
+		// Point the tombstone at the replacement so the correction can be
+		// followed later, rather than only showing that something was retired.
+		replacementID := newFactID(s.backend, agentID, before)
+		if replacementID == "" {
+			replacementID = memory.SupersededByAgent
+		}
+		if err := s.supersedeFact(agentID, victim, replacementID); err != nil {
+			return toolError(fmt.Sprintf("supersede old fact: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
 
 	case "forget":
 		// The fact to forget may arrive in target or text — both are
 		// documented as equivalent; target wins when both are set.
-		victim := target
-		if victim == "" {
-			victim = text
+		wanted := target
+		if wanted == "" {
+			wanted = text
 		}
-		if victim == "" {
+		if wanted == "" {
 			return toolError("the fact to forget is required: pass it in target (or text)")
 		}
 		facts, err := s.backend.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		for _, f := range facts {
-			if f.Text == victim {
-				oldText = f.Text
-				f.Weight = 0
-				_ = s.backend.UpdateFact(agentID, f)
-				break
-			}
+		victim, ok := findByText(facts, wanted)
+		if !ok {
+			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
 		}
-		if oldText == "" {
-			return toolError(fmt.Sprintf("target fact not found: %q", victim))
+		oldText = victim.Text
+
+		// Nothing replaces this one, so the tombstone records that an agent
+		// decided to drop it.
+		if err := s.supersedeFact(agentID, victim, memory.SupersededByAgent); err != nil {
+			return toolError(fmt.Sprintf("suppress fact: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Fact suppressed for agent %q.", agentID)
 
@@ -228,4 +237,46 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	})
 
 	return toolText(resultMsg)
+}
+
+// findByText returns the first fact whose text matches exactly.
+func findByText(facts []memory.Fact, text string) (memory.Fact, bool) {
+	for _, f := range facts {
+		if f.Text == text {
+			return f, true
+		}
+	}
+	return memory.Fact{}, false
+}
+
+// newFactID returns the ID of the fact added since the `before` snapshot was
+// taken. Matching on identity rather than text keeps it correct when the new
+// fact repeats wording that is already stored. Returns "" if the new fact
+// cannot be identified — the caller falls back to a generic marker rather than
+// leaving the correction untombstoned.
+func newFactID(backend Backend, agentID string, before []memory.Fact) string {
+	after, err := backend.List(agentID)
+	if err != nil {
+		return ""
+	}
+	known := make(map[string]bool, len(before))
+	for _, f := range before {
+		known[f.ID] = true
+	}
+	for _, f := range after {
+		if !known[f.ID] {
+			return f.ID
+		}
+	}
+	return ""
+}
+
+// supersedeFact retires a fact: it is tombstoned so Recall skips it from the
+// next query onward, and its weight is zeroed so ordinary decay pruning
+// collects it in due course. The fact itself is not deleted — storage is
+// append-only, and an audit has to be able to see what was retired and why.
+func (s *Server) supersedeFact(agentID string, f memory.Fact, supersededBy string) error {
+	f.SupersededBy = supersededBy
+	f.Weight = 0
+	return s.backend.UpdateFact(agentID, f)
 }

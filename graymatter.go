@@ -100,6 +100,8 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 		VectorReconcileInterval: cfg.VectorReconcileInterval,
 		ReadOnly:                cfg.ReadOnly,
 		StrictWrite:             cfg.StrictWrite,
+		SignalWeights:           cfg.SignalWeights,
+		MinRelevance:            cfg.MinRelevance,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graymatter: open store: %w", err)
