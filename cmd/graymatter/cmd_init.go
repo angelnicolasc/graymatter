@@ -186,31 +186,22 @@ resolves a command through it.`,
 				warnings = append(warnings, installGlobalInstructions(quiet)...)
 			}
 
+			// Putting the executable's directory on the user PATH means every
+			// later process resolves commands through it. That is fine for a
+			// directory only you can write, and a hijack vector for one you
+			// share — so it has to be refusable. Runs before the next steps so
+			// the restart instruction can fold PowerShell in when it applies.
+			pathChanged := false
+			if !noPath {
+				pathChanged = maybeAddToPath(quiet)
+			}
+
 			if !quiet {
 				for _, w := range warnings {
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
 				}
 				fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
-				printNextSteps(enableKG)
-			}
-
-			// Putting the executable's directory on the user PATH means every
-			// later process resolves commands through it. That is fine for a
-			// directory only you can write, and a hijack vector for one you
-			// share — so it has to be refusable.
-			if noPath {
-				return nil
-			}
-			if added, pathErr := addExeDirToUserPath(); pathErr != nil {
-				if !quiet {
-					exe, _ := os.Executable()
-					fmt.Fprintf(os.Stderr,
-						"\n  Warning: could not add %s to PATH: %v\n  Add it manually so you can type 'graymatter' from any directory.\n",
-						filepath.Dir(exe), pathErr)
-				}
-			} else if added && !quiet {
-				exe, _ := os.Executable()
-				fmt.Printf("\n  Added %s to your PATH — restart PowerShell to apply\n", filepath.Dir(exe))
+				printNextSteps(enableKG, pathChanged)
 			}
 
 			return nil

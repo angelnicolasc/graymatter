@@ -366,9 +366,24 @@ func installGlobalInstructions(quiet bool) []string {
 // exist in the session that ran init, and an agent that goes straight to
 // calling them finds nothing however green doctor is. Shared between the plain
 // and interactive paths so the two cannot drift.
-func printNextSteps(kgAuto bool) {
+// printNextSteps closes both init paths with the same advice.
+//
+// The restart comes first because it is the step that makes a correct install
+// look broken. MCP clients launch their servers at startup, so the tools do not
+// exist in the session that ran init, and an agent that goes straight to
+// calling them finds nothing however green doctor is. Shared between the plain
+// and interactive paths so the two cannot drift.
+//
+// pathChanged folds the Windows PATH note into the restart line instead of
+// printing a second "restart" elsewhere: two restarts of two different things
+// at the end of one install is exactly the dilution that gets both ignored.
+func printNextSteps(kgAuto bool, pathChanged bool) {
 	fmt.Printf("\nNext steps:\n")
-	fmt.Printf("  1. Restart your MCP client (editor, agent, or terminal session).\n")
+	fmt.Printf("  1. Restart your MCP client (editor, agent, or terminal session)")
+	if pathChanged {
+		fmt.Printf(" — and PowerShell itself, which needs a restart to see the PATH entry this init added")
+	}
+	fmt.Printf(".\n")
 	fmt.Printf("     Clients launch their MCP servers at startup, so the memory tools\n")
 	fmt.Printf("     are not available in the session that just ran init.\n")
 	if kgAuto {
