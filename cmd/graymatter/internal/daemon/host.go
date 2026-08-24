@@ -104,6 +104,7 @@ type ShutdownResponse struct{}
 type AgentSummary struct {
 	Agent     string    `json:"agent"`
 	LiveFacts int       `json:"live_facts"`
+	Recalls   int       `json:"recalls"` // Σ access counts over live facts: was this memory ever read?
 	AvgWeight float64   `json:"avg_weight"`
 	OldestAt  time.Time `json:"oldest_at,omitempty"`
 	NewestAt  time.Time `json:"newest_at,omitempty"`
@@ -308,6 +309,7 @@ func (h *Host) StoreOverview(req *StoreOverviewRequest, resp *StoreOverviewRespo
 				continue
 			}
 			sum.LiveFacts++
+			sum.Recalls += f.AccessCount
 			weightSum += f.Weight
 			if sum.OldestAt.IsZero() || f.CreatedAt.Before(sum.OldestAt) {
 				sum.OldestAt = f.CreatedAt

@@ -309,8 +309,9 @@ func (d *directStore) SessionSave(hs harness.HarnessSession) error {
 }
 
 // StoreOverview computes the same aggregates the daemon's Host.StoreOverview
-// returns, in-process. The two must agree; TestStatus_ParityAcrossModes pins
-// that on a seeded store.
+// returns, in-process. The two implementations must stay semantically
+// identical; each is tested against ground truth on a seeded store — the
+// daemon side in TestHostService_CoreSurface, this side by cmd_status_test.go.
 func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
 	agents, err := d.store.ListAgents()
 	if err != nil {
@@ -330,6 +331,7 @@ func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
 				continue
 			}
 			sum.LiveFacts++
+			sum.Recalls += f.AccessCount
 			weightSum += f.Weight
 			if sum.OldestAt.IsZero() || f.CreatedAt.Before(sum.OldestAt) {
 				sum.OldestAt = f.CreatedAt
