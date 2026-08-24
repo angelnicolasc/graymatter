@@ -40,9 +40,9 @@ func runDoctorGraph(cmd *cobra.Command) error {
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Knowledge-graph analytics\n\n")
-	fmt.Printf("  nodes: %d Â· edges: %d Â· orphans: %d Â· connectivity ratio: %.3f\n",
+	fmt.Printf("  nodes: %d · edges: %d · orphans: %d · connectivity ratio: %.3f\n",
 		rep.NodeCount, rep.EdgeCount, rep.Orphans, rep.ConnectivityRatio)
-	fmt.Println("  formulas: degree = undirected edges per node Â· ratio = unique pairs / NÂ·(Nâˆ’1)/2")
+	fmt.Println("  formulas: degree = undirected edges per node · ratio = unique pairs / N·(N−1)/2")
 	fmt.Println()
 
 	if len(rep.Hubs) > 0 {

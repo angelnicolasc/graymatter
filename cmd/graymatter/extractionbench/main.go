@@ -86,10 +86,10 @@ func main() {
 	})
 	const gate = 0.70
 	if precision >= gate {
-		fmt.Printf("\nGATE: PASS â€” precision %.3f >= %.2f\n", precision, gate)
+		fmt.Printf("\nGATE: PASS — precision %.3f >= %.2f\n", precision, gate)
 		return
 	}
-	fmt.Printf("\nGATE: FAIL â€” precision %.3f < %.2f (do not wire; improve extractor first)\n", precision, gate)
+	fmt.Printf("\nGATE: FAIL — precision %.3f < %.2f (do not wire; improve extractor first)\n", precision, gate)
 	os.Exit(2)
 }
 
@@ -203,7 +203,7 @@ type typedRow struct {
 }
 
 func printReport(r report) {
-	fmt.Println("Extraction precision â€” regex extractor vs hand-labeled corpus")
+	fmt.Println("Extraction precision — regex extractor vs hand-labeled corpus")
 	fmt.Println("Matcher: canonical-ID exact match (lowercased); type reported separately")
 	fmt.Printf("Corpus: %d labeled facts\n\n", r.Facts)
 	fmt.Printf("ID-level:   TP %d   FP %d   FN %d\n", r.TP, r.FP, r.FN)

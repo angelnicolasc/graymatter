@@ -66,14 +66,14 @@ enriquecimiento aporta; si no aporta, el extractor queda donde estÃ¡ y el wiring
 
 ---
 
-## Extractor v2 — re-medición tras las mejoras deterministas (2026-08-23)
+## Extractor v2 â€” re-mediciÃ³n tras las mejoras deterministas (2026-08-23)
 
 Los defectos listados arriba motivaron cuatro fixes al regex extractor
 (Unicode-safe classes, determiner stripping, organizational suffix expansion,
 all-caps role titles, URL trailing-punctuation trim). Misma corrida, mismos
-comandos, corpus idéntico:
+comandos, corpus idÃ©ntico:
 
-| Métrica | v1 (antes) | **v2 (después)** |
+| MÃ©trica | v1 (antes) | **v2 (despuÃ©s)** |
 |---|---|---|
 | Precision (ID) | 0.928 | **0.946** |
 | Recall (ID) | 0.828 | **0.946** (+0.118) |
@@ -82,12 +82,12 @@ comandos, corpus idéntico:
 | Person missed | 4 | **0** |
 | Role recovered | 0/5 | **4/5** |
 
-GATE: PASS (0.946 = 0.70), con margen ampliado en todas las dimensiones.
+GATE: PASS (0.946 â‰¥ 0.70), con margen ampliado en todas las dimensiones.
 
 Falsos positivos restantes (5): `obsidian` y los fragmentos `rafael`/`ortiz`
-de una segunda mención por apellido (clase conocida), más dos `registrar`
+de una segunda menciÃ³n por apellido (clase conocida), mÃ¡s dos `registrar`
 capturados por la regla nueva de roles contextuales donde el gold no los
-anotaba — casos límite de anotación, documentados sin ajustar el gold.
+anotaba â€” casos lÃ­mite de anotaciÃ³n, documentados sin ajustar el gold.
 
 Pendiente: re-corrida del multi-hop bench con este extractor para re-evaluar
-la condición 2 del gate ADR-003 (EnrichedHitRate > baseline).
+la condiciÃ³n 2 del gate ADR-003 (EnrichedHitRate > baseline).

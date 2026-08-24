@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
   <img width="1500" height="276" alt="graymatter-banner" src=".github/assets/graymatter-banner-1.jpg" />
 </div>
 
@@ -21,7 +21,7 @@ One binary. Drop it in. Run it. No Docker, no databases, no config files, no clo
 <br /><br />
 <strong>General-purpose MCP server. Zero vendor lock-in.</strong>
 <br />
-Works with Claude Code, Cursor, Codex, OpenCode, Antigravity â€” and any MCP-compatible client.
+Works with Claude Code, Cursor, Codex, OpenCode, Antigravity — and any MCP-compatible client.
 <br />
 Also a plain Go library if you don't use MCP.
 <br /><br />
@@ -81,7 +81,7 @@ overwritten, so it is safe in a repo that already has some.
 graymatter doctor
 ```
 
-Every line must be `âœ“` or `Â·`. If it warns, fix that before continuing; the
+Every line must be `✓` or `·`. If it warns, fix that before continuing; the
 hints are actionable.
 
 **4. Ask the user to restart you.** This step is not optional. MCP servers are
@@ -98,12 +98,12 @@ loaded, then follow [`AGENTS.md`](AGENTS.md) for when to use which.
 ## Why
 
 Every AI agent is **stateless by default**. Each run re-injects the full
-conversation history â€” and that history grows linearly. Two prompts in and you've already burned half of your daily quota.
+conversation history — and that history grows linearly. Two prompts in and you've already burned half of your daily quota.
 
 That's not just a memory problem. That's a money and performance problem.
 
 
-**Mem0, Zep, Supermemory** solve this â€” but they're Python/TypeScript-only
+**Mem0, Zep, Supermemory** solve this — but they're Python/TypeScript-only
 and require a running server. The Go ecosystem has no production-ready,
 embeddable, zero-dependency memory layer for agents.
 
@@ -114,10 +114,10 @@ That gap is GrayMatter.
 </p>
 
 <p align="center">
-<strong>~90% reduction in context tokens</strong> â€” versus full-history injection.<br>
+<strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
 Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
 No Docker. No Redis. No API key required for storage.<br><br>
-Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> â€” any MCP-compatible client picks it up automatically.
+Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
 </p>
 
 ---
@@ -127,7 +127,7 @@ Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCod
 You can't improve what you can't see.
 
 `graymatter tui` opens a live terminal dashboard with everything your
-agent memory is doing â€” no extra setup required.
+agent memory is doing — no extra setup required.
 
 <p align="center">
   <img src=".github/assets/tui-graymatter.jpg" alt="GrayMatter-TUI" width="900px" style="max-width: 900px;">
@@ -135,16 +135,16 @@ agent memory is doing â€” no extra setup required.
 
 **What you get at a glance:**
 
-- **Facts** â€” total stored, distributed across agents
-- **Memory cost** â€” KB on disk (text + embeddings), not tokens
-- **Recalls** â€” cumulative access count across all sessions
-- **Health** â€” percentage of facts above relevance threshold (weight > 0.5)
-- **Token cost (30d)** â€” real spend breakdown by model, with cache hit rate
-- **Agent activity** â€” facts vs recalls per agent, side by side
-- **Weight distribution** â€” how consolidated your memory is over time
-- **Activity timeline** â€” facts created per day, last 30 days
+- **Facts** — total stored, distributed across agents
+- **Memory cost** — KB on disk (text + embeddings), not tokens
+- **Recalls** — cumulative access count across all sessions
+- **Health** — percentage of facts above relevance threshold (weight > 0.5)
+- **Token cost (30d)** — real spend breakdown by model, with cache hit rate
+- **Agent activity** — facts vs recalls per agent, side by side
+- **Weight distribution** — how consolidated your memory is over time
+- **Activity timeline** — facts created per day, last 30 days
 
-The dashboard auto-refreshes every 5 seconds. Press `1â€“4` to switch tabs,
+The dashboard auto-refreshes every 5 seconds. Press `1–4` to switch tabs,
 `r` to force refresh, `q` to quit.
 
 ---
@@ -195,7 +195,7 @@ graymatter init
 ```
 
 One command auto-wires GrayMatter into every supported client at once.
-Existing entries from other MCP servers are **merged, not overwritten** â€”
+Existing entries from other MCP servers are **merged, not overwritten** —
 safe to run in any repo.
 
 `init` also drops a managed **memory block into `CLAUDE.md` and
@@ -230,7 +230,7 @@ settings). Five tools become available:
 | `checkpoint_resume` | Restore last checkpoint |
 | `memory_reflect` | Add / update / forget / link memories (agent self-edit) |
 
-> Agents using these tools should read **[docs/AGENTS.md](docs/AGENTS.md)** â€”
+> Agents using these tools should read **[docs/AGENTS.md](docs/AGENTS.md)** —
 > when to store vs. checkpoint, query patterns, anti-patterns, and the exact
 > per-tool parameter names (heads-up: `memory_reflect` uses `agent`, the
 > other four use `agent_id`).
@@ -245,13 +245,13 @@ graymatter mcp serve                        # stdio transport
 graymatter mcp serve --http 127.0.0.1:8080  # HTTP transport (bearer token required)
 ```
 
-The schema is identical to every other MCP server â€” `command` +
+The schema is identical to every other MCP server — `command` +
 `args: ["mcp", "serve"]`. No proprietary glue.
 
 ### Global install (all projects)
 
 If you'd rather not run `graymatter init` in every repo, drop the same
-JSON into the editor's global config â€” `~/.cursor/mcp.json` for Cursor,
+JSON into the editor's global config — `~/.cursor/mcp.json` for Cursor,
 `~/.claude/mcp.json` for Claude Code:
 
 ```json
@@ -269,7 +269,7 @@ JSON into the editor's global config â€” `~/.cursor/mcp.json` for Cursor,
 automatically on Windows via the User `PATH` registry; on macOS / Linux
 the recommended install path `/usr/local/bin` is already on `PATH`.
 
-### Troubleshooting â€” "MCP is connected but nothing gets stored"
+### Troubleshooting — "MCP is connected but nothing gets stored"
 
 Run the built-in diagnosis first:
 
@@ -278,12 +278,12 @@ graymatter doctor        # human-readable
 graymatter doctor --json # scriptable
 ```
 
-It checks the full chain: binary on `PATH` â†’ data dir writable â†’ store
-health and lock state â†’ MCP wiring per client â†’ agent instructions present.
+It checks the full chain: binary on `PATH` → data dir writable → store
+health and lock state → MCP wiring per client → agent instructions present.
 
 The two most common failure modes it catches:
 
-1. **No instructions.** An MCP connection only makes tools *available* â€”
+1. **No instructions.** An MCP connection only makes tools *available* —
    nothing tells the model to call them. If `CLAUDE.md` / `AGENTS.md`
    don't mention the memory tools, the agent will happily chat for an hour
    and never write a fact. Fix: `graymatter init` (writes the block for you).
@@ -296,7 +296,7 @@ The two most common failure modes it catches:
 
 ## How memories get stored
 
-There are **four** ways a fact ends up in the store. You don't have to pick one â€” they compose:
+There are **four** ways a fact ends up in the store. You don't have to pick one — they compose:
 
 | Path | Who calls it | When to use |
 |------|--------------|-------------|
@@ -308,14 +308,14 @@ There are **four** ways a fact ends up in the store. You don't have to pick one 
 **Forgetting a single `Remember` call is not fatal.** `memory_reflect` lets the
 agent fix its own memory as it works, and `Consolidate` curates the store
 over time. That's why long interactive sessions in **Claude Code Desktop**
-and **Cursor** are a sweet spot for GrayMatter â€” not only 24/7 autonomous
+and **Cursor** are a sweet spot for GrayMatter — not only 24/7 autonomous
 agents. The LLM maintains its own memory through MCP.
 
 ---
 
 ## Library usage
 
-Three functions cover 95% of use cases. All methods accept `context.Context` as the first argument so timeouts and cancellation propagate end-to-end â€” no wrappers needed.
+Three functions cover 95% of use cases. All methods accept `context.Context` as the first argument so timeouts and cancellation propagate end-to-end — no wrappers needed.
 
 ```go
 import "github.com/angelnicolasc/graymatter"
@@ -326,7 +326,7 @@ ctx := context.Background()
 mem := graymatter.New(".graymatter")
 defer mem.Close()
 
-// Always check health in production â€” New() never panics, but it may degrade
+// Always check health in production — New() never panics, but it may degrade
 // to no-op mode if the data dir is unwritable or bbolt fails to open.
 if !mem.Healthy() {
     log.Fatalf("graymatter: %v", mem.Status().InitError)
@@ -340,7 +340,7 @@ facts, _ := mem.Recall(ctx, "sales-closer", "follow up Maria")
 // ["Maria didn't reply Wednesday. Third touchpoint due Friday."]
 ```
 
-Context propagates everywhere â€” timeouts and traces work as expected:
+Context propagates everywhere — timeouts and traces work as expected:
 
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -390,7 +390,7 @@ mem.Remember(ctx, skill.Name, "Maria prefers Slack over email; replies within 2h
 mem.RememberExtracted(ctx, skill.Name, responseText)
 ```
 
-> Inside Claude Code / Cursor you don't need either call â€” the LLM uses the
+> Inside Claude Code / Cursor you don't need either call — the LLM uses the
 > `memory_reflect` MCP tool to self-curate. See
 > [Claude Code / Cursor (MCP)](#claude-code--cursor-mcp) below.
 
@@ -400,7 +400,7 @@ mem.RememberExtracted(ctx, skill.Name, responseText)
 mem, err := graymatter.NewWithConfig(graymatter.Config{
     DataDir:          ".graymatter",
     TopK:             8,
-    EmbeddingMode:    graymatter.EmbeddingAuto,  // Ollama â†’ OpenAI â†’ Anthropic â†’ keyword
+    EmbeddingMode:    graymatter.EmbeddingAuto,  // Ollama → OpenAI → Anthropic → keyword
     OllamaURL:        "http://localhost:11434",
     OllamaModel:      "nomic-embed-text",
     AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
@@ -450,13 +450,13 @@ curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/facts?agent=alice"
 ```
 
 The token is 256 bits, generated on first run and stored in
-`<data-dir>/graymatter.http-token` (`0600` â€” a real guarantee on POSIX; on
+`<data-dir>/graymatter.http-token` (`0600` — a real guarantee on POSIX; on
 Windows the file inherits its parent directory's ACL). Set
 `GRAYMATTER_HTTP_TOKEN` or pass `--token` to supply your own instead; neither
 touches the file.
 
 `/healthz` is the one route that answers without a credential, so liveness
-probes keep working. `/metrics` is **not** â€” it lists every agent ID the server
+probes keep working. `/metrics` is **not** — it lists every agent ID the server
 has seen.
 
 Deleting a fact:
@@ -468,7 +468,7 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8080/forget/0
 
 `DELETE /forget` with a `query` still deletes the closest match, but it now
 needs `"confirm": true`. Without it the response names the candidate and its
-ID so you can check before committing to it â€” "closest" is whatever the
+ID so you can check before committing to it — "closest" is whatever the
 embedder thinks, and there is no undo.
 
 Request bodies are capped at 1 MiB, and every response carries
@@ -482,7 +482,7 @@ Request bodies are capped at 1 MiB, and every response carries
 | No authentication | Bearer token required | Send the header, or pass `--no-auth` |
 
 `--no-auth` restores the old unauthenticated behaviour but only on a loopback
-address â€” the combination that made this a critical finding (no credential,
+address — the combination that made this a critical finding (no credential,
 reachable from the LAN) is refused outright.
 
 ### Memory is untrusted input
@@ -490,7 +490,7 @@ reachable from the LAN) is refused outright.
 A fact in the store is text some earlier process decided to keep. It may have
 come from the user, from another agent, or from a page an agent read.
 `graymatter run` therefore injects recalled facts inside a `<memory>` fence,
-labelled as data that carries no authority â€” never as more system prompt.
+labelled as data that carries no authority — never as more system prompt.
 Library consumers should do the same; see [Full agent pattern](#full-agent-pattern).
 
 [`docs/threat-model.md`](docs/threat-model.md) says what GrayMatter defends and,
@@ -505,19 +505,19 @@ daemon. Read it before pointing more than one trust level at the same store.
 ## Memory lifecycle
 
 ```
-Recall(agent, task)          â† hybrid: vector + keyword + recency â†’ top-8 facts
-    â†“
-Inject into system prompt    â† your 3 lines of code
-    â†“
+Recall(agent, task)          ← hybrid: vector + keyword + recency → top-8 facts
+    ↓
+Inject into system prompt    ← your 3 lines of code
+    ↓
 Agent runs
-    â†“
-Remember(agent, observation) â† store key facts during/after run
-    â†“
-Consolidate() [async]        â† summarise + decay + prune (LLM optional)
+    ↓
+Remember(agent, observation) ← store key facts during/after run
+    ↓
+Consolidate() [async]        ← summarise + decay + prune (LLM optional)
 ```
 
 Consolidation is the only "smart" step. Everything else is deterministic.
-Without consolidation, GrayMatter still works â€” it just doesn't compress over time.
+Without consolidation, GrayMatter still works — it just doesn't compress over time.
 
 Consolidation auto-enables when `ANTHROPIC_API_KEY` is set. To use Ollama:
 
@@ -529,7 +529,7 @@ cfg.ConsolidateLLM = "ollama"
 ### Context block (opt-in)
 
 `graymatter context-sync` projects the highest-weight live facts into a managed
-block inside CLAUDE.md / AGENTS.md, inside an explicit token budget â€” so the
+block inside CLAUDE.md / AGENTS.md, inside an explicit token budget — so the
 file your agent already reads every session stays current instead of rotting.
 
 Safety properties:
@@ -537,11 +537,11 @@ Safety properties:
 - Content outside the markers is never touched; the markers themselves say so.
 - Every rewrite leaves the previous file as `<file>.bak`.
 - A hand edit is detected against the recorded hash: `doctor` warns, and the
-  next sync replaces the block â€” warned first, never silently.
+  next sync replaces the block — warned first, never silently.
 - The projection is deterministic: same store state, same block bytes.
   `FuzzRenderBlock` holds fact text to the same rules.
 - Known limitation: two `context-sync` processes racing on one machine
-  serialize their store reads through the daemon but not the file write â€”
+  serialize their store reads through the daemon but not the file write —
   last writer wins. The loser's view returns on the next sync; nothing
   corrupts, and a single-writer workflow (the normal case) never hits it.
 
@@ -553,7 +553,7 @@ to preview the exact bytes.
 
 ## Token efficiency
 
-Numbers produced by `go run ./benchmarks/token_count` â€” real Recall calls,
+Numbers produced by `go run ./benchmarks/token_count` — real Recall calls,
 keyword embedder, no LLM required:
 
 | Sessions | Full injection | GrayMatter | Reduction |
@@ -578,7 +578,7 @@ go run ./benchmarks/token_count
 **Recalls facts planted ~100 sessions ago: 83% vs 0% for a sliding window, at
 comparable cost.**
 
-Tokens are only half the question â€” the table above would look the same for a
+Tokens are only half the question — the table above would look the same for a
 system that returned eight facts at random. A second benchmark measures whether
 the facts coming back are the ones that answer the query, against a real
 sliding window rather than against full-history injection.
@@ -595,7 +595,7 @@ go run ./benchmarks/retrieval_quality
 ```
 
 At equal fact count GrayMatter returns the most relevant facts, which are the
-longer ones â€” 114 tokens/query against 95 for a window; with relevance trimming
+longer ones — 114 tokens/query against 95 for a window; with relevance trimming
 (`MinRelevance`) it returns 4 facts instead of 8 and drops to 64 tokens/query
 while keeping the same recall. Method, per-query detail and the full comparison
 are in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
@@ -612,12 +612,12 @@ than folklore.
 
 | # | Decision |
 |---|---|
-| [001](docs/decisions/001-decay-half-life.md) | Memory decays on a 30-day half-life â€” and the two classes of fact that model gets wrong |
+| [001](docs/decisions/001-decay-half-life.md) | Memory decays on a 30-day half-life — and the two classes of fact that model gets wrong |
 | [002](docs/decisions/002-bbolt-single-writer.md) | bbolt with a single writer, and a daemon to share it |
 | [003](docs/decisions/003-knowledge-graph-autopopulation.md) | The knowledge graph has a write path but no automatic population |
 | [004](docs/decisions/004-local-first-single-node.md) | Local-first and single-node, deliberately not multi-tenant |
-| [005](docs/decisions/005-embedding-degradation-chain.md) | Embeddings degrade Ollama â†’ OpenAI â†’ Anthropic â†’ keyword |
-| [006](docs/decisions/006-configurable-signal-weights.md) | Retrieval signal weights are configurable â€” and why a sliding window is a special case |
+| [005](docs/decisions/005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword |
+| [006](docs/decisions/006-configurable-signal-weights.md) | Retrieval signal weights are configurable — and why a sliding window is a special case |
 | [007](docs/decisions/007-supersede-tombstones.md) | Contradictions are resolved by tombstone, never by delete |
 
 ---
@@ -646,9 +646,9 @@ GrayMatter degrades gracefully. It works without any embedding model.
 | **Ollama** (default) | Machine has Ollama running with `nomic-embed-text` |
 | **OpenAI** | `OPENAI_API_KEY` set, Ollama not available |
 | **Anthropic** | `ANTHROPIC_API_KEY` set, Ollama and OpenAI not available |
-| **Keyword-only** | No embedding available â€” TF-IDF + recency, zero deps |
+| **Keyword-only** | No embedding available — TF-IDF + recency, zero deps |
 
-Auto-detection order in `EmbeddingAuto` mode: Ollama â†’ OpenAI â†’ Anthropic â†’ keyword.
+Auto-detection order in `EmbeddingAuto` mode: Ollama → OpenAI → Anthropic → keyword.
 
 ```bash
 # Pull the embedding model once (Ollama):
@@ -665,7 +665,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ## Testing
 
-The full test suite requires no LLM and no network â€” every test uses
+The full test suite requires no LLM and no network — every test uses
 `t.TempDir()` with a keyword embedder or injected stubs. Runs clean on
 Linux, macOS, and Windows in CI.
 
@@ -685,9 +685,9 @@ cd cmd/graymatter && go test -count=1 -timeout=120s ./internal/...
 | `internal/server` | 11 | All REST endpoints, concurrent remember/recall, cancelled-context requests |
 | `internal/plugin` | 10 | Install, list, remove, E2E echo plugin binary |
 
-**Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` â€” each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
+**Fuzz targets** (`pkg/memory`): `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore` — each with a seeded corpus so they run deterministically in CI and can be extended with `go test -fuzz`.
 
-**Core library coverage: 74.8%** (CI gate: â‰¥ 70%). Measured without mocks â€” real bbolt + chromem-go instances in a temp directory.
+**Core library coverage: 74.8%** (CI gate: ≥ 70%). Measured without mocks — real bbolt + chromem-go instances in a temp directory.
 
 Token-reduction benchmark (also zero deps):
 
@@ -712,7 +712,7 @@ Output: single static binary, ~10 MB, no runtime dependencies.
 ## Metrics & APM hooks
 
 
-The REST server (`graymatter server`) exposes a `/metrics` endpoint powered by Go's standard `expvar` package â€” zero extra dependencies. It sits behind the same bearer token as every other data route, because it names every agent the server has seen.
+The REST server (`graymatter server`) exposes a `/metrics` endpoint powered by Go's standard `expvar` package — zero extra dependencies. It sits behind the same bearer token as every other data route, because it names every agent the server has seen.
 
 ```
 GET /metrics
@@ -731,7 +731,7 @@ Authorization: Bearer <token>
 Keys are bounded. Request keys come from the fixed route and method sets, and
 anything else folds into `other`; agent IDs get their own counter until there
 are 1000 of them, after which the rest fold into `other` too. Both are client
-input, and `expvar` entries are permanent â€” unbounded keys were a way to grow
+input, and `expvar` entries are permanent — unbounded keys were a way to grow
 the process heap until it died.
 
 For library users, `memory.StoreConfig` exposes hooks for APM integration:
@@ -763,7 +763,7 @@ store, err := memory.Open(memory.StoreConfig{
     // Routes internal log events to any standard logger.
     Logger: slog.NewLogLogger(slog.Default().Handler(), slog.LevelDebug),
 
-    // Swap the vector backend entirely â€” bring your own Qdrant, pgvector, etc.
+    // Swap the vector backend entirely — bring your own Qdrant, pgvector, etc.
     VectorBackend: myQdrantAdapter,
 })
 ```
@@ -773,7 +773,7 @@ store, err := memory.Open(memory.StoreConfig{
 
 ## What GrayMatter is NOT
 
-- Not tied to any vendor. It's an MCP server + Go library â€” not a Claude-Code-only or Cursor-only tool.
+- Not tied to any vendor. It's an MCP server + Go library — not a Claude-Code-only or Cursor-only tool.
 - Not a framework. Not an agent runner. Not a replacement for your existing tooling.
 - Not a hosted service. Not a SaaS. Not a cloud product.
 - Not a knowledge base UI. Not Notion. Not Obsidian.
@@ -791,7 +791,7 @@ Two categories get confused with this one often enough to be worth spelling out.
 Both are complementary: you can run them alongside GrayMatter and the tool
 surfaces never collide.
 
-**Code graphs** â€” [codegraph](https://github.com/colbymchenry/codegraph),
+**Code graphs** — [codegraph](https://github.com/colbymchenry/codegraph),
 [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp), and
 others. These parse your source with tree-sitter and expose symbols, call
 edges, routes, and blast radius. The repo is the source of truth: delete the
@@ -799,7 +799,7 @@ index, re-run it, and you get the same graph back, because the graph is a
 projection of code that already exists.
 
 GrayMatter never reads your source. There is no parser and no indexing step, so
-a fact exists only because something deliberately wrote it â€” `memory_add` over
+a fact exists only because something deliberately wrote it — `memory_add` over
 MCP, `graymatter remember`, `POST /remember`, or `Memory.Remember` from Go.
 Delete `.graymatter/` and nothing regenerates it, because it was never in the
 tree. A code graph tells you that every client dials the daemon; GrayMatter is
@@ -810,16 +810,16 @@ classes, files, routes, with `CALLS` / `IMPORTS` edges, derived automatically by
 parsing your code, and it is the primary thing you query. GrayMatter's is a much
 smaller idea: entities named in the facts themselves, typed person / project /
 decision / preference / fact, never derived from source. It is also the least
-finished part of this project â€” an agent can write to it explicitly, but
+finished part of this project — an agent can write to it explicitly, but
 nothing populates it automatically, tracked in
 [#24](https://github.com/angelnicolasc/graymatter/issues/24) and explained in
-[ADR-003](docs/decisions/003-knowledge-graph-autopopulation.md) â€” so take the
+[ADR-003](docs/decisions/003-knowledge-graph-autopopulation.md) — so take the
 fact store, not the graph, as what GrayMatter actually gives you today. The clearest
 tell is decay: facts here carry a weight on a 30-day
 half-life and fade when nothing touches them, which a code graph must never do,
 since a stale one is simply wrong.
 
-**Context compressors** â€” tools that sit on the transport and shrink what is
+**Context compressors** — tools that sit on the transport and shrink what is
 already moving through it: file reads, shell output, request payloads.
 GrayMatter never sees your traffic. The agent writes one distilled sentence and
 recalls a handful of facts later, so the payload is not made smaller, it stops
@@ -846,29 +846,29 @@ GrayMatter saves you conversation history. They stack.
 - [x] REST API server mode (`graymatter server`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)
 - [x] 4-view Bubble Tea TUI (Memory / Sessions / Knowledge Graph / Stats)
-- [x] Context-propagation API â€” all public methods accept `context.Context` (ctx-first, uniform)
-- [x] `Healthy()` / `Status()` â€” observable no-op mode; production callers detect init failures
-- [x] Durable vector reconciliation â€” `bucketPendingVector` closes the crash window; background reconcile loop (configurable interval); `PendingVectorCount()` for health introspection
-- [x] `AdvancedStore` interface â€” narrow, stable public surface for CLI/MCP/TUI; internal refactors no longer break public API
-- [x] `ConsolidateThreshold` default lowered to 20 â€” consolidation fires in demos and first-week production use
+- [x] Context-propagation API — all public methods accept `context.Context` (ctx-first, uniform)
+- [x] `Healthy()` / `Status()` — observable no-op mode; production callers detect init failures
+- [x] Durable vector reconciliation — `bucketPendingVector` closes the crash window; background reconcile loop (configurable interval); `PendingVectorCount()` for health introspection
+- [x] `AdvancedStore` interface — narrow, stable public surface for CLI/MCP/TUI; internal refactors no longer break public API
+- [x] `ConsolidateThreshold` default lowered to 20 — consolidation fires in demos and first-week production use
 - [x] `OnVectorIndexError` / `VectorReconcileInterval` hooks for durable vector retry observability
 - [x] Pluggable `VectorStore` interface (swap chromem-go for Qdrant, pgvector, etc.)
-- [x] expvar `/metrics` endpoint â€” zero-dep, stdlib-only observability
+- [x] expvar `/metrics` endpoint — zero-dep, stdlib-only observability
 - [x] `OnRecall` / `OnPut` / `Logger` hooks for APM integration
-- [x] Embedding dimension guard â€” warns on provider switch instead of silent corruption
-- [x] go.work workspace â€” core library imports zero TUI/CLI dependencies
-- [x] Three-platform CI (Linux, macOS, Windows) + â‰¥70% coverage gate
+- [x] Embedding dimension guard — warns on provider switch instead of silent corruption
+- [x] go.work workspace — core library imports zero TUI/CLI dependencies
+- [x] Three-platform CI (Linux, macOS, Windows) + ≥70% coverage gate
 - [x] Fuzz testing: `FuzzTokenize`, `FuzzUnmarshalFact`, `FuzzKeywordScore`
-- [x] Daemon mode â€” concurrent store access; TUI/MCP/CLI connect to one store owner over a local socket (net/rpc, stdlib-only), launch-on-connect + idle-exit, token auth
-- [x] `graymatter doctor` â€” end-to-end setup diagnosis; `init` writes the agent memory block into CLAUDE.md / AGENTS.md
-- [x] Agent activation â€” `init` writes a session protocol instead of a tool list, and `doctor` flags a project set up but never used ([#14](https://github.com/angelnicolasc/graymatter/issues/14))
-- [x] `init -i` interactive wizard + `init --global` â€” only the files your agent reads, installed once for every project ([#13](https://github.com/angelnicolasc/graymatter/issues/13), [#17](https://github.com/angelnicolasc/graymatter/issues/17))
-- [x] Correct MCP tool annotations â€” read-only tools no longer announce themselves as destructive
+- [x] Daemon mode — concurrent store access; TUI/MCP/CLI connect to one store owner over a local socket (net/rpc, stdlib-only), launch-on-connect + idle-exit, token auth
+- [x] `graymatter doctor` — end-to-end setup diagnosis; `init` writes the agent memory block into CLAUDE.md / AGENTS.md
+- [x] Agent activation — `init` writes a session protocol instead of a tool list, and `doctor` flags a project set up but never used ([#14](https://github.com/angelnicolasc/graymatter/issues/14))
+- [x] `init -i` interactive wizard + `init --global` — only the files your agent reads, installed once for every project ([#13](https://github.com/angelnicolasc/graymatter/issues/13), [#17](https://github.com/angelnicolasc/graymatter/issues/17))
+- [x] Correct MCP tool annotations — read-only tools no longer announce themselves as destructive
 - [x] REST server runs through the daemon, with a reconnecting handle and a `/healthz` that checks the store ([#19](https://github.com/angelnicolasc/graymatter/issues/19))
-- [ ] Cross-project memory federation (read-only) â€” query a registered project's memory from another ([#12](https://github.com/angelnicolasc/graymatter/issues/12))
+- [ ] Cross-project memory federation (read-only) — query a registered project's memory from another ([#12](https://github.com/angelnicolasc/graymatter/issues/12))
 - [ ] Ollama-backed consolidation LLM (Ollama as summariser, not just embedder)
 - [ ] WebSocket streaming for REST API
 
 ---
 
-*GrayMatter â€” v0.10.0 â€” August 2026*
+*GrayMatter — v0.10.0 — August 2026*

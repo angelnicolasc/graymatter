@@ -40,7 +40,7 @@ type Edge struct {
 	Relation  string    `json:"relation"` // mentioned_in / related_to / contradicts
 	CreatedAt time.Time `json:"created_at"`
 	Weight    float64   `json:"weight"`
-	// Sources lists (capped at 10) the fact IDs that produced this edge â€”
+	// Sources lists (capped at 10) the fact IDs that produced this edge —
 	// every connection is traceable to the facts that mention it.
 	Sources []string `json:"sources,omitempty"`
 }
@@ -113,7 +113,7 @@ func (g *Graph) Upsert(node Node) error {
 // Endpoints that do not exist yet are auto-upserted as placeholder nodes
 // ({Label: id, EntityType: "unknown"}) inside the same transaction. Agents
 // legitimately link before any extractor ran, and an edge whose endpoints are
-// missing is invisible to every traversal while still occupying storage â€”
+// missing is invisible to every traversal while still occupying storage —
 // the dangling-edge class behind issue #24. Creating the endpoints keeps the
 // invariant "every edge is traversable" unconditional; rejecting the link
 // instead would punish exactly the caller (link-before-extract) the tool is

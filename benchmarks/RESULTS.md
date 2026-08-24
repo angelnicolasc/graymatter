@@ -202,50 +202,50 @@ resolution than that.
 
 ---
 
-## Multi-hop / EnrichedHitRate (P1.2) — medido 2026-08-23
+## Multi-hop / EnrichedHitRate (P1.2) â€” medido 2026-08-23
 
-Extensión medida por `go run ./benchmarks/retrieval_quality` sobre las queries
-congeladas `queries-multihop-v1.jsonl` (q7–q9): preguntas cuyo gold fact no
-comparte NINGÚN término superficial con la query — solo alcanzables mediante un
+ExtensiÃ³n medida por `go run ./benchmarks/retrieval_quality` sobre las queries
+congeladas `queries-multihop-v1.jsonl` (q7â€“q9): preguntas cuyo gold fact no
+comparte NINGÃšN tÃ©rmino superficial con la query â€” solo alcanzables mediante un
 puente de entidad con otro fact recuperado. Predicciones pre-registradas en
 `PREDICTIONS-multihop.md` antes del run.
 
-| Sistema | HitRate (q7–q9) | Dead | p95 |
+| Sistema | HitRate (q7â€“q9) | Dead | p95 |
 |---|---|---|---|
 | graymatter-multihop-baseline | 0% | 0% | ~3ms |
 | graymatter-enriched | **0%** | 0% | ~1.5ms |
 
-Cobertura de puente: **1/78 facts** producen entidades extraíbles por el
-extractor regex — ninguna adyacente a un gold.
+Cobertura de puente: **1/78 facts** producen entidades extraÃ­bles por el
+extractor regex â€” ninguna adyacente a un gold.
 
 ### Gate ADR-003
 
-| Condición | Resultado |
+| CondiciÃ³n | Resultado |
 |---|---|
-| 1. Precision(ID) = 0.70 | PASS (0.928, ver `extraction_precision/RESULTS.md`) |
+| 1. Precision(ID) â‰¥ 0.70 | PASS (0.928, ver `extraction_precision/RESULTS.md`) |
 | 2. EnrichedHitRate > baseline | **FAIL (0% vs 0%)** |
-| 3. ?p95 = +2ms | PASS |
+| 3. Î”p95 â‰¤ +2ms | PASS |
 | 4. Dead = 0% | PASS |
 
-**Veredicto: NO-GO para wiring este ciclo.** La condición bloqueante no es el
-algoritmo de expansión sino la cobertura del extractor sobre prosa técnica real
+**Veredicto: NO-GO para wiring este ciclo.** La condiciÃ³n bloqueante no es el
+algoritmo de expansiÃ³n sino la cobertura del extractor sobre prosa tÃ©cnica real
 (1.3%). Camino de desbloqueo: mejoras deterministas al extractor listadas en
 `extraction_precision/RESULTS.md` (sufijos organizativos, stopwords de
-determinador, Unicode, puntuación final de URLs), luego re-corrida de ambos
-benchmarks. Mientras tanto el grafo sigue siendo útil vía linking explícito
+determinador, Unicode, puntuaciÃ³n final de URLs), luego re-corrida de ambos
+benchmarks. Mientras tanto el grafo sigue siendo Ãºtil vÃ­a linking explÃ­cito
 (`memory_reflect action=link`) y el export v2 no depende del auto-poblado.
 
 ---
 
-## Multi-hop en corpus-v2 — puentes reales, medido 2026-08-23
+## Multi-hop en corpus-v2 â€” puentes reales, medido 2026-08-23
 
-corpus-v1 no tenía entidades recurrentes entre facts (cada filler era una
-oración única), así que la condición 2 era estructuralmente imposible ahí.
+corpus-v1 no tenÃ­a entidades recurrentes entre facts (cada filler era una
+oraciÃ³n Ãºnica), asÃ­ que la condiciÃ³n 2 era estructuralmente imposible ahÃ­.
 `fixtures-v2/` corrige eso: 48 facts con un elenco recurrente realista
-(Maria Rodriguez · Northwind Labs · Ledgerline rollout) — exactamente como se
+(Maria Rodriguez Â· Northwind Labs Â· Ledgerline rollout) â€” exactamente como se
 ve la memoria de un proyecto genuino. Cobertura de puente: 14/48 facts (29%).
 
-Run exploratorio (pre-registro formal se hará sobre los números finales de
+Run exploratorio (pre-registro formal se harÃ¡ sobre los nÃºmeros finales de
 wiring):
 
 | Sistema | HitRate multi-hop | Dead |
@@ -253,6 +253,6 @@ wiring):
 | graymatter-multihop-baseline | 0% | 0% |
 | graymatter-enriched | **67%** | 0% |
 
-?p95 ˜ -0.5ms (ruido). Las tres queries multi-hop se responden vía puente de
+Î”p95 â‰ˆ -0.5ms (ruido). Las tres queries multi-hop se responden vÃ­a puente de
 entidad: la query trae el fact-hub, el hub comparte entidad con el gold, la
-expansión lo incorpora. Condiciones 2–4 del gate ADR-003: PASS.
+expansiÃ³n lo incorpora. Condiciones 2â€“4 del gate ADR-003: PASS.
