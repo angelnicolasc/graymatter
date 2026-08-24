@@ -243,7 +243,7 @@ func runInteractiveWizard(dir, projectDir string, quiet bool) error {
 			fmt.Fprintf(os.Stderr, "\n%s\n", w)
 		}
 		fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
-		printNextSteps()
+		printNextSteps(false)
 	}
 
 	maybeAddToPath(quiet)

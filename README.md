@@ -439,6 +439,8 @@ graymatter server                                 # REST API server (127.0.0.1:8
 graymatter context-sync                           # project top facts into a managed block in AGENTS.md (opt-in)
 graymatter doctor --audit [path]                  # audit any CLAUDE.md/AGENTS.md: tokens, duplicates, staleness, markers
 graymatter daemon run --kg                        # daemon + knowledge-graph auto-population (entities & edges)
+graymatter bench                                  # run the published measurement suites
+graymatter status                                 # facts, recalls, KG state, token ledger, injection estimate
 ```
 
 Global flags: `--dir` (data dir), `--quiet`, `--json`
@@ -846,7 +848,8 @@ GrayMatter saves you conversation history. They stack.
 - [x] Hybrid retrieval (vector + keyword + recency, RRF fusion)
 - [x] CLI: `init remember recall checkpoint export run sessions plugin server`
 - [x] MCP server (Claude Code / Cursor) + `memory_reflect` self-edit tool
-- [x] Knowledge graph — auto-populated when the daemon runs with `--kg` (or `GRAYMATTER_KG=1`): consolidation extracts typed entities and co-mention edges, recall enrichment is budgeted at three labels, and `memory_reflect action=link` adds explicit edges ([#24](https://github.com/angelnicolasc/graymatter/issues/24), [ADR-008](docs/decisions/008-knowledge-graph-wiring.md))
+- [x] Knowledge graph — auto-populated when the daemon runs with `--kg` (or `GRAYMATTER_KG=1`, or the sentinel written by `graymatter init --kg`): consolidation extracts typed entities and co-mention edges, recall enrichment is budgeted at three labels, and `memory_reflect action=link` adds explicit edges ([#24](https://github.com/angelnicolasc/graymatter/issues/24), [ADR-008](docs/decisions/008-knowledge-graph-wiring.md))
+- [x] `graymatter init --kg` — one flag persists knowledge-graph activation for every future daemon, including the ones MCP clients spawn with their own environment
 - [x] Shared memory across agents (`--shared`, `--all` flags, `__shared__` namespace)
 - [x] REST API server mode (`graymatter server`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)

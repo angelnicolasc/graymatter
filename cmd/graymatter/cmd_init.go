@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 )
 
 func initCmd() *cobra.Command {
@@ -21,6 +23,7 @@ func initCmd() *cobra.Command {
 		skipInstructions bool
 		noPath           bool
 		only             string
+		enableKG         bool
 	)
 
 	cmd := &cobra.Command{
@@ -64,6 +67,16 @@ resolves a command through it.`,
 				content := "# GrayMatter Memory\n\nThis directory is managed by GrayMatter.\nDo not edit gray.db manually.\n"
 				if err := os.WriteFile(memoryMD, []byte(content), 0o644); err != nil {
 					return fmt.Errorf("create MEMORY.md: %w", err)
+				}
+			}
+
+			// --kg persists the opt-in as data-dir state so every future
+			// daemon honours it — including the ones MCP clients spawn with
+			// their own environment, which an exported GRAYMATTER_KG never
+			// reaches. Removal is `rm <dir>/kg.auto`; documented as such.
+			if enableKG {
+				if err := os.WriteFile(daemon.KGSentinelPath(dir), nil, 0o644); err != nil {
+					return fmt.Errorf("write kg sentinel: %w", err)
 				}
 			}
 
@@ -178,7 +191,7 @@ resolves a command through it.`,
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
 				}
 				fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
-				printNextSteps()
+				printNextSteps(enableKG)
 			}
 
 			// Putting the executable's directory on the user PATH means every
@@ -211,6 +224,8 @@ resolves a command through it.`,
 	cmd.Flags().BoolVar(&skipOpencode, "skip-opencode", false, "do not touch opencode.jsonc")
 	cmd.Flags().BoolVar(&withAntigravity, "with-antigravity", false, "also wire mcp_config.json for Antigravity")
 	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
+	cmd.Flags().BoolVar(&enableKG, "kg", false,
+		"enable knowledge-graph auto-population: writes "+daemon.KGSentinelFile+" into the data dir so every future daemon extracts entities and co-mention edges (remove the file to turn off)")
 	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
 	cmd.Flags().BoolVar(&noPath, "no-path", false,
 		"do not add the executable's directory to your user PATH")
