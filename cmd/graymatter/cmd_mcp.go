@@ -68,7 +68,7 @@ a loopback address:
 			}
 			defer func() { _ = store.Close() }()
 
-			srv := gmcp.New(store)
+			srv := gmcp.New(store, version)
 
 			if httpAddr != "" {
 				return srv.ServeHTTP(httpAddr, httpOpts...)

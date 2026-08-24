@@ -21,7 +21,7 @@ func newTestServer(t *testing.T) (*Server, *graymatter.Memory) {
 		t.Fatalf("NewWithConfig: %v", err)
 	}
 	t.Cleanup(func() { _ = mem.Close() })
-	return New(NewDirectBackend(mem, nil)), mem
+	return New(NewDirectBackend(mem, nil), "test"), mem
 }
 
 func reflectReq(args map[string]any) mcp.CallToolRequest {

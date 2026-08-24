@@ -30,8 +30,7 @@ import (
 )
 
 const (
-	serverName    = "graymatter"
-	serverVersion = "0.10.0"
+	serverName = "graymatter"
 
 	httpReadHeaderTimeout = 15 * time.Second
 	httpIdleTimeout       = 120 * time.Second
@@ -63,18 +62,30 @@ type KGLinker interface {
 // Server wraps mcp-go with GrayMatter memory handlers.
 type Server struct {
 	backend Backend
+	version string
 	mcpSrv  *server.MCPServer
 }
 
-// New creates a configured MCP server on top of backend.
-func New(backend Backend) *Server {
-	s := &Server{backend: backend}
-	s.mcpSrv = server.NewMCPServer(serverName, serverVersion,
+// New creates a configured MCP server on top of backend, announcing version
+// in the initialize handshake.
+//
+// The version is a parameter rather than a constant here on purpose. It used
+// to be `const serverVersion`, bumped by hand at release time, and it was
+// right in 2 of the first 17 releases: every client that connected to a
+// v0.11.x or v0.12.x binary was told it was talking to 0.10.0. Taking it from
+// the caller means there is only one version string in the binary, so there
+// is nothing left to keep in sync.
+func New(backend Backend, version string) *Server {
+	s := &Server{backend: backend, version: version}
+	s.mcpSrv = server.NewMCPServer(serverName, version,
 		server.WithToolCapabilities(true),
 	)
 	s.registerTools()
 	return s
 }
+
+// Version reports what this server announces to clients.
+func (s *Server) Version() string { return s.version }
 
 // DirectBackend implements Backend against an in-process Memory. The KG
 // linker is optional; without it the link action reports unavailability.

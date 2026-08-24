@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,6 +73,7 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 			}
 
 			checks := []checkResult{
+				checkVersion(),
 				checkBinaryOnPath(),
 				checkDataDir(dataDir),
 				checkStore(dataDir),
@@ -134,6 +136,67 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
 	cmd.Flags().BoolVar(&graphMode, "graph", false, "report knowledge-graph analytics (hubs, orphans, articulation points)")
 	return cmd
+}
+
+// checkVersion reports what this binary is, and whether the binary an MCP
+// client would actually launch is the same one.
+//
+// The second half is the part that matters. MCP clients start `graymatter` by
+// name, so the process your agent talks to is whatever PATH resolves to — not
+// necessarily the build you just ran doctor from. When those differ, every
+// check below describes a binary the agent never loads.
+func checkVersion() checkResult {
+	c := checkResult{Name: "version", Status: "ok", Detail: version + " (this binary)"}
+
+	path, err := exec.LookPath("graymatter")
+	if err != nil {
+		return c
+	}
+	self, err := os.Executable()
+	if err != nil || sameBinary(self, path) {
+		return c
+	}
+	other := binaryVersion(path)
+	if other == "" || other == version {
+		return c
+	}
+
+	c.Status = "warn"
+	c.Detail = fmt.Sprintf("%s (this binary), but %s reports %s", version, path, other)
+	c.Hint = "your MCP client launches the one on PATH, so that is the version your agent is using; reinstall or move the intended build onto PATH"
+	return c
+}
+
+// sameBinary reports whether two paths name the same file on disk.
+func sameBinary(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
+// binaryVersion asks another graymatter build what it is. Best-effort by
+// design: a doctor check must never hang or fail because a stray binary on
+// PATH misbehaves, so every error path returns "" and the check stays quiet.
+func binaryVersion(path string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// cobra prints "graymatter version x.y.z".
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
 }
 
 func checkBinaryOnPath() checkResult {
