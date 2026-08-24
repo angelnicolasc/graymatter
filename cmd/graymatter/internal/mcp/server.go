@@ -259,7 +259,7 @@ func (s *Server) registerTools() {
 	// memory_search
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_search",
-			mcp.WithDescription("Search GrayMatter memory for relevant facts."),
+			mcp.WithDescription("Search GrayMatter memory for relevant facts. Call once for your agent_id, then again with agent_id \"__shared__\" for user-level preferences."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
@@ -325,7 +325,7 @@ func (s *Server) registerTools() {
 	// memory_reflect
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_reflect",
-			mcp.WithDescription("Update your own knowledge graph mid-session. Use when you discover a contradiction, complete a task, or learn a user preference that should persist."),
+			mcp.WithDescription("Add, update (supersede), forget, or link your memories. Use when you notice a contradiction, finish a task, or learn a durable preference that should persist."),
 			writeTool(true),
 			mcp.WithString("action",
 				mcp.Required(),
