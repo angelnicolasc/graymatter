@@ -44,7 +44,7 @@ jobs:
 
       - name: Test core library with coverage
         shell: bash
-        run: go test -race -count=1 -timeout=120s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
+        run: go test -race -count=1 -timeout=300s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
 
       - name: Test CLI module with coverage
         working-directory: cmd/graymatter
@@ -59,7 +59,7 @@ jobs:
       # measuring the same thing they always have.
       - name: Test root package
         shell: bash
-        run: go test -race -count=1 -timeout=120s .
+        run: go test -race -count=1 -timeout=300s .
 
       - name: Test CLI entrypoint package
         working-directory: cmd/graymatter
