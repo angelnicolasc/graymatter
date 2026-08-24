@@ -34,7 +34,8 @@ type RunOptions struct {
 
 	// KG enables knowledge-graph auto-population: consolidation extracts
 	// entities and co-mention edges from stored facts. Also enabled by
-	// GRAYMATTER_KG=1 in the daemon's environment.
+	// GRAYMATTER_KG=1 in the daemon's environment, or by the kg.auto
+	// sentinel written by `graymatter init --kg`.
 	KG bool
 
 	// Logf receives lifecycle log lines. Defaults to a stderr printer.
@@ -81,10 +82,13 @@ func Run(opts RunOptions) error {
 		adapter = kg.NewGraphAdapter(g)
 	}
 
-	// Knowledge-graph auto-population is opt-in (env or --kg). When enabled,
-	// the wired adapter doubles as the store's graph and the regex extractor
-	// feeds consolidation, so nodes AND edges appear without agent effort.
-	if opts.KG || os.Getenv("GRAYMATTER_KG") == "1" {
+	// Knowledge-graph auto-population is opt-in: --kg here, GRAYMATTER_KG=1
+	// in this process's environment, or the kg.auto sentinel left by
+	// `graymatter init --kg`. One decision point, so a daemon spawned by an
+	// MCP client (with the client's environment) and one run by hand always
+	// agree.
+	kgAuto := kgAutoEnabled(absDir, opts.KG)
+	if kgAuto {
 		extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
 		adv.SetKG(adapter, extractor)
 		logf("daemon: knowledge graph auto-population enabled")
@@ -102,6 +106,7 @@ func Run(opts RunOptions) error {
 		db:      db,
 		graph:   graph,
 		adapter: adapter,
+		kgAuto:  kgAuto,
 		stop:    srv.Stop,
 	})
 

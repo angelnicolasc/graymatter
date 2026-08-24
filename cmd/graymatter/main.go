@@ -78,6 +78,8 @@ func main() {
 		rememberCmd(),
 		recallCmd(),
 		checkpointCmd(),
+		benchCmd(),
+		statusCmd(),
 		mcpCmd(),
 		exportCmd(),
 		tuiCmd(),

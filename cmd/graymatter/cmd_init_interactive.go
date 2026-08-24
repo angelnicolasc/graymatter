@@ -243,25 +243,34 @@ func runInteractiveWizard(dir, projectDir string, quiet bool) error {
 			fmt.Fprintf(os.Stderr, "\n%s\n", w)
 		}
 		fmt.Printf("\ngraymatter is a general-purpose MCP server. Any MCP-compatible client works.\n")
-		printNextSteps()
+		pathChanged := maybeAddToPath(quiet)
+		printNextSteps(false, pathChanged)
+	} else {
+		_ = maybeAddToPath(true)
 	}
-
-	maybeAddToPath(quiet)
 	return nil
 }
 
-func maybeAddToPath(quiet bool) {
-	if added, pathErr := addExeDirToUserPath(); pathErr != nil {
+// maybeAddToPath applies the Windows PATH change when refusable-setup allows
+// it, reports the fact without any restart wording (the single authoritative
+// restart instruction lives in printNextSteps), and returns whether the PATH
+// was actually modified.
+func maybeAddToPath(quiet bool) bool {
+	added, pathErr := addExeDirToUserPath()
+	if pathErr != nil {
 		if !quiet {
 			exe, _ := os.Executable()
 			fmt.Fprintf(os.Stderr,
 				"\n  Warning: could not add %s to PATH: %v\n  Add it manually so you can type 'graymatter' from any directory.\n",
 				filepath.Dir(exe), pathErr)
 		}
-	} else if added && !quiet {
-		exe, _ := os.Executable()
-		fmt.Printf("\n  Added %s to your PATH — restart PowerShell to apply\n", filepath.Dir(exe))
+		return false
 	}
+	if added && !quiet {
+		exe, _ := os.Executable()
+		fmt.Printf("  Added %s to your user PATH\n", filepath.Dir(exe))
+	}
+	return added
 }
 
 // askForAgents prints the interactive menu and returns the selected agent IDs.

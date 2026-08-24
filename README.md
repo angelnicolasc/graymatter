@@ -115,6 +115,7 @@ That gap is GrayMatter.
 
 <p align="center">
 <strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
+Remembers what a sliding window forgets: facts planted 96 sessions back come back <strong>83%</strong> of the time.<br>
 Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
 No Docker. No Redis. No API key required for storage.<br><br>
 Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
@@ -237,8 +238,8 @@ settings). Five tools become available:
 
 > Agents using these tools should read **[docs/AGENTS.md](docs/AGENTS.md)** —
 > when to store vs. checkpoint, query patterns, anti-patterns, and the exact
-> per-tool parameter names (heads-up: `memory_reflect` uses `agent`, the
-> other four use `agent_id`).
+> per-tool parameter names (heads-up: `memory_reflect` uses `agent`; the
+> other four use `agent_id`, which `memory_reflect` also accepts as an alias).
 
 ### Any other MCP-compatible client
 
@@ -439,6 +440,8 @@ graymatter server                                 # REST API server (127.0.0.1:8
 graymatter context-sync                           # project top facts into a managed block in AGENTS.md (opt-in)
 graymatter doctor --audit [path]                  # audit any CLAUDE.md/AGENTS.md: tokens, duplicates, staleness, markers
 graymatter daemon run --kg                        # daemon + knowledge-graph auto-population (entities & edges)
+graymatter bench                                  # run the published measurement suites
+graymatter status                                 # facts, recalls, KG state, token ledger, injection estimate
 ```
 
 Global flags: `--dir` (data dir), `--quiet`, `--json`
@@ -604,6 +607,11 @@ longer ones — 114 tokens/query against 95 for a window; with relevance trimmin
 (`MinRelevance`) it returns 4 facts instead of 8 and drops to 64 tokens/query
 while keeping the same recall. Method, per-query detail and the full comparison
 are in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+
+Every figure on this page is machine-checked against a live run in CI —
+`benchmarks/token_count/main_test.go` parses this page and fails when the
+tables diverge from reality — and `graymatter bench` re-runs the same suites
+from the installed binary on your machine.
 
 
 ---
@@ -846,7 +854,8 @@ GrayMatter saves you conversation history. They stack.
 - [x] Hybrid retrieval (vector + keyword + recency, RRF fusion)
 - [x] CLI: `init remember recall checkpoint export run sessions plugin server`
 - [x] MCP server (Claude Code / Cursor) + `memory_reflect` self-edit tool
-- [x] Knowledge graph — auto-populated when the daemon runs with `--kg` (or `GRAYMATTER_KG=1`): consolidation extracts typed entities and co-mention edges, recall enrichment is budgeted at three labels, and `memory_reflect action=link` adds explicit edges ([#24](https://github.com/angelnicolasc/graymatter/issues/24), [ADR-008](docs/decisions/008-knowledge-graph-wiring.md))
+- [x] Knowledge graph — auto-populated when the daemon runs with `--kg` (or `GRAYMATTER_KG=1`, or the sentinel written by `graymatter init --kg`): consolidation extracts typed entities and co-mention edges, recall enrichment is budgeted at three labels, and `memory_reflect action=link` adds explicit edges ([#24](https://github.com/angelnicolasc/graymatter/issues/24), [ADR-008](docs/decisions/008-knowledge-graph-wiring.md))
+- [x] `graymatter init --kg` — one flag persists knowledge-graph activation for every future daemon, including the ones MCP clients spawn with their own environment
 - [x] Shared memory across agents (`--shared`, `--all` flags, `__shared__` namespace)
 - [x] REST API server mode (`graymatter server`)
 - [x] Plugin system (JSON line protocol, `graymatter plugin install/list/remove`)

@@ -125,8 +125,15 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	if !ok || action == "" {
 		return toolError("action is required")
 	}
+	// The schema names this parameter `agent`, but the other four tools use
+	// `agent_id` and models generalize across a toolset — an alias costs one
+	// line and saves the silent "agent is required" failure. Canonical stays
+	// `agent`; docs/AGENTS.md documents both as accepted.
 	agentID, ok := getString(args, "agent")
 	if !ok || agentID == "" {
+		agentID, _ = getString(args, "agent_id")
+	}
+	if agentID == "" {
 		return toolError("agent is required")
 	}
 	// text and target are validated per-action below: forget works with

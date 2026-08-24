@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
@@ -134,6 +135,15 @@ func (r *recordingStore) IsReadOnly() bool { r.rec("IsReadOnly"); return true }
 func (r *recordingStore) Ready() error     { r.rec("Ready"); return nil }
 func (r *recordingStore) Close() error     { r.rec("Close"); return nil }
 
+func (r *recordingStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
+	r.rec("StoreOverview")
+	return &daemon.StoreOverviewResponse{TotalAgents: 1}, nil
+}
+func (r *recordingStore) KGState() (*daemon.KGStateResponse, error) {
+	r.rec("KGState")
+	return &daemon.KGStateResponse{AutoPopulate: true, Nodes: 2, Edges: 1}, nil
+}
+
 // TestReconnectingStore_DelegatesEveryMethod checks that each wrapper forwards
 // its arguments, in order, to the wrapped store.
 //
@@ -181,6 +191,12 @@ func TestReconnectingStore_DelegatesEveryMethod(t *testing.T) {
 		{"TokenRecord", func(r *reconnectingStore) {
 			_ = r.TokenRecord("agent-1", "model-2", 3, 4, 5, 6)
 		}, []any{"agent-1", "model-2", uint64(3), uint64(4), uint64(5), uint64(6)}},
+		{"StoreOverview", func(r *reconnectingStore) {
+			_, _ = r.StoreOverview()
+		}, nil},
+		{"KGState", func(r *reconnectingStore) {
+			_, _ = r.KGState()
+		}, nil},
 		{"IsReadOnly", func(r *reconnectingStore) { _ = r.IsReadOnly() }, nil},
 		{"Ready", func(r *reconnectingStore) { _ = r.Ready() }, nil},
 	}

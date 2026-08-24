@@ -17,6 +17,8 @@ consequences, reversal condition.
 | [005](005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword | Accepted |
 | [006](006-configurable-signal-weights.md) | Retrieval signal weights are configurable | Accepted |
 | [007](007-supersede-tombstones.md) | Contradictions are resolved by tombstone, never by delete | Accepted |
+| [008](008-knowledge-graph-wiring.md) | Knowledge-graph auto-population ships gated (`--kg` / env) | Accepted |
+| [009](009-kg-sentinel-activation.md) | KG activation persists as data-dir state via `init --kg` | Accepted |
 
 ## Writing a new one
 

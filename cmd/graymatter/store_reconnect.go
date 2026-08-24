@@ -298,6 +298,26 @@ func (r *reconnectingStore) TokenRecord(agent, model string, input, output, cach
 	})
 }
 
+func (r *reconnectingStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
+	var out *daemon.StoreOverviewResponse
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.StoreOverview()
+		return e
+	})
+	return out, err
+}
+
+func (r *reconnectingStore) KGState() (*daemon.KGStateResponse, error) {
+	var out *daemon.KGStateResponse
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.KGState()
+		return e
+	})
+	return out, err
+}
+
 // IsReadOnly is always false through the daemon: every client is a full peer.
 // The wrapper only ever holds daemon handles, so this cannot be anything else.
 func (r *reconnectingStore) IsReadOnly() bool { return r.snapshot().IsReadOnly() }

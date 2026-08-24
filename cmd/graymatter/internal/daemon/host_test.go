@@ -136,6 +136,46 @@ func TestHostService_CoreSurface(t *testing.T) {
 		t.Fatalf("AuditWrite: %v", err)
 	}
 
+	// --- aggregated views ---
+	// The Delete above emptied agent-a; seed one live fact so the overview
+	// has something real to aggregate.
+	if err := c.Remember(ctx, "agent-a", "overview fact"); err != nil {
+		t.Fatalf("Remember for overview: %v", err)
+	}
+	overview, err := c.StoreOverview()
+	if err != nil {
+		t.Fatalf("StoreOverview: %v", err)
+	}
+	if overview.TotalAgents < 1 || overview.TotalLiveFacts < 1 {
+		t.Fatalf("StoreOverview = %+v, want at least the seeded agent fact", overview)
+	}
+	found := false
+	for _, a := range overview.Agents {
+		if a.Agent == "agent-a" && a.LiveFacts >= 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("StoreOverview missing agent-a row: %+v", overview.Agents)
+	}
+
+	kgState, err := c.KGState()
+	if err != nil {
+		t.Fatalf("KGState: %v", err)
+	}
+	// The graph is opened unconditionally; auto-population stays off unless
+	// the daemon was started with --kg/GRAYMATTER_KG, which connectFresh does
+	// not set. The two explicit KGUpserts above must show up regardless.
+	if kgState.AutoPopulate {
+		t.Error("KGState.AutoPopulate true without --kg")
+	}
+	if kgState.Nodes < 2 {
+		t.Errorf("KGState.Nodes = %d, want >= 2 from explicit upserts", kgState.Nodes)
+	}
+	if kgState.Edges < 1 {
+		t.Errorf("KGState.Edges = %d, want >= 1 from explicit link", kgState.Edges)
+	}
+
 	// --- token ledger ---
 	if err := c.TokenRecord("agent-a", "claude-sonnet-4-6", 100, 50, 10, 5); err != nil {
 		t.Fatalf("TokenRecord: %v", err)
