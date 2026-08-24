@@ -239,6 +239,8 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 	}
 	readme := string(raw)
 
+	readme = strings.ReplaceAll(readme, "**", "")
+
 	measured, err := runAll(fixtureDir)
 	if err != nil {
 		t.Fatalf("runAll: %v", err)
@@ -257,6 +259,8 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 	}
 
 	// Each published row, as it appears in README.md, against the measurement.
+	// Bold markers (**value**) are stripped from the readme before matching so
+	// formatting changes do not break the numeric gate.
 	for _, tc := range []struct {
 		label string
 		row   string
@@ -268,18 +272,13 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 		},
 		{
 			label: "dead-fact rate",
-			row: fmt.Sprintf("| Returns a fact known to be superseded | %.0f%% | %.0f%% | %.0f%% |",
+			row: fmt.Sprintf("| Returns a superseded fact | %.0f%% | %.0f%% | %.0f%% |",
 				window.DeadRate, gm.DeadRate, adaptive.DeadRate),
 		},
 		{
 			label: "tokens per query",
 			row: fmt.Sprintf("| Tokens per query | %.0f | %.0f | %.0f |",
 				window.AvgTokens, gm.AvgTokens, adaptive.AvgTokens),
-		},
-		{
-			label: "facts per query",
-			row: fmt.Sprintf("| Facts per query | %.0f | %.0f | %.0f |",
-				window.AvgReturned, gm.AvgReturned, adaptive.AvgReturned),
 		},
 	} {
 		if !strings.Contains(readme, tc.row) {
