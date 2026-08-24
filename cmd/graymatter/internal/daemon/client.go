@@ -274,6 +274,25 @@ func (c *Client) Shutdown() error {
 	return c.CallService(HostServiceName, "Shutdown", &ShutdownRequest{}, &ShutdownResponse{}, 5*time.Second)
 }
 
+// StoreOverview fetches the per-agent fact aggregates for status screens in
+// one round-trip.
+func (c *Client) StoreOverview() (*StoreOverviewResponse, error) {
+	var resp StoreOverviewResponse
+	if err := c.hostCall("StoreOverview", &StoreOverviewRequest{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// KGState reports auto-population status and current graph size.
+func (c *Client) KGState() (*KGStateResponse, error) {
+	var resp KGStateResponse
+	if err := c.hostCall("KGState", &KGStateRequest{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Remember stores a fact with full Remember semantics (the daemon backend
 // routes Put through Memory.Remember, async consolidation included).
 func (c *Client) Remember(ctx context.Context, agentID, text string) error {

@@ -54,6 +54,9 @@ type cliStore interface {
 	TokenSummary(days int) (harness.TokenUsageSummary, error)
 	TokenRecord(agent, model string, input, output, cacheRead, cacheWrite uint64) error
 	SessionSave(hs harness.HarnessSession) error
+	// Aggregated views for status screens. Both are read-only snapshots.
+	StoreOverview() (*daemon.StoreOverviewResponse, error)
+	KGState() (*daemon.KGStateResponse, error)
 
 	// IsReadOnly reports a degraded direct open (--no-daemon while another
 	// process holds the write lock). Always false through the daemon.
@@ -74,6 +77,16 @@ type daemonStore struct {
 }
 
 func (d daemonStore) IsReadOnly() bool { return false }
+
+// StoreOverview and KGState pass through to the host service; the daemon owns
+// the aggregation because it owns the bbolt handle.
+func (d daemonStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
+	return d.Client.StoreOverview()
+}
+
+func (d daemonStore) KGState() (*daemon.KGStateResponse, error) {
+	return d.Client.KGState()
+}
 
 // ExportGraphObsidian runs host-side: the graph lives on the daemon's bbolt
 // handle, so only the destination path crosses the wire.
@@ -293,6 +306,68 @@ func (d *directStore) TokenRecord(agent, model string, input, output, cacheRead,
 
 func (d *directStore) SessionSave(hs harness.HarnessSession) error {
 	return harness.SaveSessionDB(d.store.DB(), hs)
+}
+
+// StoreOverview computes the same aggregates the daemon's Host.StoreOverview
+// returns, in-process. The two must agree; TestStatus_ParityAcrossModes pins
+// that on a seeded store.
+func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
+	agents, err := d.store.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	resp := &daemon.StoreOverviewResponse{Agents: make([]daemon.AgentSummary, 0, len(agents))}
+	for _, a := range agents {
+		facts, err := d.store.List(a)
+		if err != nil {
+			return nil, err
+		}
+		sum := daemon.AgentSummary{Agent: a}
+		var weightSum float64
+		for _, f := range facts {
+			if f.SupersededBy != "" {
+				resp.TotalTombstones++
+				continue
+			}
+			sum.LiveFacts++
+			weightSum += f.Weight
+			if sum.OldestAt.IsZero() || f.CreatedAt.Before(sum.OldestAt) {
+				sum.OldestAt = f.CreatedAt
+			}
+			if f.CreatedAt.After(sum.NewestAt) {
+				sum.NewestAt = f.CreatedAt
+			}
+		}
+		if sum.LiveFacts > 0 {
+			sum.AvgWeight = weightSum / float64(sum.LiveFacts)
+		}
+		resp.TotalAgents++
+		resp.TotalLiveFacts += sum.LiveFacts
+		resp.Agents = append(resp.Agents, sum)
+	}
+	resp.PendingVectorOps = d.store.PendingVectorCount()
+	return resp, nil
+}
+
+// KGState mirrors the daemon's view: the graph is openable on any bbolt
+// handle; auto-population in direct mode is env-gated.
+func (d *directStore) KGState() (*daemon.KGStateResponse, error) {
+	resp := &daemon.KGStateResponse{AutoPopulate: os.Getenv("GRAYMATTER_KG") == "1"}
+	g, err := kg.Open(d.store.DB())
+	if err != nil {
+		return resp, nil // no graph yet: empty, not an error
+	}
+	nodes, err := g.AllNodes()
+	if err != nil {
+		return nil, err
+	}
+	resp.Nodes = len(nodes)
+	edges, err := g.AllEdges()
+	if err != nil {
+		return nil, err
+	}
+	resp.Edges = len(edges)
+	return resp, nil
 }
 
 func (d *directStore) IsReadOnly() bool { return d.store.IsReadOnly() }

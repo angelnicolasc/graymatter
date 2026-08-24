@@ -40,6 +40,7 @@ type Host struct {
 	db      *bolt.DB
 	graph   *kg.Graph
 	adapter *kg.GraphAdapter
+	kgAuto  bool // whether consolidation feeds the graph (opts.KG / env / sentinel)
 	stop    func() // initiates graceful daemon shutdown
 }
 
@@ -98,6 +99,31 @@ type TokenSummaryResponse struct{ S harness.TokenUsageSummary }
 
 type ShutdownRequest struct{}
 type ShutdownResponse struct{}
+
+// AgentSummary is one agent's row in a StoreOverview.
+type AgentSummary struct {
+	Agent     string    `json:"agent"`
+	LiveFacts int       `json:"live_facts"`
+	AvgWeight float64   `json:"avg_weight"`
+	OldestAt  time.Time `json:"oldest_at,omitempty"`
+	NewestAt  time.Time `json:"newest_at,omitempty"`
+}
+
+type StoreOverviewRequest struct{}
+type StoreOverviewResponse struct {
+	TotalAgents      int            `json:"total_agents"`
+	TotalLiveFacts   int            `json:"total_live_facts"`
+	TotalTombstones  int            `json:"total_tombstones"`
+	PendingVectorOps int            `json:"pending_vector_ops"`
+	Agents           []AgentSummary `json:"agents"`
+}
+
+type KGStateRequest struct{}
+type KGStateResponse struct {
+	AutoPopulate bool `json:"auto_populate"`
+	Nodes        int  `json:"nodes"`
+	Edges        int  `json:"edges"`
+}
 
 // --- handlers ---------------------------------------------------------------
 
@@ -252,6 +278,74 @@ func (h *Host) TokenSummary(req *TokenSummaryRequest, resp *TokenSummaryResponse
 		return err
 	}
 	resp.S = s
+	return nil
+}
+
+// StoreOverview aggregates per-agent fact statistics for `graymatter status`
+// in one call, so a status screen costs one round-trip instead of N.
+// Tombstones are excluded from live counts and weights: they never reach a
+// prompt and reporting them as memory would overstate the store.
+func (h *Host) StoreOverview(req *StoreOverviewRequest, resp *StoreOverviewResponse) error {
+	adv := h.mem.Advanced()
+	if adv == nil {
+		return errors.New("store not initialised")
+	}
+	agents, err := adv.ListAgents()
+	if err != nil {
+		return err
+	}
+	resp.Agents = make([]AgentSummary, 0, len(agents))
+	for _, a := range agents {
+		facts, err := adv.List(a)
+		if err != nil {
+			return err
+		}
+		sum := AgentSummary{Agent: a}
+		var weightSum float64
+		for _, f := range facts {
+			if f.SupersededBy != "" {
+				resp.TotalTombstones++
+				continue
+			}
+			sum.LiveFacts++
+			weightSum += f.Weight
+			if sum.OldestAt.IsZero() || f.CreatedAt.Before(sum.OldestAt) {
+				sum.OldestAt = f.CreatedAt
+			}
+			if f.CreatedAt.After(sum.NewestAt) {
+				sum.NewestAt = f.CreatedAt
+			}
+		}
+		if sum.LiveFacts > 0 {
+			sum.AvgWeight = weightSum / float64(sum.LiveFacts)
+		}
+		resp.TotalAgents++
+		resp.TotalLiveFacts += sum.LiveFacts
+		resp.Agents = append(resp.Agents, sum)
+	}
+	resp.PendingVectorOps = adv.PendingVectorCount()
+	return nil
+}
+
+// KGState reports whether auto-population is on for this daemon and how much
+// graph exists right now. The graph itself is opened unconditionally by the
+// daemon; only extraction is gated, which is why Nodes/Edges can be non-zero
+// while AutoPopulate is false (explicit agent links populate it too).
+func (h *Host) KGState(req *KGStateRequest, resp *KGStateResponse) error {
+	resp.AutoPopulate = h.kgAuto
+	if h.graph == nil {
+		return nil
+	}
+	nodes, err := h.graph.AllNodes()
+	if err != nil {
+		return err
+	}
+	resp.Nodes = len(nodes)
+	edges, err := h.graph.AllEdges()
+	if err != nil {
+		return err
+	}
+	resp.Edges = len(edges)
 	return nil
 }
 

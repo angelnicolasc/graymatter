@@ -84,7 +84,8 @@ func Run(opts RunOptions) error {
 	// Knowledge-graph auto-population is opt-in (env or --kg). When enabled,
 	// the wired adapter doubles as the store's graph and the regex extractor
 	// feeds consolidation, so nodes AND edges appear without agent effort.
-	if opts.KG || os.Getenv("GRAYMATTER_KG") == "1" {
+	kgAuto := opts.KG || os.Getenv("GRAYMATTER_KG") == "1"
+	if kgAuto {
 		extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
 		adv.SetKG(adapter, extractor)
 		logf("daemon: knowledge graph auto-population enabled")
@@ -102,6 +103,7 @@ func Run(opts RunOptions) error {
 		db:      db,
 		graph:   graph,
 		adapter: adapter,
+		kgAuto:  kgAuto,
 		stop:    srv.Stop,
 	})
 
