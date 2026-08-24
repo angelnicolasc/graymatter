@@ -8,6 +8,37 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### What users get
+
+This release attacks the first five minutes: the gap between "installed" and
+"the agent actually remembers something".
+
+- **Agents get briefed by the protocol, not just by markdown.** The MCP
+  server now sends session instructions in the initialize handshake, so
+  clients that never load CLAUDE.md still call the memory tools — the
+  failure mode behind issues #3 and #14 loses its biggest blind spot.
+- **Self-edits stopped asking for permission.** `memory_reflect` no longer
+  advertises itself as destructive; hosts that gate destructive tools were
+  prompting on every preference an agent tried to save. The real guardrails
+  moved into the handler where they are testable (exact-match forget,
+  tombstones, audit trail).
+- **`graymatter status` answers "is this thing working?"** in one screen:
+  facts and recalls per agent, KG state with its enable command when off,
+  the 30-day token ledger (labelled for what it measures), and what a recall
+  costs today against your own store.
+- **`graymatter bench` makes the published numbers yours.** The suites that
+  gate this README run from the installed binary — no Go toolchain, no clone
+  — and `--store` measures your actual memory instead of the synthetic
+  corpus.
+- **Knowledge-graph population is one flag away.** `graymatter init --kg`
+  persists the choice so daemons spawned by MCP clients honour it too;
+  doctor reports the state either way ([ADR-009](docs/decisions/009-kg-sentinel-activation.md)).
+- **Setup says one restart, once.** The Windows PATH note folds into the
+  restart step it belongs to, and doctor's restart hint survives a CLI
+  `remember` having created the database early.
+
+### Engineering detail
+
 Nothing yet.
 
 ---
