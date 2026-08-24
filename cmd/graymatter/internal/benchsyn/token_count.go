@@ -1,29 +1,25 @@
-// Package bench holds the measurement cores the repository publishes numbers
-// from, so that two entry points cannot drift apart while claiming to measure
-// the same thing: `go run ./benchmarks/token_count` (the documented
-// reproduction path) and `graymatter bench` (the installed-binary path added
-// so users do not need a Go toolchain to audit the claims).
+// Package benchsyn runs the published token-efficiency suite inside the CLI
+// binary, so `graymatter bench` can reproduce the numbers without a Go
+// toolchain or a repository clone.
 //
-// The corpus, the insertion protocol (fixed-seed shuffle + one-day-per-session
-// backdating) and the arithmetic moved here verbatim from the original
-// benchmark main; benchmarks/token_count/main_test.go still gates every
-// published table against a live run of this code.
+// Why this lives in the cmd module while benchmarks/token_count (root module)
+// carries its own copy of the same corpus: CI builds the CLI with GOWORK=off,
+// resolving the library from the last tagged release — a cmd-module import of
+// a brand-new root package cannot compile until the next tag lands. Duplicating
+// is the price of that invariant; corpus_sync_test.go makes the duplication
+// safe by comparing this package's corpus byte-for-byte against the benchmark's,
+// on every run.
 //
-// It runs entirely in-process with no LLM or network requirements — the
-// keyword embedder is used so results are deterministic and reproducible in
-// any environment.
+// The measurement itself (fixed-seed shuffle, one-day-per-session backdating,
+// per-row fresh store) mirrors benchmarks/token_count exactly; the README gate
+// test there keeps both honest against the published tables.
 //
 // Model: each "session" stores ONE observation — a paragraph extracted from a
 // realistic agent interaction, ~50-70 words. "30 sessions" means 30 stored
 // observations. "Full injection" = ALL stored observations concatenated.
 // "GrayMatter Recall" = top-8 most relevant observations for the given query.
 // Token counts are approximated at 1.33 tokens/word (matches tiktoken within ±10%).
-//
-// What this does NOT measure is in docs/benchmarks.md and is worth reading
-// before quoting a number from it: relevance is never checked, so a system
-// returning 8 random facts would score the same reduction, and full-history
-// injection is the weakest baseline available.
-package bench
+package benchsyn
 
 import (
 	"context"

@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/angelnicolasc/graymatter/internal/bench"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/benchsyn"
 	"github.com/angelnicolasc/graymatter/internal/tokens"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -150,11 +150,11 @@ func renderStoreBench(out io.Writer, dir, mode string, rows []storeAgentRow, pro
 
 func encodeStoreBenchJSON(out io.Writer, dir, mode string, rows []storeAgentRow, probe *storeProbeResult) error {
 	payload := struct {
-		Suite    string          `json:"suite"`
-		DataDir  string          `json:"data_dir"`
-		Mode     string          `json:"mode"`
-		Agents   []storeAgentRow `json:"agents"`
-		Probe    *storeProbeResult `json:"probe,omitempty"`
+		Suite   string            `json:"suite"`
+		DataDir string            `json:"data_dir"`
+		Mode    string            `json:"mode"`
+		Agents  []storeAgentRow   `json:"agents"`
+		Probe   *storeProbeResult `json:"probe,omitempty"`
 	}{Suite: "store", DataDir: dir, Mode: mode, Agents: rows, Probe: probe}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -222,7 +222,7 @@ func runBench(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 
 	start := time.Now()
-	results, err := bench.RunTokenCount()
+	results, err := benchsyn.RunTokenCount()
 	if err != nil {
 		return fmt.Errorf("token-count suite: %w", err)
 	}
@@ -242,7 +242,7 @@ func runBench(cmd *cobra.Command) error {
 			TokensPerWord float64 `json:"tokens_per_word"`
 			DurationMS    int64   `json:"duration_ms"`
 			Results       []row   `json:"results"`
-		}{Suite: "token-count", Query: bench.TokenQuery, TopK: bench.TokenTopK,
+		}{Suite: "token-count", Query: benchsyn.TokenQuery, TopK: benchsyn.TokenTopK,
 			TokensPerWord: tokens.PerWord, DurationMS: elapsed.Milliseconds()}
 		for _, r := range results {
 			payload.Results = append(payload.Results, row{
@@ -255,7 +255,7 @@ func runBench(cmd *cobra.Command) error {
 		return enc.Encode(payload)
 	}
 
-	fmt.Fprint(out, bench.RenderTokenReport(results, elapsed))
+	fmt.Fprint(out, benchsyn.RenderTokenReport(results, elapsed))
 	return nil
 }
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/angelnicolasc/graymatter/internal/bench"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/benchsyn"
 )
 
 // TestBench_SyntheticJSON executes the real cobra command and asserts the
@@ -49,12 +49,12 @@ func TestBench_SyntheticJSON(t *testing.T) {
 	if payload.TopK != 8 || payload.TokensPerWord != 1.33 {
 		t.Errorf("top_k=%d tokens_per_word=%v, want 8 / 1.33", payload.TopK, payload.TokensPerWord)
 	}
-	if len(payload.Results) != len(bench.SessionCounts) {
-		t.Fatalf("got %d rows, want %d", len(payload.Results), len(bench.SessionCounts))
+	if len(payload.Results) != len(benchsyn.SessionCounts) {
+		t.Fatalf("got %d rows, want %d", len(payload.Results), len(benchsyn.SessionCounts))
 	}
 
 	for i, r := range payload.Results {
-		wantSessions := bench.SessionCounts[i]
+		wantSessions := benchsyn.SessionCounts[i]
 		if r.Sessions != wantSessions {
 			t.Errorf("row %d sessions = %d, want %d", i, r.Sessions, wantSessions)
 		}
