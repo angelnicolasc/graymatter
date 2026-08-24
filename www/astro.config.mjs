@@ -6,9 +6,8 @@ import starlightLlmsTxt from 'starlight-llms-txt';
 
 export default defineConfig({
   // Canonical site URL used for the sitemap and llms.txt.
-  // After the first deploy, Workers prints the exact *.workers.dev URL —
-  // update this line (or point it at the final custom domain) and redeploy.
-  site: 'https://graymatter-docs.workers.dev',
+  // Update this line if the Worker name or account subdomain changes.
+  site: 'https://graymatter.nickcerutti.workers.dev',
   integrations: [
     starlight({
       title: 'GrayMatter',
