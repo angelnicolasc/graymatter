@@ -195,7 +195,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 					}
 				}
 				for i := 0; i < len(links); i++ {
-					if linkErr := writer.LinkEdges(links[i].From, links[i].To, links[i].Relation); linkErr != nil {
+					if linkErr := writer.LinkEdges([]EntityLink{links[i]}, f.ID); linkErr != nil {
 						if s.cfg.OnConsolidateError != nil {
 							s.cfg.OnConsolidateError(agentID, fmt.Errorf("link edge: %w", linkErr))
 						}

@@ -30,6 +30,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   are auto-upserted as placeholder nodes (`EntityType: "unknown"`) inside the
   same transaction, so every edge is traversable no matter when the agent
   links relative to extraction.
+- **`graymatter doctor --graph`** — knowledge-graph analytics in-binary:
+  hubs by degree, articulation points and bridges (Tarjan), orphans, and a
+  declared connectivity ratio. Human + JSON output.
+- **TUI Graph tab v2** — stats header (entities / edges / orphans) above the
+  node list; honest empty-state pointing at `daemon run --kg`.
+- **`Fact.Confidence` (verified|inferred|unverified)** — epistemic metadata
+  declared at write time via `Store.PutConfident`; surfaced in the Obsidian
+  export frontmatter and the TUI fact detail. Display-only: never affects
+  ranking, decay or pruning.
+- **Edge provenance receipts** — consolidation attributes every co-mention
+  edge to the fact that produced it (`sources`, capped at ten); Obsidian
+  entity notes print receipt counts.
+- **`benchmarks/fixtures-v2`** — recurring-entity corpus for multi-hop
+  measurement; enriched recall answers 67% vs 0% baseline there (RESULTS.md).
 - **Wiring contract tests** pin what shipped builds do and do not do with the
   knowledge graph: defaults never auto-wire extraction, explicit `SetKG`
   drives node upserts during consolidation, and today's engine has no path

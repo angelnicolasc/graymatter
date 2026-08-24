@@ -38,6 +38,15 @@ type Fact struct {
 	// Added in v0.10.0. Facts written by earlier versions have no
 	// superseded_by key and load as live.
 	SupersededBy string `json:"superseded_by,omitempty"`
+
+	// Confidence records the agent's own epistemic stance toward this fact:
+	// "verified", "inferred" or "unverified". Empty means inferred. It is
+	// metadata declared at write time and surfaced by exports and the TUI;
+	// it never affects ranking, decay or pruning.
+	//
+	// Added in v0.12.0. Facts written by earlier versions have no confidence
+	// key and load as inferred.
+	Confidence string `json:"confidence,omitempty"`
 }
 
 // SupersededByAgent is the SupersededBy marker for a fact an agent retired

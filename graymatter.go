@@ -319,6 +319,9 @@ type AdvancedStore interface {
 	// auto-population behaviour construct the graph and extractor themselves
 	// and hand them in here.
 	SetKG(graph memory.GraphAccessor, extractor memory.EntityExtractorAccessor)
+	// PutConfident stores a fact with an explicit epistemic confidence
+	// (verified|inferred|unverified) — pass-through of Store.PutConfident.
+	PutConfident(ctx context.Context, agentID, text, confidence string) error
 	// IsReadOnly reports whether the store was opened in read-only mode.
 	// Mutating methods (Put, Delete, UpdateFact) return ErrStoreReadOnly when true.
 	IsReadOnly() bool

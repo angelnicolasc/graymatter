@@ -138,10 +138,12 @@ type EntityRef struct {
 }
 
 // EntityLink is a co-mention relationship between two extracted entities.
+// Sources carries the fact IDs that produced the link (set by consolidation).
 type EntityLink struct {
 	From     string
 	To       string
 	Relation string
+	Sources  []string
 }
 
 // TypedEntityExtractor is an optional capability: extractors that preserve
@@ -160,7 +162,9 @@ type TypedEntityExtractor interface {
 //
 // Added in v0.12.0.
 type EdgeWriter interface {
-	LinkEdges(from, to, relation string) error
+	// LinkEdges persists the given co-mention links, attributing them to
+	// sourceFactID so every connection keeps its receipts.
+	LinkEdges(links []EntityLink, sourceFactID string) error
 }
 
 // Store is the central storage layer. It combines bbolt for durable
@@ -341,6 +345,36 @@ func (s *Store) IsReadOnly() bool { return s.readOnly }
 //     marker remains and the background reconciler will retry it; the caller
 //     still sees nil because bbolt is the source of truth.
 //
+// PutConfident stores a fact with an explicit epistemic confidence:
+// "verified", "inferred" or "unverified" ("" defaults to inferred). The
+// value is metadata for humans and exports; it never affects ranking,
+// decay or pruning.
+//
+// Added in v0.12.0.
+func (s *Store) PutConfident(ctx context.Context, agentID, text, confidence string) error {
+	switch confidence {
+	case "", "verified", "inferred", "unverified":
+	default:
+		return fmt.Errorf("confidence must be verified|inferred|unverified, got %q", confidence)
+	}
+	if err := s.Put(ctx, agentID, text); err != nil {
+		return err
+	}
+	// Attach the marker by updating the just-written fact in place: one
+	// extra transaction on the cold path, zero API churn.
+	stored, err := s.List(agentID)
+	if err != nil {
+		return err
+	}
+	for i := range stored {
+		if stored[i].Text == text && stored[i].Confidence == "" {
+			stored[i].Confidence = confidence
+			return s.UpdateFact(agentID, stored[i])
+		}
+	}
+	return nil
+}
+
 // This closes the crash window between the bbolt write and the vector write:
 // after a crash, reconcileVectors() at Open() drains the pending bucket.
 func (s *Store) Put(ctx context.Context, agentID, text string) error {

@@ -40,7 +40,13 @@ type Edge struct {
 	Relation  string    `json:"relation"` // mentioned_in / related_to / contradicts
 	CreatedAt time.Time `json:"created_at"`
 	Weight    float64   `json:"weight"`
+	// Sources lists (capped at 10) the fact IDs that produced this edge â€”
+	// every connection is traceable to the facts that mention it.
+	Sources []string `json:"sources,omitempty"`
 }
+
+// maxEdgeSources caps provenance receipts per edge.
+const maxEdgeSources = 10
 
 // Graph is a bbolt-backed, in-process knowledge graph.
 // It reuses the existing gray.db handle via Store.DB().
@@ -107,7 +113,7 @@ func (g *Graph) Upsert(node Node) error {
 // Endpoints that do not exist yet are auto-upserted as placeholder nodes
 // ({Label: id, EntityType: "unknown"}) inside the same transaction. Agents
 // legitimately link before any extractor ran, and an edge whose endpoints are
-// missing is invisible to every traversal while still occupying storage —
+// missing is invisible to every traversal while still occupying storage â€”
 // the dangling-edge class behind issue #24. Creating the endpoints keeps the
 // invariant "every edge is traversable" unconditional; rejecting the link
 // instead would punish exactly the caller (link-before-extract) the tool is
@@ -146,11 +152,35 @@ func (g *Graph) Link(edge Edge) error {
 				return err
 			}
 		}
+		eb := tx.Bucket(bucketEdges)
+		if len(edge.Sources) > 0 {
+			// Merge provenance into any existing edge so receipts accumulate
+			// across facts instead of being overwritten (capped, oldest kept).
+			if raw := eb.Get([]byte(key)); raw != nil {
+				var old Edge
+				if json.Unmarshal(raw, &old) == nil && len(old.Sources) > 0 {
+					seenSrc := map[string]bool{}
+					for _, s := range old.Sources {
+						seenSrc[s] = true
+					}
+					for _, s := range edge.Sources {
+						if !seenSrc[s] && len(old.Sources) < maxEdgeSources {
+							old.Sources = append(old.Sources, s)
+							seenSrc[s] = true
+						}
+					}
+					edge.Sources = old.Sources
+				}
+			}
+			if len(edge.Sources) > maxEdgeSources {
+				edge.Sources = edge.Sources[:maxEdgeSources]
+			}
+		}
 		data, err := json.Marshal(edge)
 		if err != nil {
 			return err
 		}
-		return tx.Bucket(bucketEdges).Put([]byte(key), data)
+		return eb.Put([]byte(key), data)
 	})
 }
 
@@ -298,11 +328,15 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		content := fmt.Sprintf("---\nid: %s\nentity_type: %s\nfirst_seen: %s\nlast_seen: %s\nweight: %.4f\n---\n\n# %s\n\n**Type:** %s\n",
 			n.ID, n.EntityType, n.FirstSeen.Format(time.RFC3339), n.LastSeen.Format(time.RFC3339), n.Weight, n.Label, n.EntityType)
 
-		// Add related nodes as backlinks.
+		// Add related nodes as backlinks, with provenance receipt counts.
 		var related []string
 		for _, e := range edges {
 			if e.From == n.ID {
-				related = append(related, fmt.Sprintf("- [[%s]] (%s)", e.To, e.Relation))
+				line := fmt.Sprintf("- [[%s]] (%s)", e.To, e.Relation)
+				if len(e.Sources) > 0 {
+					line += fmt.Sprintf(" · %d receipt(s)", len(e.Sources))
+				}
+				related = append(related, line)
 			}
 		}
 		if len(related) > 0 {
@@ -313,6 +347,12 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		if err := os.WriteFile(filepath.Join(outDir, fname), []byte(content), 0o644); err != nil {
 			return fmt.Errorf("kg: write node file: %w", err)
 		}
+	}
+
+	// MOC (Map of Content) grouped by entity type, so the vault has a single
+	// entry point into the graph.
+	if err := writeEntitiesMOC(outDir, nodes); err != nil {
+		return fmt.Errorf("kg: write entities index: %w", err)
 	}
 
 	// Write Obsidian canvas JSON.
@@ -425,6 +465,40 @@ func (g *Graph) allEdges() ([]Edge, error) {
 
 func edgeKey(from, to, relation string) string {
 	return from + "|" + to + "|" + relation
+}
+
+// writeEntitiesMOC writes _graphs/entities-index.md: one section per entity
+// type linking every entity note, so the vault has a single graph entry point.
+func writeEntitiesMOC(outDir string, nodes []Node) error {
+	mocDir := filepath.Join(outDir, "_graphs")
+	if err := os.MkdirAll(mocDir, 0o755); err != nil {
+		return err
+	}
+	byType := map[string][]Node{}
+	types := []string{}
+	for _, n := range nodes {
+		t := n.EntityType
+		if t == "" {
+			t = "unknown"
+		}
+		if byType[t] == nil {
+			byType[t] = nil
+			types = append(types, t)
+		}
+		byType[t] = append(byType[t], n)
+	}
+	sort.Strings(types)
+
+	var sb strings.Builder
+	sb.WriteString("---\ntags: [graymatter, moc]\n---\n\n# Entities Index\n\n")
+	for _, t := range types {
+		fmt.Fprintf(&sb, "## %s (%d)\n\n", t, len(byType[t]))
+		for _, n := range byType[t] {
+			fmt.Fprintf(&sb, "- [[%s|%s]]\n", sanitizeFilename(n.Label), n.Label)
+		}
+		sb.WriteString("\n")
+	}
+	return os.WriteFile(filepath.Join(mocDir, "entities-index.md"), []byte(sb.String()), 0o644)
 }
 
 func sanitizeFilename(s string) string {

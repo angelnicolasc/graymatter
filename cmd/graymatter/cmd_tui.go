@@ -106,7 +106,11 @@ func (n nodeItem) FilterValue() string { return n.n.Label + " " + n.n.EntityType
 type agentsLoadedMsg struct{ agents []agentItem }
 type factsLoadedMsg struct{ facts []factItem }
 type sessionsLoadedMsg struct{ sessions []sessionItem }
-type nodesLoadedMsg struct{ nodes []nodeItem }
+type nodesLoadedMsg struct {
+	nodes   []nodeItem
+	edges   int
+	orphans int
+}
 type errMsg struct{ err error }
 type statusMsg struct{ text string }
 
@@ -144,8 +148,10 @@ type tuiModel struct {
 	sessionList list.Model
 
 	// graph tab
-	nodeList   list.Model
-	nodeDetail viewport.Model
+	nodeList    list.Model
+	nodeDetail  viewport.Model
+	kgEdgeCount int
+	kgOrphans   int
 
 	// stats tab (observability dashboard)
 	dashboard dashboardData
@@ -222,11 +228,23 @@ func (m tuiModel) loadNodes() tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
+		edges, _ := m.store.KGEdges()
+		degree := map[string]int{}
+		for _, e := range edges {
+			degree[e.From]++
+			degree[e.To]++
+		}
+		orphans := 0
+		for _, n := range nodes {
+			if degree[n.ID] == 0 {
+				orphans++
+			}
+		}
 		items := make([]nodeItem, len(nodes))
 		for i, n := range nodes {
 			items[i] = nodeItem{n}
 		}
-		return nodesLoadedMsg{items}
+		return nodesLoadedMsg{nodes: items, edges: len(edges), orphans: orphans}
 	}
 }
 
@@ -305,6 +323,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items[i] = n
 		}
 		m.nodeList.SetItems(items)
+		m.kgEdgeCount = msg.edges
+		m.kgOrphans = msg.orphans
 
 	case dashboardLoadedMsg:
 		m.dashboard = msg.data
@@ -596,12 +616,17 @@ func (m tuiModel) renderSessions(h int) string {
 func (m tuiModel) renderGraph(h int) string {
 	if len(m.nodeList.Items()) == 0 {
 		return styleBorderInactive.Width(m.width - 4).Height(h - 2).
-			Render(styleDimText.Render("\n  Knowledge graph empty.\n  Run `graymatter init` and store some memories first."))
+			Render(styleDimText.Render("\n  Knowledge graph empty.\n  Run `graymatter init`, store some memories, and enable auto-population with `graymatter daemon run --kg`\n  (or add explicit edges via `memory_reflect action=link`)."))
 	}
 	leftW := m.width * 2 / 5
-	leftPane := styleBorderInactive.Width(leftW - 2).Height(h - 2).Render(m.nodeList.View())
-	rightPane := styleBorderInactive.Width(m.width - leftW - 4).Height(h - 2).Render(m.nodeDetail.View())
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+	stats := styleDimText.Render(fmt.Sprintf(
+		"  entities: %d · edges: %d · orphans: %d",
+		len(m.nodeList.Items()), m.kgEdgeCount, m.kgOrphans))
+	header := styleBorderInactive.Width(m.width - 4).Height(3).Render(stats)
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		styleBorderInactive.Width(leftW-2).Height(h-5).Render(m.nodeList.View()),
+		styleBorderInactive.Width(m.width-leftW-4).Height(h-5).Render(m.nodeDetail.View()))
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
 // ── Size management ───────────────────────────────────────────────────────────
@@ -639,6 +664,9 @@ func formatFactDetail(f memory.Fact) string {
 	sb.WriteString(fmt.Sprintf("Created: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("Weight:  %.4f\n", f.Weight))
 	sb.WriteString(fmt.Sprintf("Access:  %d times\n", f.AccessCount))
+	if f.Confidence != "" {
+		sb.WriteString(fmt.Sprintf("Confidence: %s\n", f.Confidence))
+	}
 	sb.WriteString("\n─── Text ────────────────────────────\n\n")
 	sb.WriteString(f.Text)
 	sb.WriteString("\n")

@@ -264,6 +264,16 @@ func (r *reconnectingStore) KGLink(from, to, relation string) error {
 	return r.do(func(s cliStore) error { return s.KGLink(from, to, relation) })
 }
 
+func (r *reconnectingStore) KGEdges() ([]kg.Edge, error) {
+	var out []kg.Edge
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.KGEdges()
+		return e
+	})
+	return out, err
+}
+
 func (r *reconnectingStore) ExportGraphObsidian(outDir string) error {
 	return r.do(func(s cliStore) error { return s.ExportGraphObsidian(outDir) })
 }

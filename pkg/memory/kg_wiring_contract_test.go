@@ -136,8 +136,11 @@ func (g *edgeWritingGraph) UpsertNode(id, label, entityType string) error {
 	return nil
 }
 
-func (g *edgeWritingGraph) LinkEdges(from, to, relation string) error {
-	g.links = append(g.links, EntityLink{From: from, To: to, Relation: relation})
+func (g *edgeWritingGraph) LinkEdges(links []EntityLink, sourceFactID string) error {
+	for _, l := range links {
+		l.Sources = []string{sourceFactID}
+		g.links = append(g.links, l)
+	}
 	return nil
 }
 
@@ -208,4 +211,21 @@ type idsOnlyExtractor struct{}
 
 func (e *idsOnlyExtractor) ExtractIDs(text string) ([]string, error) {
 	return []string{"hub-entity"}, nil
+}
+
+func TestPutConfident_ValidatesAndPersists(t *testing.T) {
+	s := newKGWiringStore(t)
+	ctx := context.Background()
+
+	if err := s.PutConfident(ctx, "c-agent", "a verified claim", "bogus"); err == nil {
+		t.Fatal("invalid confidence accepted")
+	}
+	if err := s.PutConfident(ctx, "c-agent", "a verified claim", "verified"); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, _ := s.List("c-agent")
+	if len(stored) != 1 || stored[0].Confidence != "verified" {
+		t.Fatalf("confidence not persisted: %+v", stored)
+	}
 }

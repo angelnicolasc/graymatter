@@ -29,7 +29,10 @@ type checkResult struct {
 }
 
 func doctorCmd() *cobra.Command {
-	var audit bool
+	var (
+		audit     bool
+		graphMode bool
+	)
 	cmd := &cobra.Command{
 		Use:   "doctor [path]",
 		Short: "Diagnose the GrayMatter setup in this directory",
@@ -49,6 +52,9 @@ blocks. Works on any project — no .graymatter directory required.
 Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if graphMode {
+				return runDoctorGraph(cmd)
+			}
 			if audit {
 				root := "."
 				if len(args) > 0 {
@@ -126,6 +132,7 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 		},
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
+	cmd.Flags().BoolVar(&graphMode, "graph", false, "report knowledge-graph analytics (hubs, orphans, articulation points)")
 	return cmd
 }
 

@@ -44,6 +44,9 @@ func writeObsidianNote(outDir string, f memory.Fact) error {
 	sb.WriteString(fmt.Sprintf("accessed: %s\n", f.AccessedAt.Format("2006-01-02T15:04:05Z")))
 	sb.WriteString(fmt.Sprintf("access_count: %d\n", f.AccessCount))
 	sb.WriteString(fmt.Sprintf("weight: %.4f\n", f.Weight))
+	if f.Confidence != "" {
+		sb.WriteString(fmt.Sprintf("confidence: %s\n", f.Confidence))
+	}
 	sb.WriteString(fmt.Sprintf("tags:\n  - graymatter\n  - %s\n", sanitiseFilename(f.AgentID)))
 	sb.WriteString("---\n\n")
 	sb.WriteString(f.Text + "\n")

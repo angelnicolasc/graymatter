@@ -223,6 +223,15 @@ func (c *Client) KGNodes() ([]kg.Node, error) {
 	return resp.Nodes, nil
 }
 
+// KGEdges returns every knowledge-graph edge (empty when no graph exists).
+func (c *Client) KGEdges() ([]kg.Edge, error) {
+	var resp KGEdgesResponse
+	if err := c.hostCall("KGEdges", &KGEdgesRequest{}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Edges, nil
+}
+
 // KGLink creates an edge between two nodes on the daemon's graph.
 func (c *Client) KGLink(from, to, relation string) error {
 	return c.hostCall("KGLink", &KGLinkRequest{From: from, To: to, Relation: relation}, &KGLinkResponse{})

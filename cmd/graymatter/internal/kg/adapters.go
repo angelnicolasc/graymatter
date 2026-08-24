@@ -24,9 +24,19 @@ func (a *GraphAdapter) LinkNodes(from, to, relation string) error {
 }
 
 // LinkEdges implements memory.EdgeWriter: consolidation links the
-// co-mentioned pairs an extractor produced.
-func (a *GraphAdapter) LinkEdges(from, to, relation string) error {
-	return a.g.Link(Edge{From: from, To: to, Relation: relation})
+// co-mentioned pairs an extractor produced, attributing them to sourceFactID
+// (the graph merges receipts across facts, capped at ten per edge).
+func (a *GraphAdapter) LinkEdges(links []memory.EntityLink, sourceFactID string) error {
+	for _, l := range links {
+		e := Edge{From: l.From, To: l.To, Relation: l.Relation}
+		if sourceFactID != "" {
+			e.Sources = []string{sourceFactID}
+		}
+		if err := a.g.Link(e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NeighborTexts implements memory.GraphAccessor.

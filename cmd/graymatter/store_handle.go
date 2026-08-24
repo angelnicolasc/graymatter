@@ -47,6 +47,7 @@ type cliStore interface {
 	SessionKill(id string) error
 	SessionResolve(agentID, sessionID string) (string, error)
 	KGNodes() ([]kg.Node, error)
+	KGEdges() ([]kg.Edge, error)
 	KGLink(from, to, relation string) error
 	ExportGraphObsidian(outDir string) error
 	AuditWrite(e audit.Entry) error
@@ -249,6 +250,15 @@ func (d *directStore) KGNodes() ([]kg.Node, error) {
 		return nil, nil // no graph yet: empty, not an error
 	}
 	return g.AllNodes()
+}
+
+// KGEdges returns every edge in the graph (empty when no graph exists).
+func (d *directStore) KGEdges() ([]kg.Edge, error) {
+	g, err := kg.Open(d.store.DB())
+	if err != nil {
+		return nil, nil // no graph yet: empty, not an error
+	}
+	return g.AllEdges()
 }
 
 func (d *directStore) KGLink(from, to, relation string) error {

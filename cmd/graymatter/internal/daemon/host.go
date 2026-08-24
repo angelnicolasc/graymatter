@@ -72,6 +72,9 @@ type SessionResolveResponse struct{ ID string }
 type KGNodesRequest struct{}
 type KGNodesResponse struct{ Nodes []kg.Node }
 
+type KGEdgesRequest struct{}
+type KGEdgesResponse struct{ Edges []kg.Edge }
+
 type KGLinkRequest struct{ From, To, Relation string }
 type KGLinkResponse struct{}
 
@@ -181,6 +184,20 @@ func (h *Host) KGNodes(req *KGNodesRequest, resp *KGNodesResponse) error {
 		return err
 	}
 	resp.Nodes = nodes
+	return nil
+}
+
+// KGEdges returns every knowledge-graph edge (empty when no graph exists).
+func (h *Host) KGEdges(req *KGEdgesRequest, resp *KGEdgesResponse) error {
+	if h.graph == nil {
+		resp.Edges = nil
+		return nil
+	}
+	edges, err := h.graph.AllEdges()
+	if err != nil {
+		return err
+	}
+	resp.Edges = edges
 	return nil
 }
 
