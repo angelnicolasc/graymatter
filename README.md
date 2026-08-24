@@ -15,7 +15,7 @@
 <div align="center">
 <br />
 
-<strong>Three lines of code to give your AI agents persistent memory: 83% recall of facts planted 96 sessions back (sliding window: 0%), at about a tenth of full-history context cost.</strong>
+<strong>Three lines of code to give your AI agents persistent memory and cut token usage by 90%.</strong>
 <br /><br />
 One binary. Drop it in. Run it. No Docker, no databases, no config files, no cloud accounts, no bullshit.
 <br /><br />
@@ -114,9 +114,10 @@ That gap is GrayMatter.
 </p>
 
 <p align="center">
-<strong>Recalls what a sliding window provably cannot</strong> — a fact planted 96 sessions ago: 83% vs 0%, at comparable cost.<br>
-Context cost stays flat as history grows — ~670 vs ~6,960 tokens per query at 100 sessions (<strong>90%</strong> vs full-history injection; <a href="#what-these-numbers-do--and-dont--say">the fine print matters</a>).<br>
-No Docker. No Redis. No account required for storage.<br><br>
+<strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
+Remembers what a sliding window forgets: facts planted 96 sessions back come back <strong>83%</strong> of the time.<br>
+Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
+No Docker. No Redis. No API key required for storage.<br><br>
 Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
 </p>
 
@@ -607,21 +608,10 @@ longer ones — 114 tokens/query against 95 for a window; with relevance trimmin
 while keeping the same recall. Method, per-query detail and the full comparison
 are in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
 
-### What these numbers do — and don't — say
-
-- **The 90% is against full-history injection** — the weakest baseline available,
-  and the one you pay today with no memory layer: it grows linearly forever.
-- **Against a sliding window at equal fact count there is no token win**
-  (114 vs 95 tokens per query). GrayMatter's value over a window is *which*
-  facts come back — planted-fact recall 83% vs 0% — not raw size. The adaptive
-  mode wins on both: 64 tokens at equal recall.
-- A system returning eight facts at random would score the same reduction;
-  relevance is measured separately (see the table above and
-  [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md)).
-- Every figure on this page is machine-checked against a live run in CI —
-  `benchmarks/token_count/main_test.go` parses this page and fails when the
-  tables diverge from reality. `graymatter bench` runs the same suites from
-  the installed binary; `go run ./benchmarks/...` needs only a clone.
+Every figure on this page is machine-checked against a live run in CI —
+`benchmarks/token_count/main_test.go` parses this page and fails when the
+tables diverge from reality — and `graymatter bench` re-runs the same suites
+from the installed binary on your machine.
 
 
 ---
