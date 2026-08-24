@@ -135,6 +135,17 @@ jobs:
           go-version: "1.26.7"
           cache: true
 
+      # go.work makes every build here resolve the library from the checkout
+      # next door, which hid the fact that cmd/graymatter/go.mod required it at
+      # v0.5.0 — a version predating pkg/memory/rpc and internal/tokens, both
+      # of which the CLI imports. The module did not build on its own, and
+      # nothing noticed because nothing ever built it on its own.
+      - name: The CLI module must build without the workspace
+        working-directory: cmd/graymatter
+        env:
+          GOWORK: "off"
+        run: go build -o /dev/null ./...
+
       - name: Build with an injected version
         working-directory: cmd/graymatter
         run: go build -ldflags="-X main.version=9.9.9-ci" -o "${RUNNER_TEMP}/graymatter" .
