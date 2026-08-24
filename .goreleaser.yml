@@ -42,6 +42,32 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+brews:
+  - repository:
+      owner: angelnicolasc
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/angelnicolasc/graymatter
+    description: "Persistent memory for AI agents. Single binary, zero infrastructure."
+    license: MIT
+  skip_upload: auto
+
+scoops:
+  - repository:
+      owner: angelnicolasc
+      name: scoop-bucket
+    homepage: https://github.com/angelnicolasc/graymatter
+    description: "Persistent memory for AI agents. Single binary, zero infrastructure."
+    license: MIT
+
+nix:
+  - repository:
+      owner: angelnicolasc
+      name: nur-packages
+    homepage: https://github.com/angelnicolasc/graymatter
+    description: "Persistent memory for AI agents. Single binary, zero infrastructure."
+    license: mit
+
 changelog:
   sort: asc
   filters:
@@ -60,31 +86,3 @@ release:
   draft: false
   prerelease: auto
   name_template: "GrayMatter {{.Tag}}"
-  # The release body is composed by .github/workflows/release.yml from
-  # .github/release-notes-header.md plus the CHANGELOG.md section for the tag,
-  # and passed with --release-notes. That flag bypasses release.header and
-  # release.footer entirely (goreleaser v2.17.1, internal/pipe/changelog), so
-  # a `header:` here would be silently ignored — the header lives in that file
-  # instead. A tag with no changelog section fails the release.
-  #
-  # Two things that block of text got wrong before, kept here because both are
-  # easy to reintroduce:
-  #
-  # It is one string for every platform, so it cannot name a per-platform
-  # archive. It tried anyway:
-  #
-  #   curl .../{{.Tag}}/graymatter_{{.Tag}}_$(uname -s)_$(uname -m).tar.gz
-  #
-  # and 404'd on all five builds, because archives are named from
-  # `{{ .Version }}_{{ .Os }}_{{ .Arch }}` (0.9.0_darwin_arm64) while that line
-  # produced Tag plus uname (v0.9.0_Darwin_arm64). It shipped broken from at
-  # least v0.7.1 to v0.9.0. Per-platform curl belongs in the README, where each
-  # command can be written out and checked.
-  #
-  # It also advertised `go install ...@{{.Tag}}`, which did not work: cmd/graymatter
-  # is its own module, so Go looks for a `cmd/graymatter/v0.9.0` tag and, finding
-  # none, reports that the root module "does not contain package
-  # .../cmd/graymatter". The release workflow now pushes that second,
-  # subdirectory-prefixed tag on every release, so @{{.Tag}} resolves. It is a
-  # workflow step rather than a manual one precisely because the first version
-  # of this comment rejected the idea as something that would be forgotten.

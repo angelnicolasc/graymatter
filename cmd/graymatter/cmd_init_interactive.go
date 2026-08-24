@@ -109,6 +109,22 @@ func knownAgents(projectDir string) []agentDef {
 				return filepath.Join(dir, "mcp_config.json"), nil
 			},
 		},
+		{
+			id: "windsurf", name: "Windsurf", configDesc: ".windsurf/mcp.json",
+			instructionFile: "",
+			run:             func() (writeResult, error) { return writeWindsurfProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, ".windsurf", "mcp.json"), nil
+			},
+		},
+		{
+			id: "vscodecopilot", name: "VS Code Copilot Agent", configDesc: ".vscode/mcp.json",
+			instructionFile: "",
+			run:             func() (writeResult, error) { return writeVSCodeCopilotProject(projectDir) },
+			configPath: func(dir string) (string, error) {
+				return filepath.Join(dir, ".vscode", "mcp.json"), nil
+			},
+		},
 	}
 }
 

@@ -424,7 +424,9 @@ func TestKnownAgentsTableIsComplete(t *testing.T) {
 		if a.configPath == nil {
 			t.Errorf("%s has no configPath, so doctor cannot see it", a.id)
 		}
-		if a.instructionFile == "" {
+		// MCP-only wiring targets (Windsurf, VS Code Copilot) do not read
+		// instruction files. They need the server config, not a briefing block.
+		if a.instructionFile == "" && a.id != "windsurf" && a.id != "vscodecopilot" {
 			t.Errorf("%s has no instructionFile", a.id)
 		}
 	}

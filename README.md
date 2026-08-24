@@ -142,6 +142,19 @@ graymatter doctor          # verify everything
 Restart your editor. Five memory tools are live.
 
 <details>
+<summary><strong>Package managers</strong> — Homebrew, Scoop, Nix</summary>
+
+```bash
+# Homebrew (macOS / Linux)
+brew install angelnicolasc/tap/graymatter
+
+# Scoop (Windows)
+scoop bucket add angelnicolasc https://github.com/angelnicolasc/scoop-bucket
+scoop install graymatter
+```
+</details>
+
+<details>
 <summary><strong>Pre-built binaries</strong> — Linux, macOS, Windows</summary>
 
 ```bash
@@ -170,8 +183,11 @@ from other MCP servers are merged, never overwritten.
 | Codex (OpenAI) | `~/.codex/config.toml` | home |
 | OpenCode | `opencode.jsonc` | project |
 | Antigravity (Google) | `mcp_config.json` | opt-in |
+| Windsurf | `.windsurf/mcp.json` | project |
+| VS Code Copilot Agent | `.vscode/mcp.json` | project |
 
-Any MCP-compatible client works — point it at `graymatter mcp serve`.
+**Also works out of the box:** Pi (reads `.mcp.json` natively), Zed, Cline,
+and any MCP-compatible client — point them at `graymatter mcp serve`.
 See [docs/AGENTS.md](docs/AGENTS.md) for tool parameters and query patterns.
 </details>
 

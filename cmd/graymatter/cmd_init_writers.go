@@ -120,6 +120,14 @@ func writeAntigravityProject(projectDir string) (writeResult, error) {
 	return mergeJSONMCPServers(filepath.Join(projectDir, "mcp_config.json"), "mcpServers", mcpEntry)
 }
 
+func writeWindsurfProject(projectDir string) (writeResult, error) {
+	return mergeJSONMCPServers(filepath.Join(projectDir, ".windsurf", "mcp.json"), "mcpServers", mcpEntry)
+}
+
+func writeVSCodeCopilotProject(projectDir string) (writeResult, error) {
+	return mergeJSONMCPServers(filepath.Join(projectDir, ".vscode", "mcp.json"), "servers", mcpEntry)
+}
+
 // --- Codex (TOML, home-scoped) ----------------------------------------------
 
 // codexConfigPath resolves ~/.codex/config.toml honoring USERPROFILE on
