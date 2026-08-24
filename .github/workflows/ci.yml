@@ -18,11 +18,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # 1.23 is the minimum go.mod declares, so it stays in the matrix to
-        # keep that promise honest. 1.26.7 is the toolchain the released
-        # binaries are built with; every stdlib advisory govulncheck reported
-        # against 1.26.1 is fixed at 1.26.6 or earlier.
-        go: ["1.23", "1.26.7"]
+        # 1.25 is the minimum the CLI module's go.mod declares (mcp-go v0.58
+        # requires it), so it stays in the matrix to keep that promise
+        # honest. 1.26.7 is the toolchain the released binaries are built
+        # with; every stdlib advisory govulncheck reported against 1.26.1 is
+        # fixed at 1.26.6 or earlier.
+        go: ["1.25", "1.26.7"]
 
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
