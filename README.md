@@ -237,8 +237,8 @@ settings). Five tools become available:
 
 > Agents using these tools should read **[docs/AGENTS.md](docs/AGENTS.md)** —
 > when to store vs. checkpoint, query patterns, anti-patterns, and the exact
-> per-tool parameter names (heads-up: `memory_reflect` uses `agent`, the
-> other four use `agent_id`).
+> per-tool parameter names (heads-up: `memory_reflect` uses `agent`; the
+> other four use `agent_id`, which `memory_reflect` also accepts as an alias).
 
 ### Any other MCP-compatible client
 

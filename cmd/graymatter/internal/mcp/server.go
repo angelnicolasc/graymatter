@@ -249,13 +249,22 @@ func readOnlyTool() mcp.ToolOption {
 	})
 }
 
-// writeTool annotates a tool that writes. destructive is true only where a call
-// can remove or supersede an existing fact; appending a fact or a checkpoint is
-// additive. Nothing here is idempotent: every call stores a new record.
-func writeTool(destructive bool) mcp.ToolOption {
+// writeTool annotates a tool that writes. Nothing here is idempotent: every
+// call stores a new record.
+//
+// memory_reflect passes destructive=false even though its forget/update
+// actions can retire a fact. The annotation is per-tool and three of its four
+// actions are purely additive, so advertising destructive would push hosts
+// into gating every self-edit behind an approval prompt — including plain
+// adds — which is how unattended agents quietly stop calling the tool. The
+// guardrail lives in the handler instead, where it is testable: forget
+// requires an exact-text match and both retiring actions leave a tombstone
+// pointing at the replacement (never a hard delete), with every action
+// recorded in the audit trail.
+func writeTool() mcp.ToolOption {
 	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
 		ReadOnlyHint:    mcp.ToBoolPtr(false),
-		DestructiveHint: mcp.ToBoolPtr(destructive),
+		DestructiveHint: mcp.ToBoolPtr(false),
 		IdempotentHint:  mcp.ToBoolPtr(false),
 		OpenWorldHint:   mcp.ToBoolPtr(false),
 	})
@@ -286,7 +295,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_add",
 			mcp.WithDescription("Store a new fact in GrayMatter memory."),
-			writeTool(false),
+			writeTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent to associate this memory with."),
@@ -303,7 +312,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("checkpoint_save",
 			mcp.WithDescription("Save a checkpoint of current agent state."),
-			writeTool(false),
+			writeTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent to checkpoint."),
@@ -332,7 +341,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_reflect",
 			mcp.WithDescription("Add, update (supersede), forget, or link your memories. Use when you notice a contradiction, finish a task, or learn a durable preference that should persist."),
-			writeTool(true),
+			writeTool(),
 			mcp.WithString("action",
 				mcp.Required(),
 				mcp.Description("One of: add, update, forget, link."),
@@ -340,7 +349,7 @@ func (s *Server) registerTools() {
 			),
 			mcp.WithString("agent",
 				mcp.Required(),
-				mcp.Description("The agent whose memory to modify."),
+				mcp.Description("The agent whose memory to modify. agent_id is accepted as an alias."),
 			),
 			mcp.WithString("text",
 				mcp.Description("The fact text for add/update, the fact to forget (alternative to target), or the source node ID for link."),

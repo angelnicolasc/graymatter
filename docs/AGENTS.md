@@ -26,7 +26,7 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 | `checkpoint_resume` | `agent_id` (string) | — | JSON: `{id, created_at, state}` (latest checkpoint) or empty if none |
 | `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`), **`agent`** (string), `text` (string) | `target` (string — old fact text for `update`/`forget`; target node ID for `link`) | Confirmation string |
 
-> ⚠️ **`memory_reflect` uses `agent`, not `agent_id`.** The other four tools use `agent_id`. If your client builds tool calls programmatically, branch on tool name.
+> ℹ️ **`memory_reflect` names the agent parameter `agent`.** The other four tools use `agent_id`. `memory_reflect` also accepts `agent_id` as an alias, so either spelling works; when building calls programmatically, prefer the canonical name per tool.
 
 ### Return-shape examples
 
