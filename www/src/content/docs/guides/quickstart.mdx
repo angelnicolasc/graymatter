@@ -1,0 +1,75 @@
+---
+title: Quick start
+description: Install GrayMatter, wire your MCP clients, and verify — in under a minute.
+---
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+GrayMatter is a single ~10 MB static binary. Install it, run `init`, restart
+your editor — done.
+
+## Install
+
+<Tabs>
+  <TabItem label="Homebrew (macOS / Linux)">
+    ```bash
+    brew install angelnicolasc/tap/graymatter
+    ```
+  </TabItem>
+  <TabItem label="Scoop (Windows)">
+    ```powershell
+    scoop bucket add angelnicolasc https://github.com/angelnicolasc/scoop-bucket
+    scoop install graymatter
+    ```
+  </TabItem>
+  <TabItem label="Go">
+    ```bash
+    go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
+    ```
+  </TabItem>
+  <TabItem label="Binary">
+    Pre-built binaries for Linux, macOS, and Windows are on the
+    [releases page](https://github.com/angelnicolasc/graymatter/releases/latest).
+
+    ```bash
+    # Linux (x86_64)
+    curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/v0.13.1/graymatter_0.13.1_linux_amd64.tar.gz | tar -xz && sudo mv graymatter /usr/local/bin/
+    ```
+  </TabItem>
+</Tabs>
+
+## Wire and verify
+
+<Steps>
+  1. Wire every supported MCP client at once:
+     ```bash
+     graymatter init
+     ```
+     This creates `.graymatter/`, writes the MCP config for each detected
+     client, and adds a memory block to CLAUDE.md / AGENTS.md. Existing MCP
+     entries from other servers are merged, never overwritten.
+
+  2. Verify:
+     ```bash
+     graymatter doctor
+     ```
+
+  3. Restart your editor. Five memory tools are live: `memory_search`,
+     `memory_add`, `checkpoint_save`, `checkpoint_resume`, and
+     `memory_reflect`.
+</Steps>
+
+## Optional: knowledge graph from day one
+
+```bash
+graymatter init --kg
+```
+
+Persists knowledge-graph activation so every future daemon builds the graph
+automatically. See [Knowledge graph](/guides/knowledge-graph/).
+
+## Next steps
+
+- [MCP clients](/guides/mcp-clients/) — per-client config files and manual wiring
+- [Agent guide](/reference/agents-guide/) — how agents should use the five tools
+- [Benchmarks](/reference/benchmarks/) — where the 90% number comes from

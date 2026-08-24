@@ -1,0 +1,3 @@
+# The docs site is documentation, not app code — exclude it from GitHub
+# language statistics so the repo keeps its Go profile.
+www/** linguist-documentation

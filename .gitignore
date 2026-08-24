@@ -20,3 +20,9 @@ coverage*.out
 graymatter.exe
 graymatter.exe~
 *.exe~
+
+# Docs site (www/) build artifacts
+www/node_modules/
+www/.astro/
+# Generated at build time from /docs by www/scripts/sync-docs.mjs
+www/src/content/docs/reference/

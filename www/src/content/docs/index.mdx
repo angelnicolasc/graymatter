@@ -1,0 +1,78 @@
+---
+title: GrayMatter
+description: Persistent memory, a self-building knowledge graph, and 90% fewer context tokens for AI agents. One binary, zero infra.
+template: splash
+hero:
+  title: Persistent memory for AI agents
+  tagline: One binary. Drop it in. 90% fewer context tokens, a self-building knowledge graph, and facts that survive across sessions — no Docker, no databases, no config files, no cloud accounts.
+  actions:
+    - text: Quick start
+      link: /guides/quickstart/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/angelnicolasc/graymatter
+      icon: external
+---
+
+import { Card, CardGrid, Steps } from '@astrojs/starlight/components';
+
+**General-purpose MCP server. Zero vendor lock-in.** Works with Claude Code,
+Cursor, Codex, OpenCode, Antigravity — and any MCP-compatible client. Also a
+plain Go library if you don't use MCP. Free. Offline. No account required.
+
+![Context tokens per query vs full-history injection](/assets/token-reduction.png)
+
+## Why
+
+Every AI agent is **stateless by default**. Each run re-injects the full
+conversation history — and that history grows linearly. Two prompts in and
+you've already burned half of your daily quota.
+
+That's not just a memory problem. That's a money and performance problem.
+GrayMatter closes it with a local, embeddable memory layer: recall by meaning,
+inject the top-8 relevant facts, forget the rest.
+
+<CardGrid stagger>
+  <Card title="90% token reduction">
+    Top-8 relevant facts instead of full-history injection. Measured, not
+    claimed — every figure is machine-checked in CI.
+  </Card>
+  <Card title="Knowledge graph">
+    Typed entities and co-mention edges, auto-populated from ordinary use.
+    Export to Obsidian with one command.
+  </Card>
+  <Card title="Self-curation">
+    `memory_reflect` lets the agent add, update, forget, and link its own
+    memories.
+  </Card>
+  <Card title="Context block">
+    `context-sync` projects top facts into CLAUDE.md / AGENTS.md inside an
+    explicit token budget.
+  </Card>
+  <Card title="Deterministic decay">
+    30-day half-life. Facts fade when nothing touches them. Tombstones, never
+    deletes.
+  </Card>
+  <Card title="Single binary">
+    ~10 MB static. No Docker, no Redis, no config files, no cloud accounts.
+  </Card>
+</CardGrid>
+
+## Install and wire in under a minute
+
+```bash
+brew install angelnicolasc/tap/graymatter   # macOS / Linux
+graymatter init                             # wires MCP config + memory block
+graymatter doctor                           # verify everything
+```
+
+Restart your editor. Five memory tools are live. Full instructions,
+including Scoop, Nix, pre-built binaries, and `go install`, in the
+[quick start](/guides/quickstart/).
+
+## What GrayMatter is NOT
+
+Not tied to any vendor. Not a framework. Not a hosted service. Not a
+knowledge-base UI. It is exactly one thing: **the missing stateful layer for
+Go agents**, packaged as an MCP server and a library you import in three
+lines.

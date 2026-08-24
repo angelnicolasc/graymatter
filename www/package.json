@@ -1,0 +1,23 @@
+{
+  "name": "graymatter-docs",
+  "type": "module",
+  "version": "0.13.1",
+  "private": true,
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "prebuild": "node scripts/sync-docs.mjs",
+    "dev": "node scripts/sync-docs.mjs && astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.8",
+    "astro": "^7.2.6",
+    "starlight-llms-txt": "^0.11.0"
+  },
+  "devDependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "wrangler": "^4.0.0"
+  }
+}
