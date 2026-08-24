@@ -6,6 +6,7 @@
 
 
 <p align="center">
+  <a href="https://graymatter.nickcerutti.workers.dev"><img src="https://img.shields.io/badge/docs-live-brightgreen" alt="Documentation"></a>
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
