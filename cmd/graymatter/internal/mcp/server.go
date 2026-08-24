@@ -67,7 +67,8 @@ type Server struct {
 }
 
 // New creates a configured MCP server on top of backend, announcing version
-// in the initialize handshake.
+// and the session instructions (see instructions.go) in the initialize
+// handshake.
 //
 // The version is a parameter rather than a constant here on purpose. It used
 // to be `const serverVersion`, bumped by hand at release time, and it was
@@ -75,10 +76,15 @@ type Server struct {
 // v0.11.x or v0.12.x binary was told it was talking to 0.10.0. Taking it from
 // the caller means there is only one version string in the binary, so there
 // is nothing left to keep in sync.
-func New(backend Backend, version string) *Server {
+func New(backend Backend, version string, opts ...Option) *Server {
+	cfg := defaultServerOptions()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	s := &Server{backend: backend, version: version}
 	s.mcpSrv = server.NewMCPServer(serverName, version,
 		server.WithToolCapabilities(true),
+		server.WithInstructions(cfg.instructions),
 	)
 	s.registerTools()
 	return s
