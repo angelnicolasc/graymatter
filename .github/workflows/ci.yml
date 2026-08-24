@@ -118,6 +118,54 @@ jobs:
           $env:CGO_ENABLED = "0"
           go build -ldflags="-s -w" -o NUL ./cmd/graymatter
 
+  # The CLI and the MCP server each carried their own version string, and they
+  # disagreed for four releases: a v0.12.1 binary introduced itself to every
+  # MCP client as 0.10.0. Unit tests cover each half; only building the binary
+  # and asking both surfaces catches a wrong value handed over at the call
+  # site, which is where the original defect lived.
+  version-consistency:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.7"
+          cache: true
+
+      - name: Build with an injected version
+        working-directory: cmd/graymatter
+        run: go build -ldflags="-X main.version=9.9.9-ci" -o "${RUNNER_TEMP}/graymatter" .
+
+      - name: The CLI and the MCP handshake must report the same version
+        run: |
+          set -euo pipefail
+          GM="${RUNNER_TEMP}/graymatter"
+          STORE="${RUNNER_TEMP}/version-check-store"
+          mkdir -p "$STORE"
+
+          cli="$("$GM" --version | awk '{print $NF}')"
+
+          req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'
+          mcp="$(printf '%s\n' "$req" \
+            | timeout 60 "$GM" mcp serve --no-daemon --quiet --dir "$STORE" \
+            | head -1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["serverInfo"]["version"])')"
+
+          echo "--version:     $cli"
+          echo "MCP handshake: $mcp"
+
+          if [ "$cli" != "9.9.9-ci" ]; then
+            echo "::error::-ldflags set main.version=9.9.9-ci but --version reports ${cli}"
+            exit 1
+          fi
+          if [ "$cli" != "$mcp" ]; then
+            echo "::error::the CLI reports ${cli} while the MCP server announces ${mcp}"
+            exit 1
+          fi
+
   # A blocking gate, not a report. govulncheck only flags advisories with a
   # call path reachable from this code, so a failure here means a vulnerability
   # someone can actually reach, not a version-number mismatch.

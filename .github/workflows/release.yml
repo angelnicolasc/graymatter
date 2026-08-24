@@ -33,6 +33,58 @@ jobs:
         with:
           go-version: "1.26.6"
 
+      # The release body used to be a list of commit subjects with 40-character
+      # SHAs, generated from git log. CHANGELOG.md was written by hand and read
+      # by nothing, so it drifted: v0.11.0 through v0.12.1 all shipped while the
+      # file still filed their entries under "Unreleased".
+      #
+      # Now the changelog is the source, and a missing section stops the
+      # release. --release-notes bypasses release.header and release.footer
+      # entirely (goreleaser v2.17.1, internal/pipe/changelog), so the whole
+      # body is composed here.
+      - name: Compose release notes from CHANGELOG
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          V="${TAG#v}"
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+
+          awk -v v="$V" '
+            BEGIN                 { start = "## [" v "]" }
+                                  { sub(/\r$/, "") }
+            index($0, start) == 1 { p = 1; next }
+            p && /^## \[/         { exit }
+            p                     { print }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/section.md"
+
+          if [ ! -s "${RUNNER_TEMP}/section.md" ]; then
+            echo "::error file=CHANGELOG.md::No '## [${V}]' section — refusing to release ${TAG} with notes nobody wrote"
+            exit 1
+          fi
+
+          sed "s/\$TAG/${TAG}/g" .github/release-notes-header.md > "$NOTES"
+          cat "${RUNNER_TEMP}/section.md" >> "$NOTES"
+          echo "Release notes for ${TAG}:"
+          cat "$NOTES"
+
+      # cmd/graymatter is its own module, so Go resolves its versions from tags
+      # prefixed with the module path. Without them the CLI had no published
+      # version at all: `@vX.Y.Z` failed with "unknown revision", and `@latest`
+      # — the command printed on every release page — resolved to a
+      # pseudo-version of whatever was on main, not to the release being read.
+      #
+      # Pushed after the changelog gate so a release that is going to fail does
+      # not leave a version behind on the Go proxy, which never forgets one.
+      # The tag does not start with "v", so it cannot re-trigger this workflow.
+      - name: Publish the CLI submodule tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git tag "cmd/graymatter/${TAG}" "${TAG}"
+          git push origin "cmd/graymatter/${TAG}"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
@@ -40,6 +92,6 @@ jobs:
           # Pinned, not "latest": the released binaries are built by whatever
           # this resolves to, so it should not change without a commit.
           version: v2.17.1
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

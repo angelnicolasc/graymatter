@@ -60,8 +60,18 @@ release:
   draft: false
   prerelease: auto
   name_template: "GrayMatter {{.Tag}}"
-  # This header is one string for every platform, so it cannot name a
-  # per-platform archive. The version that used to live here tried anyway:
+  # The release body is composed by .github/workflows/release.yml from
+  # .github/release-notes-header.md plus the CHANGELOG.md section for the tag,
+  # and passed with --release-notes. That flag bypasses release.header and
+  # release.footer entirely (goreleaser v2.17.1, internal/pipe/changelog), so
+  # a `header:` here would be silently ignored — the header lives in that file
+  # instead. A tag with no changelog section fails the release.
+  #
+  # Two things that block of text got wrong before, kept here because both are
+  # easy to reintroduce:
+  #
+  # It is one string for every platform, so it cannot name a per-platform
+  # archive. It tried anyway:
   #
   #   curl .../{{.Tag}}/graymatter_{{.Tag}}_$(uname -s)_$(uname -m).tar.gz
   #
@@ -71,24 +81,10 @@ release:
   # least v0.7.1 to v0.9.0. Per-platform curl belongs in the README, where each
   # command can be written out and checked.
   #
-  # `go install ...@{{.Tag}}` does not work either, and for a different reason:
-  # cmd/graymatter is its own module, so Go looks for a `cmd/graymatter/v0.9.0`
-  # tag, does not find one, falls back to the root module and reports that it
-  # "does not contain package .../cmd/graymatter". @latest resolves to a
-  # pseudo-version of the default branch and builds. If you ever want @{{.Tag}}
-  # to work, the release process has to push a second, subdirectory-prefixed
-  # tag — a moving part that breaks this again the first time it is forgotten.
-  header: |
-    ## GrayMatter {{.Tag}}
-
-    Persistent memory for Go AI agents. Single binary. Zero infra.
-
-    ### Quick install
-
-    ```bash
-    go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
-    ```
-
-    Prebuilt binaries for Linux, macOS and Windows are in the assets below,
-    with `checksums.txt` (sha256). Per-platform download commands are in the
-    [README](https://github.com/angelnicolasc/graymatter#install).
+  # It also advertised `go install ...@{{.Tag}}`, which did not work: cmd/graymatter
+  # is its own module, so Go looks for a `cmd/graymatter/v0.9.0` tag and, finding
+  # none, reports that the root module "does not contain package
+  # .../cmd/graymatter". The release workflow now pushes that second,
+  # subdirectory-prefixed tag on every release, so @{{.Tag}} resolves. It is a
+  # workflow step rather than a manual one precisely because the first version
+  # of this comment rejected the idea as something that would be forgotten.
