@@ -70,7 +70,10 @@ func exportCmd() *cobra.Command {
 				if err := store.ExportGraphObsidian(outDir); err != nil {
 					return fmt.Errorf("export knowledge graph: %w", err)
 				}
-				graphNote = " + knowledge graph (entities, canvas)"
+				if err := linkFactNotesToEntities(outDir, facts); err != nil {
+					return fmt.Errorf("link facts to entities: %w", err)
+				}
+				graphNote = " + knowledge graph (entities, canvas, fact links)"
 			}
 
 			from := "all agents"

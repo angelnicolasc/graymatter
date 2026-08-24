@@ -170,11 +170,11 @@ func TestDecay_PrunesLowWeight(t *testing.T) {
 
 	// Insert a node with a tiny weight that will drop below 0.01 after decay.
 	n := Node{
-		ID:       "dying",
-		Label:    "Dying Node",
+		ID:         "dying",
+		Label:      "Dying Node",
 		EntityType: "fact",
-		Weight:   0.001, // already below prune threshold
-		LastSeen: time.Now().Add(-1000 * time.Hour),
+		Weight:     0.001, // already below prune threshold
+		LastSeen:   time.Now().Add(-1000 * time.Hour),
 	}
 	if err := g.Upsert(n); err != nil {
 		t.Fatalf("Upsert: %v", err)

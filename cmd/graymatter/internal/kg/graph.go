@@ -325,8 +325,8 @@ func (g *Graph) ExportObsidian(outDir string) error {
 
 	// Write one .md file per node.
 	for _, n := range nodes {
-		content := fmt.Sprintf("---\nid: %s\nentity_type: %s\nfirst_seen: %s\nlast_seen: %s\nweight: %.4f\n---\n\n# %s\n\n**Type:** %s\n",
-			n.ID, n.EntityType, n.FirstSeen.Format(time.RFC3339), n.LastSeen.Format(time.RFC3339), n.Weight, n.Label, n.EntityType)
+		content := fmt.Sprintf("---\nid: %s\nentity_type: %s\ntags:\n  - entity\n  - %s\nfirst_seen: %s\nlast_seen: %s\nweight: %.4f\n---\n\n# %s\n\n**Type:** %s\n",
+			n.ID, n.EntityType, n.EntityType, n.FirstSeen.Format(time.RFC3339), n.LastSeen.Format(time.RFC3339), n.Weight, n.Label, n.EntityType)
 
 		// Add related nodes as backlinks, with provenance receipt counts.
 		var related []string
@@ -353,6 +353,12 @@ func (g *Graph) ExportObsidian(outDir string) error {
 	// entry point into the graph.
 	if err := writeEntitiesMOC(outDir, nodes); err != nil {
 		return fmt.Errorf("kg: write entities index: %w", err)
+	}
+
+	// Ship the .obsidian/graph.json template so the vault opens with the
+	// color-grouped, force-tuned view instead of the raw default.
+	if err := WriteGraphConfig(outDir); err != nil {
+		return fmt.Errorf("kg: write graph config: %w", err)
 	}
 
 	// Write Obsidian canvas JSON.
@@ -499,6 +505,68 @@ func writeEntitiesMOC(outDir string, nodes []Node) error {
 		sb.WriteString("\n")
 	}
 	return os.WriteFile(filepath.Join(mocDir, "entities-index.md"), []byte(sb.String()), 0o644)
+}
+
+// graphJSON is the .obsidian/graph.json template shipped with --include-graph
+// so the vault opens with the color-grouped, force-tuned view instead of the
+// raw default. Colors group entity notes by their type tag.
+type graphColorGroup struct {
+	Query string `json:"query"`
+	Color struct {
+		A   float64 `json:"a"`
+		Rgb int     `json:"rgb"`
+	} `json:"color"`
+}
+
+func graphJSONTemplate() string {
+	group := func(query string, rgb int) graphColorGroup {
+		g := graphColorGroup{Query: query}
+		g.Color.A = 1
+		g.Color.Rgb = rgb
+		return g
+	}
+	cfg := map[string]any{
+		"collapse-filter":       true,
+		"search":                "",
+		"showTags":              false,
+		"showAttachments":       false,
+		"hideUnresolved":        false,
+		"showOrphans":           true,
+		"collapse-color-groups": false,
+		"colorGroups": []graphColorGroup{
+			group("tag:person", 0x7CB342),       // green
+			group("tag:organization", 0xFFB300), // amber
+			group("tag:project", 0x42A5F5),      // blue
+			group("tag:role", 0xAB47BC),         // purple
+			group("tag:preference", 0xFF7043),   // coral
+		},
+		"collapse-display":   true,
+		"showArrow":          false,
+		"textFadeMultiplier": 0,
+		"nodeSizeMultiplier": 1.4,
+		"lineSizeMultiplier": 1,
+		"collapse-forces":    true,
+		"centerStrength":     0.4,
+		"repelStrength":      12,
+		"linkStrength":       1,
+		"linkDistance":       200,
+		"nodeSize":           6,
+		"scale":              0.8,
+		"close":              false,
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return string(data)
+}
+
+// WriteGraphConfig writes the .obsidian/graph.json template into vaultRoot
+// (the directory Obsidian opens as a vault). Best-effort: Obsidian regenerates
+// this file on first open if missing.
+func WriteGraphConfig(vaultRoot string) error {
+	cfgDir := filepath.Join(vaultRoot, ".obsidian")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cfgDir, "graph.json"), []byte(graphJSONTemplate()), 0o644)
 }
 
 func sanitizeFilename(s string) string {

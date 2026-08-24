@@ -76,13 +76,16 @@ func TestRegexExtractor_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestRegexExtractor_EdgesLinkConsecutiveNodes(t *testing.T) {
+func TestRegexExtractor_EdgesLinkAllPairs(t *testing.T) {
 	e := NewExtractor(ExtractorConfig{})
 	_, edges, err := e.Extract("Maria Rodriguez is at Acme Corp. See https://acme.example.com for info.")
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	// Edges should link consecutive extracted nodes.
+	// Co-mention is a clique: 3 nodes => 3 undirected pairs, all present.
+	if len(edges) != 3 {
+		t.Errorf("expected 3 co-mention edges for 3 nodes, got %d: %+v", len(edges), edges)
+	}
 	for _, edge := range edges {
 		if edge.Relation != "co_mentioned" {
 			t.Errorf("unexpected relation %q", edge.Relation)

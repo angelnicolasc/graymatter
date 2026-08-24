@@ -180,14 +180,18 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 		add(sub[1], "preference")
 	}
 
-	// Link consecutive entity pairs as "co_mentioned".
+	// Link ALL entity pairs within the fact as "co_mentioned": co-mention
+	// means mentioned together, which is a clique, not a chain. A fact naming
+	// five entities contributes its full local structure to the graph.
 	var edges []Edge
-	for i := 0; i < len(nodes)-1; i++ {
-		edges = append(edges, Edge{
-			From:     nodes[i].ID,
-			To:       nodes[i+1].ID,
-			Relation: "co_mentioned",
-		})
+	for i := 0; i < len(nodes); i++ {
+		for j := i + 1; j < len(nodes); j++ {
+			edges = append(edges, Edge{
+				From:     nodes[i].ID,
+				To:       nodes[j].ID,
+				Relation: "co_mentioned",
+			})
+		}
 	}
 
 	return nodes, edges, nil
