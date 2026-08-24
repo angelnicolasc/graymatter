@@ -50,7 +50,7 @@ brews:
     homepage: https://github.com/angelnicolasc/graymatter
     description: "Persistent memory for AI agents. Single binary, zero infrastructure."
     license: MIT
-  skip_upload: auto
+    skip_upload: auto
 
 scoops:
   - repository:
