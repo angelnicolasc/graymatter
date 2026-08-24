@@ -7,6 +7,7 @@ package kg
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -65,6 +66,30 @@ func Open(db *bolt.DB) (*Graph, error) {
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("kg: init buckets: %w", err)
+	}
+	return &Graph{db: db}, nil
+}
+
+// ErrNoGraph reports that the database carries no graph buckets at all —
+// distinct from "a graph with zero nodes", and from an IO failure.
+var ErrNoGraph = errors.New("kg: no graph in this database")
+
+// OpenRead returns a Graph over an existing one without initialising
+// anything, so it works on read-only bbolt handles where Open's bucket
+// creation would fail. Callers distinguish three states: nil error means a
+// readable graph; ErrNoGraph means the store never had one; any other error
+// is a real failure.
+func OpenRead(db *bolt.DB) (*Graph, error) {
+	err := db.View(func(tx *bolt.Tx) error {
+		for _, name := range [][]byte{bucketNodes, bucketEdges} {
+			if tx.Bucket(name) == nil {
+				return ErrNoGraph
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return &Graph{db: db}, nil
 }

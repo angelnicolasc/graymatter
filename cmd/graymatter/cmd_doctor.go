@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -79,6 +80,7 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 				checkStore(dataDir),
 				checkMCPWiring("."),
 				checkInstructions("."),
+				checkKG(dataDir),
 				checkContextSync("."),
 			}
 
@@ -258,17 +260,30 @@ func projectAge(dir string) (time.Duration, bool) {
 	return time.Since(info.ModTime()), true
 }
 
-// flagIfUnused downgrades an otherwise-healthy store check to a warning when a
-// project has been set up for a while and still holds nothing.
+// flagIfUnused shapes the store check for a project that holds nothing.
 //
 // This is the gap issue #14 fell through: wiring, instructions and store can
 // all be green while the agent never calls a single tool, and the old summary
 // still read "Everything looks good". A user had no way to tell a fresh install
 // apart from a week of silence, so the failure produced no bug reports, just
 // people quietly giving up.
+//
+// Two regimes, both anchored on facts == 0 regardless of whether gray.db
+// exists yet (a CLI `remember` during setup used to silence the hint while
+// the MCP session still had no tools):
+//
+//   - young projects get the restart hint at ok severity — the single most
+//     common false alarm is a client that has not been restarted since init;
+//   - projects idle past staleAfter degrade to warn and stack the instruction
+//     guidance on top, because at that point restart alone did not help.
+const zeroFactsRestartHint = "if your agent cannot see the memory tools, restart your MCP client; clients launch their servers at startup, so a session that predates `graymatter init` never picks them up"
+
 func flagIfUnused(c checkResult, dir string, facts int) checkResult {
 	if facts > 0 || (c.Status != "ok" && c.Status != "info") {
 		return c
+	}
+	if c.Hint == "" {
+		c.Hint = zeroFactsRestartHint
 	}
 	age, ok := projectAge(dir)
 	if !ok || age < staleAfter {
@@ -276,7 +291,7 @@ func flagIfUnused(c checkResult, dir string, facts int) checkResult {
 	}
 	c.Status = "warn"
 	c.Detail = fmt.Sprintf("initialised %d day(s) ago and still holds no facts", int(age.Hours()/24))
-	c.Hint = "the tools are wired but nothing is calling them; confirm CLAUDE.md / AGENTS.md carry the memory block (re-run `graymatter init` to refresh it) and that your agent loads that file, or use `graymatter init --global` to install it for every project"
+	c.Hint = zeroFactsRestartHint + "; if a restart did happen, confirm CLAUDE.md / AGENTS.md carry the memory block (re-run `graymatter init` to refresh it), that your agent loads that file, or use `graymatter init --global` to install it for every project"
 	return c
 }
 
@@ -355,6 +370,91 @@ func checkStore(dir string) checkResult {
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
 	return flagIfUnused(c, dir, facts)
+}
+
+// checkKG reports knowledge-graph auto-population state and graph size.
+//
+// Deliberately benign when off: the graph is optional, and a warning for
+// something the user never asked for is noise that trains people to ignore
+// doctor output. The goal here is discoverability — the one line that tells
+// a non-README-reading user the feature exists and how to turn it on — plus
+// confirmation (with counts) for those who did opt in. The daemon is not
+// required: the sentinel/env decision and a read-only graph open answer
+// everything offline, so this check works before any client has started.
+func checkKG(dir string) checkResult {
+	c := checkResult{Name: "knowledge graph"}
+	auto := os.Getenv("GRAYMATTER_KG") == "1"
+	if _, err := os.Stat(daemon.KGSentinelPath(dir)); err == nil {
+		auto = true
+	}
+
+	nodes, edges, countErr := countGraphReadOnly(dir)
+	switch {
+	case countErr != nil:
+		// No db yet: same fresh-install regime as the store check.
+		c.Status, c.Detail = "info", "no database yet; the graph starts empty"
+		if auto {
+			c.Detail = "auto-population on; the graph starts empty"
+			c.Hint = "first entities appear after ~20 facts, when consolidation first runs"
+		} else {
+			c.Hint = "optional: graymatter init --kg extracts entities and co-mention edges during consolidation"
+		}
+	case !auto && nodes == 0 && edges == 0:
+		c.Status, c.Detail = "info", fmt.Sprintf("off — %d nodes / %d edges", nodes, edges)
+		c.Hint = "optional: graymatter init --kg extracts entities and co-mention edges during consolidation; explicit links via memory_reflect action=link work regardless"
+	case auto && nodes == 0:
+		c.Status, c.Detail = "info", fmt.Sprintf("auto-population on — graph empty until consolidation (%d nodes / %d edges)", nodes, edges)
+		c.Hint = "first entities appear after ~20 facts, when consolidation first runs"
+	default:
+		c.Status = "ok"
+		detail := fmt.Sprintf("%d nodes / %d edges", nodes, edges)
+		if auto {
+			detail = "auto-population active — " + detail
+		} else {
+			detail = "explicitly linked — " + detail
+		}
+		c.Detail = detail
+	}
+	return c
+}
+
+// countGraphReadOnly reads node/edge counts without touching the daemon:
+// through its RPC when one is up, else a read-only bbolt open. A missing
+// gray.db reports as (0, 0, nil) so callers treat it as "empty", not error.
+func countGraphReadOnly(dir string) (nodes, edges int, err error) {
+	if dc, derr := daemon.ConnectNoSpawn(dir); derr == nil {
+		defer func() { _ = dc.Close() }()
+		state, serr := dc.KGState()
+		if serr != nil {
+			return 0, 0, serr
+		}
+		return state.Nodes, state.Edges, nil
+	}
+	dbPath := filepath.Join(dir, "gray.db")
+	if _, statErr := os.Stat(dbPath); statErr != nil {
+		return 0, 0, nil //nolint:nilerr // no database yet is emptiness, not failure
+	}
+	store, oerr := memory.Open(memory.StoreConfig{DataDir: dir, ReadOnly: true})
+	if oerr != nil {
+		return 0, 0, oerr
+	}
+	defer func() { _ = store.Close() }()
+	g, gerr := kg.OpenRead(store.DB())
+	if errors.Is(gerr, kg.ErrNoGraph) {
+		return 0, 0, nil // the store never had a graph: empty, not failure
+	}
+	if gerr != nil {
+		return 0, 0, gerr
+	}
+	ns, nerr := g.AllNodes()
+	if nerr != nil {
+		return 0, 0, nerr
+	}
+	es, eerr := g.AllEdges()
+	if eerr != nil {
+		return 0, 0, eerr
+	}
+	return len(ns), len(es), nil
 }
 
 // wiredAgents returns the known agents whose MCP config in this project
