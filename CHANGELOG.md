@@ -8,6 +8,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.13.0] - 2026-08-24
+
 ### What users get
 
 This release attacks the first five minutes: the gap between "installed" and
@@ -36,10 +40,16 @@ This release attacks the first five minutes: the gap between "installed" and
 - **Setup says one restart, once.** The Windows PATH note folds into the
   restart step it belongs to, and doctor's restart hint survives a CLI
   `remember` having created the database early.
-
-### Engineering detail
-
-Nothing yet.
+- **Install via Homebrew or Scoop.** goreleaser generates a formula and a
+  manifest on every release — `brew install angelnicolasc/tap/graymatter`
+  or `scoop install graymatter`.
+- **Two more MCP clients auto-wired.** Windsurf (`.windsurf/mcp.json`) and
+  VS Code Copilot Agent (`.vscode/mcp.json`) join the existing five; Pi
+  reads `.mcp.json` natively ([#15](https://github.com/angelnicolasc/graymatter/issues/15),
+  [#18](https://github.com/angelnicolasc/graymatter/issues/18)).
+- **mcp-go upgraded from v0.32.0 to v0.58.0.** The server negotiates MCP
+  2025-11-25 with every client, inheriting twenty-six releases of security
+  patches and protocol improvements from the library.
 
 ---
 
@@ -888,6 +898,8 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 [0.7.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.0
 [0.6.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.6.0
 [0.5.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.1
+[0.13.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.13.0
+
 [0.5.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.0
 [0.4.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.4.0
 [0.3.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.3.0
