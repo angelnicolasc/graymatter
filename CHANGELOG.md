@@ -10,6 +10,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.13.1] - 2026-08-24
+
+### Fixed
+
+- **v0.13.0 has no downloadable binaries; this release does.** Its tag was
+  published, so `go install` and the Go module proxy serve v0.13.0 normally,
+  but the release job failed before uploading anything: GoReleaser rejected a
+  malformed `brews` block, and the retry then died on `tag already exists`
+  because the CLI submodule tag from the first attempt was already public.
+  Every archive link for v0.13.0 returns 404. The code here is v0.13.0's plus
+  the pipeline fixes below.
+- **A failed release can now be retried.** Publishing the `cmd/graymatter/`
+  submodule tag is idempotent: once the Go proxy has served that version the
+  tag is immutable, so a re-run accepts the published one instead of trying to
+  recreate it.
+- **Homebrew, Scoop and Nix publishing is wired to a credential that can
+  reach its repositories.** The three taps live in separate repos, which the
+  job's default `GITHUB_TOKEN` cannot write to; each publisher now takes a
+  dedicated token, and the release refuses to start without it rather than
+  failing after the binaries are already up.
+
+---
+
 ## [0.13.0] - 2026-08-24
 
 ### What users get
@@ -886,7 +909,7 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 
 See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable public identifiers and the compatibility promise for the v0.x series.
 
-[Unreleased]: https://github.com/angelnicolasc/graymatter/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/angelnicolasc/graymatter/compare/v0.13.1...HEAD
 [0.12.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.1
 [0.12.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.0
 [0.11.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.11.1
@@ -898,6 +921,7 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 [0.7.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.0
 [0.6.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.6.0
 [0.5.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.1
+[0.13.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.13.1
 [0.13.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.13.0
 
 [0.5.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.0
