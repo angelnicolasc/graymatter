@@ -90,7 +90,7 @@ above; appended entries are enrichment hints, capped and deduplicated, and
 never displace a ranked fact. Without a wired graph the exception does not
 exist and `Recall` returns exactly `topK`.
 
-Before v0.10.1 the ordering of equal-scoring facts was unspecified in practice:
+Before v0.11.0 the ordering of equal-scoring facts was unspecified in practice:
 the three signal rankings were sorted with a comparator that read only the
 score, and `sort.Slice` is not stable, so tied facts received arbitrary ranks
 which the fusion then read. Nothing about the scores has changed — only the

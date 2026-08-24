@@ -68,6 +68,30 @@ jobs:
           echo "Release notes for ${TAG}:"
           cat "$NOTES"
 
+      # The README's download commands are copied by hand and went stale: they
+      # advertised v0.10.0 while v0.12.1 was current, so the documented install
+      # was two minor versions behind the one being announced. Same rule as the
+      # changelog — the docs describe this release before it ships.
+      - name: README must advertise the release being published
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          V="${TAG#v}"
+
+          stale="$(grep -oE 'releases/download/v[0-9]+\.[0-9]+\.[0-9]+/[^ )]+' README.md \
+            | grep -v "^releases/download/${TAG}/graymatter_${V}_" || true)"
+          if [ -n "$stale" ]; then
+            echo "::error file=README.md::download links do not point at ${TAG}:"
+            echo "$stale"
+            exit 1
+          fi
+
+          if ! grep -qE "^\*GrayMatter .* ${TAG} " README.md; then
+            echo "::error file=README.md::the footer does not name ${TAG}"
+            exit 1
+          fi
+
       # cmd/graymatter is its own module, so Go resolves its versions from tags
       # prefixed with the module path. Without them the CLI had no published
       # version at all: `@vX.Y.Z` failed with "unknown revision", and `@latest`
