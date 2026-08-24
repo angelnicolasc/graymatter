@@ -16,3 +16,7 @@ coverage*.out
 # Editor-local MCP wiring. `graymatter init` writes this per machine; there is
 # nothing here worth sharing, and it names absolute paths.
 .cursor/
+
+graymatter.exe
+graymatter.exe~
+*.exe~
