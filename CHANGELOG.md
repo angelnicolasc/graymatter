@@ -8,6 +8,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [0.12.1] - 2026-08-23
+
+### Added
+
+- **`graymatter doctor --graph`** — knowledge-graph analytics in-binary:
+  hubs by degree, articulation points and bridges (Tarjan), orphans, and a
+  declared connectivity ratio. Human + JSON output.
+- **TUI Graph tab v2** — stats header (entities / edges / orphans) above the
+  node list; honest empty-state pointing at `daemon run --kg`.
+- **`Fact.Confidence` (verified|inferred|unverified)** — epistemic metadata
+  declared at write time via `Store.PutConfident`; surfaced in the Obsidian
+  export frontmatter and the TUI fact detail. Display-only: never affects
+  ranking, decay or pruning.
+- **Edge provenance receipts** — consolidation attributes every co-mention
+  edge to the fact that produced it (`sources`, capped at ten); Obsidian
+  entity notes print receipt counts.
+- **`benchmarks/fixtures-v2`** — recurring-entity corpus for multi-hop
+  measurement; enriched recall answers 67% vs 0% baseline there (RESULTS.md).
+
+---
+
+## [0.12.0] - 2026-08-23
+
 ### Added
 
 - **Knowledge-graph auto-population ships gated (`daemon run --kg` / `GRAYMATTER_KG=1`)** —
@@ -30,24 +57,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   are auto-upserted as placeholder nodes (`EntityType: "unknown"`) inside the
   same transaction, so every edge is traversable no matter when the agent
   links relative to extraction.
-- **`graymatter doctor --graph`** — knowledge-graph analytics in-binary:
-  hubs by degree, articulation points and bridges (Tarjan), orphans, and a
-  declared connectivity ratio. Human + JSON output.
-- **TUI Graph tab v2** — stats header (entities / edges / orphans) above the
-  node list; honest empty-state pointing at `daemon run --kg`.
-- **`Fact.Confidence` (verified|inferred|unverified)** — epistemic metadata
-  declared at write time via `Store.PutConfident`; surfaced in the Obsidian
-  export frontmatter and the TUI fact detail. Display-only: never affects
-  ranking, decay or pruning.
-- **Edge provenance receipts** — consolidation attributes every co-mention
-  edge to the fact that produced it (`sources`, capped at ten); Obsidian
-  entity notes print receipt counts.
-- **`benchmarks/fixtures-v2`** — recurring-entity corpus for multi-hop
-  measurement; enriched recall answers 67% vs 0% baseline there (RESULTS.md).
 - **Wiring contract tests** pin what shipped builds do and do not do with the
   knowledge graph: defaults never auto-wire extraction, explicit `SetKG`
   drives node upserts during consolidation, and today's engine has no path
   that creates edges (documented before the wiring round changes it).
+
+---
+
+## [0.11.1] - 2026-08-23
+
+### Added
+
 - **`graymatter doctor --audit [path]`** — free auditor for instruction
   documents, no store or adoption required. Reports approx token cost per
   prompt (tokenizer declared in every output), near-duplicate paragraphs
@@ -57,17 +77,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   graymatter regions, nesting across kinds, and context-block hashes that no
   longer verify. Semantic contradiction detection is out of scope by design.
   Human and JSON output; exit code 1 only on failure-level findings.
-- **`graymatter context-sync` (opt-in)** — projects the highest-weight live
-  facts into a managed block inside CLAUDE.md / AGENTS.md under an explicit
-  token budget (default 512), regenerated on every run. Safety model:
-  content outside the markers is never touched; every rewrite keeps the
-  previous file as `<file>.bak`; hand edits are detected against the SHA-256
-  recorded in the block header and reported by `doctor` and by
-  `context-sync --check` — warned, then overwritten, never silently merged.
-  The projection is deterministic given a store state, tombstoned facts are
-  excluded immediately, and `FuzzRenderBlock` (the fourth fuzz target) holds
-  fact text to the same structure rules. The engine is untouched: `Recall`
-  never reads the block.
 
 ### Fixed
 
@@ -101,6 +110,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   pairs, not just identical text), staleness buckets with mixed commit ages
   under a fixed clock, splice behaviour when an orphaned begin marker
   precedes a real block, and the `doctor --audit` exit-code contract.
+
+---
+
+## [0.11.0] - 2026-08-23
+
+### Added
+
+- **`graymatter context-sync` (opt-in)** — projects the highest-weight live
+  facts into a managed block inside CLAUDE.md / AGENTS.md under an explicit
+  token budget (default 512), regenerated on every run. Safety model:
+  content outside the markers is never touched; every rewrite keeps the
+  previous file as `<file>.bak`; hand edits are detected against the SHA-256
+  recorded in the block header and reported by `doctor` and by
+  `context-sync --check` — warned, then overwritten, never silently merged.
+  The projection is deterministic given a store state, tombstoned facts are
+  excluded immediately, and `FuzzRenderBlock` (the fourth fuzz target) holds
+  fact text to the same structure rules. The engine is untouched: `Recall`
+  never reads the block.
+
+### Fixed
 
 - **Recall breaks score ties deterministically (oldest first); previously
   arbitrary.** The three signal rankings were sorted by score alone, and
@@ -411,7 +440,7 @@ running as you can read the daemon token. All four are in the threat model.
 
 ---
 
-## [0.8.0] – 2026-08-10
+## [0.8.0] - 2026-08-10
 
 A release about surfaces that reported something they had not checked: an
 `init` writing files nobody reads, and a `doctor` calling a project healthy on
@@ -465,7 +494,7 @@ text it prints is different.
 
 ---
 
-## [0.7.1] – 2026-08-10
+## [0.7.1] - 2026-08-10
 
 Follow-up to 0.7.0. Every item here is a surface that reported something it had
 not checked: a price looked up under the wrong key, a dashboard drawing zeros it
@@ -498,7 +527,7 @@ work.
 
 ---
 
-## [0.7.0] – 2026-08-10
+## [0.7.0] - 2026-08-10
 
 ### Added
 
@@ -554,7 +583,7 @@ work.
 
 ---
 
-## [0.6.0] – 2026-06-13
+## [0.6.0] - 2026-06-13
 
 ### Added
 
@@ -594,7 +623,9 @@ work.
 
 ---
 
-## [0.5.2] – 2026-04-28
+## 0.5.2 - 2026-04-28 — never tagged
+
+No `v0.5.2` tag exists. This section is kept because it is the only record of the work, which first shipped in [0.6.0].
 
 ### Added
 
@@ -614,7 +645,15 @@ work.
 
 ---
 
-## [0.5.0] – 2026-04-18
+## [0.5.1] - 2026-04-19
+
+### Fixed
+
+- **`go install` works for anyone outside the local workspace.** The `replace` directive in `cmd/graymatter/go.mod` pointed at the checkout next door, so `go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest` failed for every user who was not building from a clone with the sibling module present.
+
+---
+
+## [0.5.0] - 2026-04-18
 
 ### Added
 
@@ -639,7 +678,7 @@ work.
 
 ---
 
-## [0.4.0] – 2026-04-16
+## [0.4.0] - 2026-04-16
 
 ### Added
 
@@ -666,13 +705,13 @@ work.
 
 ---
 
-## [0.3.0] – 2026-04-13
+## [0.3.0] - 2026-04-13
 
 Observability dashboard redesign (KPI strip, Agents inventory-vs-activity panel, weight distribution, activity sparkline). See commit `20758a2`.
 
 ---
 
-## [0.2.1] – 2026-04-11
+## [0.2.1] - 2026-04-11
 
 ### Fixed
 
@@ -687,7 +726,7 @@ Observability dashboard redesign (KPI strip, Agents inventory-vs-activity panel,
 
 ---
 
-## [0.2.0] – 2026-04-10
+## [0.2.0] - 2026-04-10
 
 ### Added
 
@@ -760,7 +799,7 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 
 ---
 
-## [0.1.0] – 2026-04-10
+## [0.1.0] - 2026-04-10
 
 ### Added
 
@@ -806,8 +845,21 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 
 See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable public identifiers and the compatibility promise for the v0.x series.
 
+[Unreleased]: https://github.com/angelnicolasc/graymatter/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.1
+[0.12.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.0
+[0.11.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.11.1
+[0.11.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.11.0
 [0.10.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.10.0
 [0.9.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.9.0
+[0.8.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.8.0
+[0.7.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.1
+[0.7.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.7.0
+[0.6.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.6.0
+[0.5.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.1
+[0.5.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.5.0
+[0.4.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.4.0
+[0.3.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.3.0
 [0.2.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.2.1
 [0.2.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.1.0
