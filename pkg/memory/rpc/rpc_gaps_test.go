@@ -71,7 +71,11 @@ func startFailingServer(t *testing.T) (*Server, *Client) {
 	srv := NewServer(failingBackend{}, rpcTestConfig{})
 	srv.SetAuthToken(token)
 
-	ln, cleanup, err := Listen(t.TempDir(), token)
+	// One dataDir serves both sides: Listen writes its real discovery file
+	// there (unix socket on POSIX, TCP loopback on Windows) and the client
+	// dials through the ordinary public path.
+	dataDir := t.TempDir()
+	ln, cleanup, err := Listen(dataDir, token)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -79,12 +83,6 @@ func startFailingServer(t *testing.T) (*Server, *Client) {
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(srv.Stop)
 
-	// A discovery file whose address points at this server and whose token
-	// matches it: the client dials through the ordinary public path.
-	dataDir := t.TempDir()
-	if err := writeDiscovery(dataDir, "tcp://"+ln.Addr().String(), token); err != nil {
-		t.Fatalf("plant discovery: %v", err)
-	}
 	c, err := Dial(DialOptions{DataDir: dataDir, PingOnDial: true})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -184,7 +182,8 @@ func TestRegisterExtra_ServiceIsReachableThroughThePreamble(t *testing.T) {
 	srv.SetAuthToken(token)
 	srv.RegisterExtra("GrayMatterEcho", echoService{})
 
-	ln, cleanup, err := Listen(t.TempDir(), token)
+	dataDir := t.TempDir()
+	ln, cleanup, err := Listen(dataDir, token)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -192,7 +191,11 @@ func TestRegisterExtra_ServiceIsReachableThroughThePreamble(t *testing.T) {
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(srv.Stop)
 
-	conn, err := dialAddr("tcp://"+ln.Addr().String(), 2*time.Second)
+	addr, _, err := readDiscovery(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := dialAddr(addr, 2*time.Second)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
