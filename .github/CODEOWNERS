@@ -1,0 +1,3 @@
+# Default owner for every path. A single-owner repo states that explicitly:
+# an empty CODEOWNERS would imply shared ownership nobody can name.
+* @angelnicolasc
