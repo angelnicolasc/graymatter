@@ -370,6 +370,13 @@ func stripCodeFence(s string) string {
 // It returns how many facts were actually tombstoned; per-fact write failures
 // are joined into the returned error without stopping the remaining ones.
 func (s *Store) applyProposal(ctx context.Context, agentID string, batch []Fact, prop *consolidationProposal) (int, error) {
+	// Defence in depth: parseProposal validates Ollama output, but the
+	// Anthropic path wraps plain text into a proposal directly. No caller
+	// reaches here with an unusable proposal any more — keeping the check at
+	// the mutation boundary is what makes that true for future paths too.
+	if strings.TrimSpace(prop.Summary) == "" || len(prop.Consumes) == 0 {
+		return 0, fmt.Errorf("%w: empty summary or empty consumes", ErrInvalidProposal)
+	}
 	byID := make(map[string]Fact, len(batch))
 	for _, f := range batch {
 		byID[f.ID] = f
@@ -480,6 +487,13 @@ func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (*
 		if err != nil {
 			return nil, err
 		}
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			// An empty model response must never become an empty fact that
+			// eats its batch: discard with the same sentinel the Ollama path
+			// validates with, so the hook fires and the store stays intact.
+			return nil, fmt.Errorf("%w: anthropic returned empty content", ErrInvalidProposal)
+		}
 		// The Anthropic path predates structured proposals: whatever it
 		// returns accounts for the whole batch, deterministically. The
 		// apply step still tombstones with receipts — only the proposal's
@@ -488,7 +502,7 @@ func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (*
 		for _, f := range facts {
 			ids = append(ids, f.ID)
 		}
-		return &consolidationProposal{Summary: strings.TrimSpace(summary), Consumes: ids}, nil
+		return &consolidationProposal{Summary: summary, Consumes: ids}, nil
 	case "ollama":
 		prompt := fmt.Sprintf(
 			"The following are memory facts for an AI agent, each prefixed with its ID. "+

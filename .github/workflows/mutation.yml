@@ -1,0 +1,61 @@
+name: Mutation
+
+# Nightly mutation testing over the root module's tested code. Statement
+# coverage says a line executed; only a killed mutant says an assertion would
+# catch a change to it. This workflow is the quality meter behind the coverage
+# number — it reports, it does not gate yet: the first runs collect the
+# baseline (surviving mutants become tomorrow's test-writing queue) and the
+# thresholds get switched on once that baseline is known.
+#
+# Scope: the root module only. cmd/graymatter is a separate module gremlins
+# does not see here; benchmarks/ and examples/ carry no test suite, so every
+# mutant there would be unkillable noise.
+
+on:
+  schedule:
+    # Nightly at 04:43 UTC — off the hour, after the fuzz cadence.
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutate:
+    name: Mutation testing (root module)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.7"
+          cache: true
+
+      # Pinned release rather than @latest: the mutation operator set is what
+      # makes two runs comparable, and a silent tool upgrade would move the
+      # baseline under our feet.
+      - name: Install gremlins v0.5.0
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.5.0
+
+      # Non-blocking on purpose (baseline phase). When thresholds switch on,
+      # remove continue-on-error and wire --efficacy-threshold to the agreed
+      # floor.
+      - name: Unleash
+        id: unleash
+        continue-on-error: true
+        run: |
+          "$(go env GOPATH)/bin/gremlins" unleash \
+            --exclude-files "^benchmarks/.*" \
+            --exclude-files "^examples/.*" \
+            --exclude-files "^internal/.*" \
+            --output mutation-report.json \
+            .
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-report
+          path: mutation-report.json
+          retention-days: 30

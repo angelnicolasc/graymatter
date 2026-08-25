@@ -99,16 +99,6 @@ jobs:
             exit 1
           fi
 
-      - name: Upload coverage reports
-        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.26.7'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: coverage-report
-          path: |
-            coverage-core.out
-            coverage-cli.out
-          retention-days: 14
-
       - name: Build (Linux / macOS)
         if: runner.os != 'Windows'
         run: CGO_ENABLED=0 go build -ldflags="-s -w" -o /dev/null ./cmd/graymatter
@@ -118,6 +108,87 @@ jobs:
         run: |
           $env:CGO_ENABLED = "0"
           go build -ldflags="-s -w" -o NUL ./cmd/graymatter
+
+      # Coverage is uploaded from every platform, not just ubuntu: the union
+      # computed by the coverage-union job below is the honest number. A
+      # Windows-only file's tests (the DACL suite) are invisible to a
+      # Linux-only profile, and vice versa for unix sockets.
+      - name: Rename coverage profiles per platform
+        if: always()
+        shell: bash
+        run: |
+          [ -f coverage-core.out ] && cp coverage-core.out "coverage-core.${{ matrix.os }}.out"
+          [ -f coverage-cli.out ] && cp coverage-cli.out "coverage-cli.${{ matrix.os }}.out"
+          exit 0
+
+      - name: Upload coverage profiles
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: |
+            coverage-core.*.out
+            coverage-cli.*.out
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Statement coverage measured on one operating system systematically
+  # undercounts this repository: platform-split files (Windows ACLs, unix
+  # sockets) only execute their own OS's tests. This job merges the per-OS
+  # profiles into one union and gates on that — the number where "covered"
+  # means "tested somewhere in the matrix", not "tested on Linux".
+  coverage-union:
+    name: Coverage union (all platforms)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.7"
+
+      - name: Download per-platform profiles
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          path: cov
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Merge into union profiles
+        run: |
+          go run ./tools/covmerge -o union-core.out cov/coverage-core.*.out
+          go run ./tools/covmerge -o union-cli.out cov/coverage-cli.*.out
+
+      - name: Coverage gate — core union (≥82%)
+        run: |
+          TOTAL=$(go tool cover -func=union-core.out \
+            | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Core union coverage: ${TOTAL}%"
+          if awk "BEGIN{exit !($TOTAL < 82)}"; then
+            echo "::error::Core union coverage ${TOTAL}% is below the 82% threshold."
+            exit 1
+          fi
+
+      - name: Coverage gate — CLI union (≥65%, ratchets upward with phase-2 tests)
+        run: |
+          TOTAL=$(go tool cover -func=union-cli.out \
+            | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "CLI union coverage: ${TOTAL}%"
+          if awk "BEGIN{exit !($TOTAL < 65)}"; then
+            echo "::error::CLI union coverage ${TOTAL}% is below the 65% threshold."
+            exit 1
+          fi
+
+      - name: Upload union profiles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-union
+          path: |
+            union-core.out
+            union-cli.out
+          retention-days: 14
 
   # The CLI and the MCP server each carried their own version string, and they
   # disagreed for four releases: a v0.12.1 binary introduced itself to every

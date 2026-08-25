@@ -5,6 +5,7 @@ package rpc
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unsafe"
@@ -37,6 +38,16 @@ func aceSIDs(acl *windows.ACL) ([]string, error) {
 		base = unsafe.Add(base, uintptr(hdr.AceSize))
 	}
 	return out, nil
+}
+
+// SecureFileOwnerOnly must fail loudly on a path it cannot secure — the
+// caller's contract is abort-rather-than-run-unprotected, so a silently
+// succeeding no-op would be the dangerous behaviour.
+func TestSecureFileOwnerOnly_MissingPathErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist", "graymatter.addr")
+	if err := SecureFileOwnerOnly(missing); err == nil {
+		t.Fatal("securing a nonexistent path returned nil")
+	}
 }
 
 // The discovery file is the daemon's only access control on Windows: the

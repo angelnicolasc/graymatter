@@ -474,6 +474,12 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 	var facts []Fact
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		parent := tx.Bucket(bucketFacts)
+		if parent == nil {
+			// Read-only open of an empty or pre-bucketing database: there are
+			// no facts by definition, and a crash here would turn a harmless
+			// inspection into a process kill.
+			return nil
+		}
 		b := parent.Bucket([]byte(agentID))
 		if b == nil {
 			return nil
@@ -498,7 +504,14 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 func (s *Store) ListAgents() ([]string, error) {
 	var agents []string
 	if err := s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketAgents).ForEach(func(k, _ []byte) error {
+		b := tx.Bucket(bucketAgents)
+		if b == nil {
+			// A read-only open can land on an empty or pre-bucketing database
+			// (no writer has run yet); "no agents" is the truth there, not a
+			// reason to crash the process that merely looked.
+			return nil
+		}
+		return b.ForEach(func(k, _ []byte) error {
 			agents = append(agents, string(k))
 			return nil
 		})
