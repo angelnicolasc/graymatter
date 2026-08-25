@@ -145,9 +145,13 @@ func renderStatus(out io.Writer, view statusView) error {
 
 	fmt.Fprintln(out, "TOKENS     last 30d — recorded by 'graymatter run' sessions only:")
 	if tok.Loaded && tok.Requests > 0 {
-		inOut := tok.Input + tok.Output
+		// Cache reads are part of the input side: the hit rate is
+		// CacheRead / (Input + CacheRead), matching the harness ledger and
+		// the TUI dashboard. Dividing by Input+Output printed >100% on
+		// cache-heavy workloads.
+		inputSide := tok.Input + tok.CacheRead
 		fmt.Fprintf(out, "           in ~%dk · out ~%dk · cache-read %.0f%% · requests %d\n",
-			tok.Input/1000, tok.Output/1000, pct(tok.CacheRead, inOut), tok.Requests)
+			tok.Input/1000, tok.Output/1000, pct(tok.CacheRead, inputSide), tok.Requests)
 	} else {
 		fmt.Fprintln(out, "           no harness runs recorded (MCP sessions are not measured)")
 	}
