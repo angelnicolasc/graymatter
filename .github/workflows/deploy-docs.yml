@@ -66,4 +66,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: www
-          command: versions upload --message "docs preview for PR #${{ github.event.number }}"
+          command: versions upload --message docs-preview-pr-${{ github.event.number }}
