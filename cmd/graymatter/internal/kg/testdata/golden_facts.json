@@ -1,0 +1,110 @@
+{
+  "facts": [
+    {
+      "text": "Ingrid Olsen promoted Maria Rodriguez to program lead for the Ledgerline Rollout.",
+      "want": [
+        { "label": "Ingrid Olsen", "type": "person" },
+        { "label": "Maria Rodriguez", "type": "person" }
+      ],
+      "forbid": ["the"]
+    },
+    {
+      "text": "The Modigliani-Miller irrelevance result appeared in The American Economic Review, volume 48, 1958.",
+      "want": [{ "label": "American Economic Review", "type": "organization" }],
+      "forbid": ["the", "modigliani", "1958", "miller"]
+    },
+    {
+      "text": "Robert Kaplan and David Norton introduced the Balanced Scorecard in 1992.",
+      "want": [
+        { "label": "Robert Kaplan", "type": "person" },
+        { "label": "David Norton", "type": "person" }
+      ],
+      "forbid": ["the", "1992"]
+    },
+    {
+      "text": "Hector Salazar negotiated the co-marketing clause into the renewal.",
+      "want": [{ "label": "Hector Salazar", "type": "person" }],
+      "forbid": ["the"]
+    },
+    {
+      "text": "Course notes reference https://corporatefinanceinstitute.com for WACC walkthroughs.",
+      "want": [],
+      "forbid": ["https://corporatefinanceinstitute.com"]
+    },
+    {
+      "text": "Case pack deadline logged as 2026-09-12 in the syllabus tracker.",
+      "want": [],
+      "forbid": ["2026-09-12"]
+    },
+    {
+      "text": "William Sharpe, John Lintner and Jan Mossin built the CAPM independently around 1965.",
+      "want": [
+        { "label": "William Sharpe", "type": "person" },
+        { "label": "John Lintner", "type": "person" },
+        { "label": "Jan Mossin", "type": "person" }
+      ],
+      "forbid": ["the", "1965"]
+    },
+    {
+      "text": "Harvard Business School hosts the Institute for Strategy and Competitiveness led by Porter.",
+      "want": [{ "label": "Harvard Business School", "type": "organization" }],
+      "forbid": ["the"]
+    },
+    {
+      "text": "Northwind Labs renewed after the case study ran in the industry newsletter.",
+      "want": [{ "label": "Northwind Labs", "type": "organization" }],
+      "forbid": ["the"]
+    },
+    {
+      "text": "The Goal argues the goal of the firm is to make money now and in the future.",
+      "want": [],
+      "forbid": ["the", "goal"]
+    },
+    {
+      "text": "Michael Porter published How Competitive Forces Shape Strategy in Harvard Business Review in 1979.",
+      "want": [
+        { "label": "Michael Porter", "type": "person" },
+        { "label": "Harvard Business Review", "type": "organization" }
+      ],
+      "forbid": ["1979"]
+    },
+    {
+      "text": "Ahmed Karim and Sofia Marchetti ran the S&OP signing meeting together.",
+      "want": [
+        { "label": "Ahmed Karim", "type": "person" },
+        { "label": "Sofia Marchetti", "type": "person" }
+      ]
+    },
+    {
+      "text": "Benjamin Graham advocated margin of safety in The Intelligent Investor, published in 1949.",
+      "want": [{ "label": "Benjamin Graham", "type": "person" }],
+      "forbid": ["1949"]
+    },
+    {
+      "text": "Toyota pioneered lean production with just-in-time inventory under Taiichi Ohno.",
+      "want": [{ "label": "Taiichi Ohno", "type": "person" }]
+    },
+    {
+      "text": "The CTO approved the migration plan.",
+      "want": [{ "label": "CTO", "type": "role" }],
+      "forbid": ["the"]
+    },
+    {
+      "text": "Ping @maria about the deployment window.",
+      "want": [{ "label": "@maria", "type": "person" }],
+      "forbid": ["the"]
+    },
+    {
+      "text": "Six Sigma targets fewer than 3.4 defects per million opportunities.",
+      "want": [{ "label": "Six Sigma", "type": "person" }]
+    },
+    {
+      "text": "Blue Ocean Strategy by Chan Kim and Renee Mauborgne urges creating uncontested market space.",
+      "want": [
+        { "label": "Blue Ocean Strategy", "type": "concept" },
+        { "label": "Chan Kim", "type": "person" },
+        { "label": "Renee Mauborgne", "type": "person" }
+      ]
+    }
+  ]
+}
