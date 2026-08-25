@@ -80,8 +80,8 @@ func statusStyle(status string) string {
 	switch status {
 	case "running":
 		return styleStatusOK.Render("● running")
-	case "success":
-		return styleStatusOK.Render("✓ success")
+	case "success", "done": // the runner writes "done" for completed runs
+		return styleStatusOK.Render("✓ " + status)
 	case "failed", "killed":
 		return styleStatusFail.Render("✗ " + status)
 	default:
@@ -622,10 +622,13 @@ func (m tuiModel) renderGraph(h int) string {
 	stats := styleDimText.Render(fmt.Sprintf(
 		"  entities: %d · edges: %d · orphans: %d",
 		len(m.nodeList.Items()), m.kgEdgeCount, m.kgOrphans))
+	// The stats block costs 5 screen rows (3 content + 2 border). The panes
+	// must discount them or the tab overflows the viewport and pushes the
+	// header off screen — h-7 content + 2 border + 5 = h, an exact fit.
 	header := styleBorderInactive.Width(m.width - 4).Height(3).Render(stats)
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		styleBorderInactive.Width(leftW-2).Height(h-5).Render(m.nodeList.View()),
-		styleBorderInactive.Width(m.width-leftW-4).Height(h-5).Render(m.nodeDetail.View()))
+		styleBorderInactive.Width(leftW-2).Height(h-7).Render(m.nodeList.View()),
+		styleBorderInactive.Width(m.width-leftW-4).Height(h-7).Render(m.nodeDetail.View()))
 	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
@@ -650,9 +653,12 @@ func (m *tuiModel) updateSizes() {
 	m.sessionList.SetSize(m.width-6, listH)
 
 	leftW := m.width * 2 / 5
-	m.nodeList.SetSize(leftW-4, listH)
+	// Graph-tab panes sit under a 5-row stats header the other tabs don't
+	// have, so their lists get 3 rows less than the shared listH (see
+	// renderGraph for the arithmetic).
+	m.nodeList.SetSize(leftW-4, listH-3)
 	m.nodeDetail.Width = m.width - leftW - 6
-	m.nodeDetail.Height = listH
+	m.nodeDetail.Height = listH - 3
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
