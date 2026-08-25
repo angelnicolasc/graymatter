@@ -19,6 +19,8 @@ consequences, reversal condition.
 | [007](007-supersede-tombstones.md) | Contradictions are resolved by tombstone, never by delete | Accepted |
 | [008](008-knowledge-graph-wiring.md) | Knowledge-graph auto-population ships gated (`--kg` / env) | Accepted |
 | [009](009-kg-sentinel-activation.md) | KG activation persists as data-dir state via `init --kg` | Accepted |
+| [010](010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation | Accepted |
+| [011](011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally | Accepted |
 
 ## Writing a new one
 

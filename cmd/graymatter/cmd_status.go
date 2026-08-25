@@ -137,6 +137,8 @@ func renderStatus(out io.Writer, view statusView) error {
 		ov.TotalAgents, ov.TotalLiveFacts, ov.TotalTombstones, pinnedTotal, avgWeight)
 	fmt.Fprintf(out, "           oldest fact %s · newest %s · pending vector ops: %d\n",
 		relTime(oldest), relTime(newest), ov.PendingVectorOps)
+	fmt.Fprintf(out, "           consolidations %d · facts consolidated %d\n",
+		ov.Consolidations, ov.FactsConsumed)
 
 	totalRecalls := 0
 	for _, a := range ov.Agents {
@@ -228,12 +230,15 @@ func pct(part, whole uint64) float64 {
 
 func encodeStatusJSON(out io.Writer, mode string, ov *daemon.StoreOverviewResponse, kg *daemon.KGStateResponse, tok harness.TokenUsageSummary, pinned int) error {
 	payload := struct {
-		Mode     string                        `json:"mode"`
-		Store    *daemon.StoreOverviewResponse `json:"store"`
-		KG       *daemon.KGStateResponse       `json:"kg"`
-		Tokens30 *harness.TokenUsageSummary    `json:"tokens_30d"`
-		Pinned   int                           `json:"pinned"`
-	}{Mode: mode, Store: ov, KG: kg, Tokens30: &tok, Pinned: pinned}
+		Mode           string                        `json:"mode"`
+		Store          *daemon.StoreOverviewResponse `json:"store"`
+		KG             *daemon.KGStateResponse       `json:"kg"`
+		Tokens30       *harness.TokenUsageSummary    `json:"tokens_30d"`
+		Pinned         int                           `json:"pinned"`
+		Consolidations int                           `json:"consolidations"`
+		FactsConsumed  int                           `json:"facts_consumed"`
+	}{Mode: mode, Store: ov, KG: kg, Tokens30: &tok, Pinned: pinned,
+		Consolidations: ov.Consolidations, FactsConsumed: ov.FactsConsumed}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)

@@ -28,6 +28,7 @@ import (
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // HostServiceName is the net/rpc service name for the host-level service,
@@ -116,6 +117,8 @@ type StoreOverviewResponse struct {
 	TotalLiveFacts   int            `json:"total_live_facts"`
 	TotalTombstones  int            `json:"total_tombstones"`
 	PendingVectorOps int            `json:"pending_vector_ops"`
+	Consolidations   int            `json:"consolidations"`    // cycles that applied at least one proposal
+	FactsConsumed    int            `json:"facts_consumed"`    // batch facts tombstoned by those proposals
 	Agents           []AgentSummary `json:"agents"`
 }
 
@@ -326,6 +329,7 @@ func (h *Host) StoreOverview(req *StoreOverviewRequest, resp *StoreOverviewRespo
 		resp.Agents = append(resp.Agents, sum)
 	}
 	resp.PendingVectorOps = adv.PendingVectorCount()
+	resp.Consolidations, resp.FactsConsumed = memory.ReadConsolidationCounters(h.db)
 	return nil
 }
 

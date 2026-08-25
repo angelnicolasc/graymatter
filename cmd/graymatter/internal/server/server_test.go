@@ -49,11 +49,13 @@ func (u unreadyStore) Ready() error { return u.err }
 
 type testConsolidateCfg struct{}
 
-func (testConsolidateCfg) GetAnthropicAPIKey() string      { return os.Getenv("ANTHROPIC_API_KEY") }
-func (testConsolidateCfg) GetConsolidateLLM() string       { return "anthropic" }
-func (testConsolidateCfg) GetConsolidateModel() string     { return "claude-haiku-4-5-20251001" }
-func (testConsolidateCfg) GetConsolidateThreshold() int    { return 20 }
-func (testConsolidateCfg) GetDecayHalfLife() time.Duration { return 168 * time.Hour }
+func (testConsolidateCfg) GetAnthropicAPIKey() string        { return os.Getenv("ANTHROPIC_API_KEY") }
+func (testConsolidateCfg) GetConsolidateLLM() string         { return "anthropic" }
+func (testConsolidateCfg) GetConsolidateModel() string       { return "claude-haiku-4-5-20251001" }
+func (testConsolidateCfg) GetConsolidateThreshold() int      { return 20 }
+func (testConsolidateCfg) GetDecayHalfLife() time.Duration   { return 168 * time.Hour }
+func (testConsolidateCfg) GetOllamaURL() string              { return "" }
+func (testConsolidateCfg) GetOllamaConsolidateModel() string { return "" }
 
 // startTestServer starts the REST server on a random free port and returns
 // the base URL + a cleanup function that shuts it down.

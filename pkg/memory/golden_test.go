@@ -506,3 +506,5 @@ func (goldenConsolidateCfg) GetConsolidateLLM() string         { return "" }
 func (goldenConsolidateCfg) GetConsolidateModel() string       { return "" }
 func (goldenConsolidateCfg) GetConsolidateThreshold() int      { return 100 }
 func (c goldenConsolidateCfg) GetDecayHalfLife() time.Duration { return c.halfLife }
+func (goldenConsolidateCfg) GetOllamaURL() string              { return "" }
+func (goldenConsolidateCfg) GetOllamaConsolidateModel() string { return "" }

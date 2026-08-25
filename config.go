@@ -47,6 +47,11 @@ type Config struct {
 	// Default: value of GRAYMATTER_OLLAMA_MODEL env var, or "nomic-embed-text"
 	OllamaModel string
 
+	// OllamaConsolidateModel is the local model used for consolidation
+	// summarisation when ConsolidateLLM is "ollama".
+	// Default: value of GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL env var, or "llama3.2"
+	OllamaConsolidateModel string
+
 	// AnthropicAPIKey for the Anthropic embeddings and consolidation endpoints.
 	// Default: value of ANTHROPIC_API_KEY env var.
 	AnthropicAPIKey string
@@ -135,21 +140,22 @@ type Config struct {
 // variables and runtime probes. Safe to call multiple times.
 func DefaultConfig() Config {
 	return Config{
-		DataDir:              ".graymatter",
-		TopK:                 8,
-		EmbeddingMode:        EmbeddingAuto,
-		OllamaURL:            envOrDefault("GRAYMATTER_OLLAMA_URL", "http://localhost:11434"),
-		OllamaModel:          envOrDefault("GRAYMATTER_OLLAMA_MODEL", "nomic-embed-text"),
-		AnthropicAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
-		OpenAIAPIKey:         os.Getenv("OPENAI_API_KEY"),
-		OpenAIModel:          envOrDefault("GRAYMATTER_OPENAI_MODEL", "text-embedding-3-small"),
-		ConsolidateLLM:       resolveConsolidateLLM(),
-		ConsolidateModel:     "claude-haiku-4-5-20251001",
-		ConsolidateThreshold: 20,
+		DataDir:                 ".graymatter",
+		TopK:                    8,
+		EmbeddingMode:           EmbeddingAuto,
+		OllamaURL:               envOrDefault("GRAYMATTER_OLLAMA_URL", "http://localhost:11434"),
+		OllamaModel:             envOrDefault("GRAYMATTER_OLLAMA_MODEL", "nomic-embed-text"),
+		OllamaConsolidateModel:  envOrDefault("GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL", "llama3.2"),
+		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
+		OpenAIModel:             envOrDefault("GRAYMATTER_OPENAI_MODEL", "text-embedding-3-small"),
+		ConsolidateLLM:          resolveConsolidateLLM(),
+		ConsolidateModel:        "claude-haiku-4-5-20251001",
+		ConsolidateThreshold:    20,
 		VectorReconcileInterval: 30 * time.Second,
-		DecayHalfLife:        720 * time.Hour,
-		AsyncConsolidate:       true,
-		MaxAsyncConsolidations: 2,
+		DecayHalfLife:           720 * time.Hour,
+		AsyncConsolidate:        true,
+		MaxAsyncConsolidations:  2,
 	}
 }
 
@@ -182,8 +188,10 @@ func envOrDefault(key, def string) string {
 // Config implements memory.ConsolidateConfig so it can be passed directly
 // to Store.Consolidate / Store.MaybeConsolidate without an adapter.
 
-func (c Config) GetAnthropicAPIKey() string      { return c.AnthropicAPIKey }
-func (c Config) GetConsolidateLLM() string       { return c.ConsolidateLLM }
-func (c Config) GetConsolidateModel() string     { return c.ConsolidateModel }
-func (c Config) GetConsolidateThreshold() int    { return c.ConsolidateThreshold }
-func (c Config) GetDecayHalfLife() time.Duration { return c.DecayHalfLife }
+func (c Config) GetAnthropicAPIKey() string        { return c.AnthropicAPIKey }
+func (c Config) GetConsolidateLLM() string         { return c.ConsolidateLLM }
+func (c Config) GetConsolidateModel() string       { return c.ConsolidateModel }
+func (c Config) GetOllamaURL() string              { return c.OllamaURL }
+func (c Config) GetOllamaConsolidateModel() string { return c.OllamaConsolidateModel }
+func (c Config) GetConsolidateThreshold() int      { return c.ConsolidateThreshold }
+func (c Config) GetDecayHalfLife() time.Duration   { return c.DecayHalfLife }
