@@ -10,6 +10,80 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.14.0] - 2026-08-25
+
+### What users get
+
+- **Pinned facts: what you declare permanent stays.** `graymatter pin <agent> <text>` and
+  `memory_reflect action=pin|unpin` exempt a fact from decay, pruning *and* the summarisation
+  batch (ADR-010) — a project that goes dormant no longer collects standing obligations or
+  architecture decisions. The exemption is visible everywhere: star in the TUI, `pinned` count
+  in `status`, `pinned: true` in the Obsidian export, reported by `doctor`.
+- **Consolidation runs fully local with Ollama — no account, no API key.**
+  `ConsolidateLLM="ollama"` used to be accepted by config and rejected at runtime; it now works
+  end to end against `/api/generate` (`GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL`, default
+  `llama3.2`). The model proposes; the application is deterministic (ADR-011): an invalid or
+  unreachable response degrades to decay+prune-only behaviour, never to data loss.
+- **`graymatter doctor --health` audits your store the way `bench` audits published numbers.**
+  Four deterministic rules — supersede loops, dumping bursts, critical-looking facts near prune
+  (with pin suggestions), duplicate density. Same store, byte-identical JSON, every run.
+- **A living documentation site** ships at graymatter.nickcerutti.workers.dev (Starlight),
+  deployed by CI instead of hand-published.
+
+### Changed
+
+- **Consolidation keeps receipts instead of deleting.** The consumed batch becomes tombstones
+  pointing at the summary fact (ADR-007 finally holds on every path): they leave recall
+  immediately, stay listed/exportable/auditable, and ordinary decay collects them. Code that
+  iterates raw `List` output will now observe tombstones where deletes used to be silent;
+  every shipped consumer already filters superseded facts.
+- **The knowledge graph got an extraction floor.** Stopword entities (`The`), URL/date nodes
+  and their meaningless co-mention cliques are gone; role matching uses word boundaries; the
+  ambiguous fallback type is `concept`, not `fact`; institution suffixes expanded. All five
+  noise classes are pinned by a golden corpus gate that runs in CI
+  (`internal/kg/extractor_golden_test.go`). Graph artifacts change shape accordingly.
+- **`ErrConsolidateLLMUnsupported` is never returned.** Ollama consolidation is implemented,
+  so the sentinel is retired (kept for `errors.Is` compatibility). An unreachable Ollama now
+  surfaces as the underlying transport error via `OnConsolidateError`.
+- **Extraction is incremental.** A text-signature watermark makes consolidation's graph pass
+  O(changes) per cycle instead of re-extracting every fact forever; retired facts never reach
+  the graph.
+
+### Security
+
+- **Windows token files are now actually private.** A `0600` mode maps to nothing there, so
+  the daemon's discovery file and the HTTP bearer-token file inherited whatever their
+  directory granted — every local user in team-shared trees. Both now receive a protected
+  owner-only DACL (current user + SYSTEM + Administrators) at write time, and failing to
+  secure aborts startup/minting rather than running with an exposed credential.
+  `docs/threat-model.md` documents the mechanism and the residual caveat (`gray.db` still
+  follows directory ACLs).
+
+### Fixed
+
+- `status` printed cache-read >100% by dividing by the wrong denominator.
+- Obsidian export: fact notes named by ULID are now readable titles; previews truncate by rune
+  so accented text stays valid UTF-8; the index is deterministic.
+- KG export `## Related` links resolve to entity note filenames instead of raw IDs, making the
+  graph navigable in Obsidian.
+- TUI: the graph tab no longer overflows its viewport; done sessions render as done, not
+  pending; the detail pane follows the highlighted node.
+
+### Compatibility notes
+
+- `memory.ConsolidateConfig` gained two methods (`GetOllamaURL`,
+  `GetOllamaConsolidateModel`) to carry the local summariser settings. Callers using
+  `graymatter.Config` get them automatically. Hand-rolled implementers must add two one-line
+  getters — the compiler names them. This deviates from the deprecation-notice rule in
+  [api-stability.md](docs/api-stability.md); recorded here deliberately instead of silently.
+- `Fact.Pinned` / `Fact.PinnedAt` follow the v0.10.0 pattern: zero values reproduce previous
+  behaviour exactly, and stores written before this release load as unpinned.
+- `status --json` adds `pinned`, `consolidations` and `facts_consumed` (additive).
+- A new `kg_extracted` bucket records the extraction watermark; no migration is needed — old
+  stores simply behave as fully unextracted for one cycle.
+
+---
+
 ## [0.13.1] - 2026-08-24
 
 ### Fixed

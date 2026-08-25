@@ -52,21 +52,22 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).Close() error` | |
 | `(*Store).SetKG(graph GraphAccessor, extractor EntityExtractorAccessor)` | |
 | `(*Store).DB() *bolt.DB` | |
-| `Fact` struct — all fields present in v0.1.0 | New fields may be added; `SupersededBy` added in v0.10.0 |
+| `Fact` struct — all fields present in v0.1.0 | New fields may be added; `SupersededBy` added in v0.10.0; `Confidence` added in v0.12.0; `Pinned`/`PinnedAt` added in v0.14.0 (zero values reproduce pre-v0.14 behaviour; older stores load as unpinned) |
 | `(Fact).IsSuperseded() bool` | Added in v0.10.0 |
 | `SupersededByAgent` constant | Added in v0.10.0 |
 | `MemoryStats` struct | |
 | `StoreConfig` struct — all fields present in v0.1.0 | New fields may be added; `SignalWeights` and `MinRelevance` added in v0.10.0 |
 | `SignalWeights` struct | Added in v0.10.0 |
 | `DefaultSignalWeights() SignalWeights` | Added in v0.10.0 |
-| `ErrConsolidateLLMUnsupported` | Added in v0.10.0 |
+| `ErrConsolidateLLMUnsupported` | Added in v0.10.0. Deprecated in v0.14.0: never returned anymore (Ollama consolidation is implemented); kept so `errors.Is` callers keep compiling |
 | `SharedAgentID` constant | |
-| `ConsolidateConfig` interface | |
+| `ConsolidateConfig` interface | **v0.14.0:** gained `GetOllamaURL()` and `GetOllamaConsolidateModel()`. This is a signature-level change to a stable identifier, taken with the deviation documented in the 0.14.0 changelog compatibility notes instead of a prior-minor deprecation cycle. Callers using `graymatter.Config` are unaffected; hand-rolled implementers add two getters |
 | `GraphAccessor` interface | |
 | `EntityExtractorAccessor` interface | |
 | `TypedEntityExtractor` interface, `EntityRef`, `EntityLink` | Added in v0.12.0 — optional extractor capability preserving label + type and producing co-mention links; consolidation uses it when implemented, legacy ID-only path otherwise |
 | `EdgeWriter` interface | Added in v0.12.0 — optional graph capability used by consolidation to persist co-mention edges |
 | `AdvancedStore.SetKG(...)` | Exposed in v0.12.0 (mirrors `(*Store).SetKG`) |
+| `(*Store).ConsolidationCounters()`, `ReadConsolidationCounters(db)` | Added in v0.14.0 — lifetime consolidation totals from the meta bucket, surfaced by `status` and `doctor` |
 
 ### Recall result ordering
 
