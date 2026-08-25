@@ -224,5 +224,9 @@ func TestTUI_GraphTabFitsViewport(t *testing.T) {
 		if !strings.Contains(out, "1-4") {
 			t.Errorf("graph tab at %dx%d lost the footer", m.width, m.height)
 		}
+		// The detail pane must show the highlighted node, never dead space.
+		if !strings.Contains(out, "Entity:") {
+			t.Errorf("graph tab at %dx%d has an empty detail pane", m.width, m.height)
+		}
 	}
 }
