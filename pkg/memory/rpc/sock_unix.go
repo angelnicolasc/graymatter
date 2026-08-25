@@ -28,6 +28,11 @@ const runtimeDirPerm = 0o700
 // the primary gate for the whole data dir.
 func secureDiscoveryFile(_ string) error { return nil }
 
+// SecureFileOwnerOnly is the cross-platform hook shared with other secret
+// files (the HTTP bearer token). On Unix the mode bits already carry the
+// whole promise, so there is nothing further to apply.
+func SecureFileOwnerOnly(_ string) error { return nil }
+
 // socketPath chooses where to bind the daemon socket. It prefers a socket
 // inside dataDir (nice for `ls .graymatter`), but deeply nested project
 // paths can blow past sun_path — so when the in-dir path is too long it
