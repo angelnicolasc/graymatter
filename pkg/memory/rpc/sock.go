@@ -81,7 +81,12 @@ func readDiscovery(dataDir string) (addr, token string, err error) {
 }
 
 // writeDiscovery atomically records the listener address and token to
-// dataDir's discovery file with 0600 perms.
+// dataDir's discovery file with 0600 perms. After the rename lands, the
+// platform hook tightens access further (a protected owner-only DACL on
+// Windows, where 0600 does not map to ACLs and the file would otherwise
+// inherit whatever its container directory grants — including in team-shared
+// trees). Failing to secure is fatal: a daemon that cannot protect its token
+// must not start.
 func writeDiscovery(dataDir, addr, token string) error {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
@@ -91,7 +96,10 @@ func writeDiscovery(dataDir, addr, token string) error {
 	if err := os.WriteFile(tmp, []byte(addr+"\n"+token+"\n"), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return secureDiscoveryFile(path)
 }
 
 // removeDiscovery deletes the discovery file. Best-effort.

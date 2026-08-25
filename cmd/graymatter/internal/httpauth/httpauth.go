@@ -44,9 +44,10 @@ func TokenFilePath(dataDir string) string {
 //
 // The environment variable wins when set, and is never written to disk.
 //
-// The file is written 0600. That is a real guarantee on POSIX only; on Windows
-// it inherits the parent directory's ACL, same caveat as the daemon's
-// discovery file.
+// The file is written 0600 and then handed to the platform's real access
+// control (rpc.SecureFileOwnerOnly): a protected owner-only DACL on Windows,
+// where 0600 alone is not a promise. A failure to secure the file is an
+// error — a token that cannot be protected must not be minted.
 func LoadOrCreateToken(dataDir string) (token string, created bool, err error) {
 	if env := strings.TrimSpace(os.Getenv(TokenEnv)); env != "" {
 		return env, false, nil
@@ -79,6 +80,10 @@ func LoadOrCreateToken(dataDir string) (token string, created bool, err error) {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return "", false, fmt.Errorf("httpauth: install token: %w", err)
+	}
+	if err := rpc.SecureFileOwnerOnly(path); err != nil {
+		_ = os.Remove(path)
+		return "", false, fmt.Errorf("httpauth: secure token file: %w", err)
 	}
 	return tok, true, nil
 }

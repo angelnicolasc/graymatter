@@ -75,7 +75,7 @@ the shape is:
 |---|---|
 | REST API (`graymatter server`) | Binds `127.0.0.1` by default; bearer token on every route but `/healthz`, compared in constant time |
 | MCP over HTTP (`mcp serve --http`) | Same bearer token, same loopback default; `--no-auth` refused on non-loopback addresses |
-| Daemon RPC | 256-bit token in a `0600` discovery file, constant-time compare; Unix socket on POSIX, TCP loopback on Windows |
+| Daemon RPC | 256-bit token, constant-time compare. Unix: `0600` discovery file + kernel-enforced socket perms. Windows: TCP loopback + the discovery file and the HTTP token file carry a protected owner-only DACL (user + SYSTEM + Administrators), applied at write time and enforced by the kernel — see below |
 | Plugin install | Mandatory `sha256`, verified before install and before every call; executable copied inside the store; HTTPS-only manifests; interactive confirmation |
 | Plugin / CLI names | Whitelisted identifiers plus a containment check, so no path traversal out of the plugins dir |
 
@@ -111,9 +111,16 @@ process that can write both the record and the file.
 hijack point for every process that later resolves a command through it. Pass
 `--no-path` to skip it, or install into a directory only you can write.
 
-**`0600` is POSIX-only.** On Windows, the discovery file and the HTTP token file
-inherit their parent directory's ACL. The mode passed to `os.WriteFile` does
-nothing there.
+**`0600` is POSIX-only — mitigated for the token files.** On Windows, the
+mode passed to `os.WriteFile` does nothing; a file inherits its parent
+directory's ACL. Both secret files close that gap explicitly: the daemon's
+discovery file and the HTTP bearer-token file receive a *protected* owner-only
+DACL at write time (current user + SYSTEM + Administrators, nothing
+inherited), so even in a team-shared tree no other local user can read the
+token. Failure to apply the DACL aborts the write path instead of running
+with an unprotected credential. Remaining Windows caveat: other files in the
+data dir (including `gray.db`) still inherit directory ACLs — put the store
+in a per-user location if your tree is shared.
 
 **No rate limiting.** An authenticated client can hammer any surface.
 
