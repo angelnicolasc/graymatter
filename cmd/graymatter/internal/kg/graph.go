@@ -348,6 +348,14 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		return err
 	}
 
+	// Wikilinks must name the note file (sanitized label), not the raw node
+	// ID — an [[ID]] link matches no file and Obsidian drops it from the
+	// graph view entirely.
+	labelBy := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		labelBy[n.ID] = n.Label
+	}
+
 	// Write one .md file per node.
 	for _, n := range nodes {
 		content := fmt.Sprintf("---\nid: %s\nentity_type: %s\ntags:\n  - entity\n  - %s\nfirst_seen: %s\nlast_seen: %s\nweight: %.4f\n---\n\n# %s\n\n**Type:** %s\n",
@@ -357,7 +365,12 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		var related []string
 		for _, e := range edges {
 			if e.From == n.ID {
-				line := fmt.Sprintf("- [[%s]] (%s)", e.To, e.Relation)
+				label := labelBy[e.To]
+				target := e.To
+				if label != "" {
+					target = SanitizeFilename(label)
+				}
+				line := fmt.Sprintf("- [[%s|%s]] (%s)", target, label, e.Relation)
 				if len(e.Sources) > 0 {
 					line += fmt.Sprintf(" · %d receipt(s)", len(e.Sources))
 				}
@@ -368,7 +381,7 @@ func (g *Graph) ExportObsidian(outDir string) error {
 			content += "\n## Related\n" + strings.Join(related, "\n") + "\n"
 		}
 
-		fname := sanitizeFilename(n.Label) + ".md"
+		fname := SanitizeFilename(n.Label) + ".md"
 		if err := os.WriteFile(filepath.Join(outDir, fname), []byte(content), 0o644); err != nil {
 			return fmt.Errorf("kg: write node file: %w", err)
 		}
@@ -525,7 +538,7 @@ func writeEntitiesMOC(outDir string, nodes []Node) error {
 	for _, t := range types {
 		fmt.Fprintf(&sb, "## %s (%d)\n\n", t, len(byType[t]))
 		for _, n := range byType[t] {
-			fmt.Fprintf(&sb, "- [[%s|%s]]\n", sanitizeFilename(n.Label), n.Label)
+			fmt.Fprintf(&sb, "- [[%s|%s]]\n", SanitizeFilename(n.Label), n.Label)
 		}
 		sb.WriteString("\n")
 	}
@@ -594,8 +607,14 @@ func WriteGraphConfig(vaultRoot string) error {
 	return os.WriteFile(filepath.Join(cfgDir, "graph.json"), []byte(graphJSONTemplate()), 0o644)
 }
 
-func sanitizeFilename(s string) string {
+// PLACEHOLDER maps an entity label to a filename-safe note name. It is
+// the single authority for entity note naming: ExportObsidian writes notes
+// with it and every wikilink to an entity must use it, or the link will not
+// resolve in Obsidian. Covers the characters Obsidian's link syntax and
+// Windows filenames both reject, and trims trailing dots/spaces.
+func SanitizeFilename(s string) string {
 	r := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-",
-		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-", " ", "_")
-	return r.Replace(s)
+		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-",
+		"#", "-", "^", "-", "[", "-", "]", "-", " ", "_")
+	return strings.TrimRight(r.Replace(s), ". ")
 }

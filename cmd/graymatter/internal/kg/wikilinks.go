@@ -18,7 +18,7 @@ func EntityWikilinkTargets(text string) []string {
 		if n.ID == "" {
 			continue
 		}
-		target := sanitizeFilename(n.Label)
+		target := SanitizeFilename(n.Label)
 		if target == "" || seen[target] {
 			continue
 		}
