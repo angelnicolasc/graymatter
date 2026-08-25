@@ -21,12 +21,18 @@ npm run deploy     # build + wrangler deploy (manual deploys)
 
 ## Deployment
 
-CI deploys via Cloudflare Workers Builds (Git integration): every push to
-`main` runs the build command and `npx wrangler deploy`. Non-production
-branches get preview builds.
+Deploys run through GitHub Actions (`.github/workflows/deploy-docs.yml`) and
+only trigger when `www/`, `docs/`, or the workflow itself changes:
+
+- push to `main` → `wrangler deploy` (promotes to the active deployment)
+- PRs touching those paths → `wrangler versions upload` (preview URL in the
+  step log, production untouched)
+
+Requires the repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare
+Workers") and `CLOUDFLARE_ACCOUNT_ID`.
 
 Config lives in `wrangler.jsonc` — assets-only, no Worker code. The Worker
-`name` must match the Worker created in the Cloudflare dashboard.
+`name` must match the Worker registered in the Cloudflare dashboard.
 
 The canonical `site` URL in `astro.config.mjs` feeds the sitemap and
 `llms.txt`; update it after the first deploy or when attaching a custom
