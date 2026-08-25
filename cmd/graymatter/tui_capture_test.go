@@ -230,3 +230,26 @@ func TestTUI_GraphTabFitsViewport(t *testing.T) {
 		}
 	}
 }
+
+// Pinned facts are visible in the Memory tab (ADR-010): star marker on the
+// row and the flag in the detail pane.
+func TestTUI_PinnedFactMarker(t *testing.T) {
+	st := seedForCapture(t)
+	m := newCaptureTUI(t, st)
+	m = loadAll(t, m, "graymatter-backend")
+
+	// Pin the selected fact directly on the model's list.
+	items := m.factList.Items()
+	if len(items) == 0 {
+		t.Fatal("no facts loaded")
+	}
+	sel := items[0].(factItem)
+	sel.fact.Pinned = true
+	m.factList.SetItem(0, sel)
+	m.memPane = memPaneFacts
+
+	out := m.View()
+	if !strings.Contains(out, "\u2605 ") {
+		t.Error("pinned star marker missing from fact list")
+	}
+}

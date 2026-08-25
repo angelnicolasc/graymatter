@@ -152,3 +152,19 @@ func TestBuildFactNoteNames_CollisionFreeAndDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// Pinned facts carry the flag into the vault frontmatter (ADR-010).
+func TestObsidian_PinnedFrontmatter(t *testing.T) {
+	base := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	facts := []memory.Fact{
+		{ID: "01P", AgentID: "arch", Text: "Single-writer write path.", CreatedAt: base, AccessedAt: base, Weight: 1, Pinned: true},
+	}
+	out := exportObsidian(t, facts)
+	data, err := os.ReadFile(filepath.Join(out, "arch", "Single-writer-write-path.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "pinned: true") {
+		t.Errorf("pinned flag missing from frontmatter:\n%s", data)
+	}
+}
