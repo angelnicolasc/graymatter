@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 func runStatusCmd(t *testing.T, args ...string) string {
@@ -192,3 +194,37 @@ func TestDirectStoreOverview_MatchesGroundTruth(t *testing.T) {
 // The daemon-side aggregation is pinned against a real daemon in
 // internal/daemon TestHostService_CoreSurface; the two implementations share
 // semantics (live excludes tombstones; recalls sums AccessCount).
+
+// Cache reads are part of the input side: the percentage must be
+// CacheRead / (Input + CacheRead). Dividing by Input+Output printed
+// impossible values (>100%) on cache-heavy workloads.
+func TestStatus_CacheReadPercentage(t *testing.T) {
+	view := statusView{
+		Mode: "in-process",
+		Overview: &daemon.StoreOverviewResponse{
+			TotalAgents:    1,
+			TotalLiveFacts: 1,
+			Agents:         []daemon.AgentSummary{{Agent: "writer", LiveFacts: 1, Recalls: 3, AvgWeight: 1}},
+		},
+		KG: &daemon.KGStateResponse{},
+		Tokens: harness.TokenUsageSummary{
+			Loaded:   true,
+			Requests: 10,
+			Input:    1_000,
+			Output:   500,
+			CacheRead: 9_000,
+		},
+		Facts: map[string][]memory.Fact{
+			"writer": {{ID: "f1", AgentID: "writer", Text: "one two three four five"}},
+		},
+	}
+
+	var out bytes.Buffer
+	if err := renderStatus(&out, view); err != nil {
+		t.Fatalf("renderStatus: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "cache-read 90%") {
+		t.Errorf("cache-read line wrong, want 90%% (CacheRead/(Input+CacheRead)):\n%s", got)
+	}
+}
