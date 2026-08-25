@@ -21,6 +21,10 @@ var (
 	bucketMeta          = []byte("meta")
 	bucketAgents        = []byte("agents")
 	bucketPendingVector = []byte("pending_vector")
+	// bucketKGExtracted is the extraction watermark (A7): key
+	// "<agentID>\x00<factID>" → text signature of the last successfully
+	// extracted version of the fact, so consolidation passes are incremental.
+	bucketKGExtracted = []byte("kg_extracted")
 
 	// ErrStoreReadOnly is returned by mutating methods when the store was opened
 	// in read-only mode (e.g. another process holds the write lock).
@@ -234,7 +238,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 	if !readOnly {
 		// Ensure top-level buckets exist.
 		if err := db.Update(func(tx *bolt.Tx) error {
-			for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents, bucketPendingVector} {
+			for _, name := range [][]byte{bucketFacts, bucketSessions, bucketMeta, bucketAgents, bucketPendingVector, bucketKGExtracted} {
 				if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 					return err
 				}
@@ -441,17 +445,27 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 	return nil
 }
 
-// Delete removes a fact by ID for agentID.
+// Delete removes a fact by ID for agentID, together with its KG extraction
+// watermark: a signature for a deleted fact is unbounded garbage, and a
+// future re-add of the same text lands under a new ID (new key) so it must
+// extract again.
 func (s *Store) Delete(agentID, factID string) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
+		parent := tx.Bucket(bucketFacts)
+		b := parent.Bucket([]byte(agentID))
 		if b == nil {
 			return nil
 		}
-		return b.Delete([]byte(factID))
+		if err := b.Delete([]byte(factID)); err != nil {
+			return err
+		}
+		if kb := tx.Bucket(bucketKGExtracted); kb != nil {
+			return kb.Delete([]byte(agentID + "\x00" + factID))
+		}
+		return nil
 	})
 }
 

@@ -614,8 +614,15 @@ export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic embeddings + consolidation LL
 ollama pull nomic-embed-text
 export GRAYMATTER_OLLAMA_URL=http://localhost:11434     # optional override
 export GRAYMATTER_OLLAMA_MODEL=nomic-embed-text         # optional override
+export GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL=llama3.2     # local consolidation summariser (ADR-011)
 export GRAYMATTER_OPENAI_MODEL=text-embedding-3-small   # optional override
 ```
+
+Consolidation (`ConsolidateLLM`) accepts `"anthropic"` (needs
+`ANTHROPIC_API_KEY`) or `"ollama"` — fully local, no key. With Ollama, each
+applied cycle replaces the weakest half of an agent's facts with one summary;
+the consumed facts stay auditable as tombstones pointing at the summary, and
+`status` reports the running totals (`consolidations`, `facts_consumed`).
 
 ### Key config fields ([`config.go`](../config.go))
 

@@ -14,11 +14,13 @@ import (
 // kgTestConfig satisfies memory.ConsolidateConfig with deterministic values.
 type kgTestConfig struct{}
 
-func (c *kgTestConfig) GetAnthropicAPIKey() string      { return "" }
-func (c *kgTestConfig) GetConsolidateLLM() string       { return "" }
-func (c *kgTestConfig) GetConsolidateModel() string     { return "" }
-func (c *kgTestConfig) GetConsolidateThreshold() int    { return 100 }
-func (c *kgTestConfig) GetDecayHalfLife() time.Duration { return 720 * time.Hour }
+func (c *kgTestConfig) GetAnthropicAPIKey() string        { return "" }
+func (c *kgTestConfig) GetConsolidateLLM() string         { return "" }
+func (c *kgTestConfig) GetConsolidateModel() string       { return "" }
+func (c *kgTestConfig) GetConsolidateThreshold() int      { return 100 }
+func (c *kgTestConfig) GetDecayHalfLife() time.Duration   { return 720 * time.Hour }
+func (c *kgTestConfig) GetOllamaURL() string              { return "" }
+func (c *kgTestConfig) GetOllamaConsolidateModel() string { return "" }
 
 // TestKGEndToEnd_DirectMode is the acceptance run for knowledge-graph
 // auto-population, exercised through the real shipped stack in direct mode:

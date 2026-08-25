@@ -348,6 +348,7 @@ func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
 		resp.Agents = append(resp.Agents, sum)
 	}
 	resp.PendingVectorOps = d.store.PendingVectorCount()
+	resp.Consolidations, resp.FactsConsumed = memory.ReadConsolidationCounters(d.store.DB())
 	return resp, nil
 }
 

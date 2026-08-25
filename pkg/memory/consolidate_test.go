@@ -20,13 +20,17 @@ type testConsolidateCfg struct {
 	llm       string
 	apiKey    string
 	model     string
+	ollamaURL string
+	ollamaMdl string
 }
 
-func (c *testConsolidateCfg) GetAnthropicAPIKey() string     { return c.apiKey }
-func (c *testConsolidateCfg) GetConsolidateLLM() string      { return c.llm }
-func (c *testConsolidateCfg) GetConsolidateModel() string    { return c.model }
-func (c *testConsolidateCfg) GetConsolidateThreshold() int   { return c.threshold }
-func (c *testConsolidateCfg) GetDecayHalfLife() time.Duration { return c.halfLife }
+func (c *testConsolidateCfg) GetAnthropicAPIKey() string        { return c.apiKey }
+func (c *testConsolidateCfg) GetConsolidateLLM() string         { return c.llm }
+func (c *testConsolidateCfg) GetConsolidateModel() string       { return c.model }
+func (c *testConsolidateCfg) GetConsolidateThreshold() int      { return c.threshold }
+func (c *testConsolidateCfg) GetDecayHalfLife() time.Duration   { return c.halfLife }
+func (c *testConsolidateCfg) GetOllamaURL() string              { return c.ollamaURL }
+func (c *testConsolidateCfg) GetOllamaConsolidateModel() string { return c.ollamaMdl }
 
 func defaultTestCfg() *testConsolidateCfg {
 	return &testConsolidateCfg{
@@ -273,13 +277,14 @@ func TestConsolidate_PutBeforeDelete(t *testing.T) {
 	}
 }
 
-// TestConsolidate_OllamaSummariserReportsUnsupported covers a misconfiguration
-// that used to be invisible. Ollama is a supported embedding backend, so
-// setting ConsolidateLLM="ollama" looks reasonable and is accepted by config —
-// but summarisation via Ollama is not implemented, and the code returned an
-// empty summary and no error. Consolidation then ran forever doing decay and
-// pruning only, with nothing anywhere to explain why memory kept growing.
-func TestConsolidate_OllamaSummariserReportsUnsupported(t *testing.T) {
+// TestConsolidate_OllamaUnreachableReports covers the misconfiguration that
+// used to be invisible. Ollama is a supported embedding backend, so setting
+// ConsolidateLLM="ollama" looks reasonable — and when nothing answers on that
+// URL, consolidation must say so through OnConsolidateError instead of
+// quietly doing nothing forever. The cycle itself still runs decay and
+// pruning, and the batch stays live: a broken summariser degrades to the
+// exact behaviour of ConsolidateLLM="".
+func TestConsolidate_OllamaUnreachableReports(t *testing.T) {
 	var reported []error
 	dir := t.TempDir()
 	s, err := Open(StoreConfig{
@@ -296,7 +301,9 @@ func TestConsolidate_OllamaSummariserReportsUnsupported(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	cfg := &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour, llm: "ollama"}
+	// Port 1 on localhost is reserved and refuses connections immediately.
+	cfg := &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour, llm: "ollama",
+		ollamaURL: "http://127.0.0.1:1"}
 	for i := 0; i < 5; i++ { // over the threshold, so summarisation is attempted
 		if err := s.Put(ctx, "ollama-agent", fmt.Sprintf("observation number %d", i)); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -307,14 +314,17 @@ func TestConsolidate_OllamaSummariserReportsUnsupported(t *testing.T) {
 		t.Fatalf("Consolidate: %v", err)
 	}
 
-	var found bool
+	if len(reported) == 0 {
+		t.Error("an unreachable consolidation LLM reported nothing")
+	}
 	for _, e := range reported {
 		if errors.Is(e, ErrConsolidateLLMUnsupported) {
-			found = true
+			t.Errorf("sentinel ErrConsolidateLLMUnsupported is retired but was returned: %v", e)
 		}
 	}
-	if !found {
-		t.Errorf("configuring an unimplemented consolidation LLM reported nothing; got %v", reported)
+	facts, _ := s.List("ollama-agent")
+	if len(facts) != 5 {
+		t.Errorf("fallback must leave the store untouched; got %d facts, want 5", len(facts))
 	}
 }
 

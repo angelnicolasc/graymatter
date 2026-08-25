@@ -326,6 +326,9 @@ func checkStore(dir string) checkResult {
 		pending, _ := dc.PendingVectorCount()
 		c.Status = "ok"
 		c.Detail = fmt.Sprintf("served by daemon — %d fact(s) across %d agent(s)", facts, len(agents))
+		if ov, err := dc.StoreOverview(); err == nil {
+			c.Detail += fmt.Sprintf(" · consolidations %d (facts consolidated %d)", ov.Consolidations, ov.FactsConsumed)
+		}
 		if pending > 0 {
 			c.Status = "warn"
 			c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
@@ -362,8 +365,9 @@ func checkStore(dir string) checkResult {
 		}
 	}
 	pending := store.PendingVectorCount()
+	cycles, consumed := store.ConsolidationCounters()
 	c.Status = "ok"
-	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read)", facts, len(agents))
+	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read) · consolidations %d (facts consolidated %d)", facts, len(agents), cycles, consumed)
 	if pending > 0 {
 		c.Status = "warn"
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
