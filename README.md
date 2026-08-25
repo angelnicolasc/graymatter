@@ -270,6 +270,7 @@ graymatter bench                                   # audit published numbers fro
 graymatter status                                  # facts, recalls, KG state, injection estimate
 graymatter doctor --audit [path]                   # audit any instruction file
 graymatter doctor --graph                          # knowledge-graph analytics
+graymatter doctor --health                         # store health audit (supersede loops, dumping, near-prune criticals, duplicates)
 graymatter context-sync                            # managed context block (opt-in)
 graymatter mcp serve                               # start MCP server
 graymatter server                                  # REST API server (127.0.0.1:8080)
@@ -360,6 +361,7 @@ condition under which it should be reversed.
 | [008](docs/decisions/008-knowledge-graph-wiring.md) | KG auto-population ships gated and measured |
 | [009](docs/decisions/009-kg-sentinel-activation.md) | `init --kg` persists activation via sentinel file |
 | [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation |
+| [011](docs/decisions/011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally |
 
 ---
 
@@ -450,8 +452,8 @@ It is exactly one thing: **the missing stateful layer for Go agents**, packaged 
 
 ## Roadmap
 
-- [ ] Cross-project memory federation (read-only) — [#12](https://github.com/angelnicolasc/graymatter/issues/12)
-- [ ] Ollama-backed consolidation LLM
+- [x] Ollama-backed consolidation LLM — shipped in [v0.14.0](CHANGELOG.md): propose/apply with tombstone receipts, fully local ([ADR-011](docs/decisions/011-consolidation-propose-apply.md))
+- [ ] Cross-project memory federation (read-only) — [#12](https://github.com/angelnicolasc/graymatter/issues/12), deferred until a multi-project store demonstrates the need
 - [ ] WebSocket streaming for REST API
 - [ ] MCP 2026-07-28 stateless protocol support
 
