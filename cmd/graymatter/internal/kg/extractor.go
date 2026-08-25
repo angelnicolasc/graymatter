@@ -55,12 +55,33 @@ var (
 	// Unicode classes so accented names survive intact instead of fragmenting
 	// at the first non-ASCII letter.
 	reCapNames = regexp.MustCompile(`\b(\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)+)\b`)
-	// Single capitalized words (≥2 occurrences required to be considered significant)
+	// Single capitalized words (occurrence-gated; see singleCapMinCount)
 	reCaps = regexp.MustCompile(`\b(\p{Lu}\p{Ll}{2,})\b`)
+	// Sentence-function words are never entities, however often they appear:
+	// "The" opens most English sentences and would clear any occurrence
+	// threshold. Matched case-insensitively against the lowercased candidate.
+	singleCapStop = map[string]bool{
+		"the": true, "this": true, "that": true, "these": true, "those": true,
+		"there": true, "then": true, "when": true, "what": true, "why": true,
+		"how": true, "but": true, "and": true, "or": true, "not": true,
+		"all": true, "any": true, "some": true, "now": true, "once": true,
+		"after": true, "before": true, "if": true, "it": true, "its": true,
+		"his": true, "her": true, "their": true, "our": true, "your": true,
+	}
+	// A single capitalized word becomes an entity at this many occurrences.
+	// 2 produced measured noise on a 320-fact corpus ("The", hyphen-split
+	// name fragments like "Modigliani" from "Modigliani-Miller", single-word
+	// title fragments); 3 removed that class while every genuine single-word
+	// entity in the corpus cleared it. Measured, not guessed — see
+	// extractor_testdata/golden_facts.json.
+	singleCapMinCount = 3
 	// All-caps role titles, optionally followed by a capitalized name:
 	// "CTO", "VP Finance". Case-sensitive on purpose: a lowercase token
 	// after the title is a verb ("the CTO approved"), not a name.
 	reRoleTitle = regexp.MustCompile(`\b(VP|CTO|CEO|CFO|COO|CIO)(\s+[A-Z][a-z]+)?\b`)
+	// Role words matched with word boundaries. Substring matching typed
+	// "Hector Salazar" as a role because "heCTOR" contains "cto".
+	reRoleWord = regexp.MustCompile(`\b(vp|ceo|cto|cfo|coo|cio|director|manager)\b`)
 	// Sentence-initial determiners glued onto a name: "The Atlas Migration".
 	// Stripped after matching so the entity is the name, not the sentence.
 	determiners = map[string]bool{"the": true, "a": true, "an": true, "and": true, "or": true}
@@ -73,12 +94,10 @@ var (
 		"systems": true, "analytics": true, "freight": true, "legal": true,
 		"foods": true, "ventures": true, "utilities": true,
 		"semiconductors": true, "health": true,
+		"institutions": true, "school": true, "review": true, "journal": true,
+		"institute": true, "press": true,
 	}
 	lowercaseRoles = []string{"director", "manager", "advisor", "registrar"}
-	// URLs
-	reURL = regexp.MustCompile(`https?://[^\s"'<>]+`)
-	// ISO dates: 2026-04-09
-	reDate = regexp.MustCompile(`\b(\d{4}-\d{2}-\d{2})\b`)
 	// @mentions
 	reMention = regexp.MustCompile(`@([A-Za-z0-9_]+)`)
 	// Quoted strings (double-quote only, 3–60 chars)
@@ -134,40 +153,40 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 
 	// Multi-word capitalized names → persons or organizations. Leading
 	// determiners are stripped so "The Atlas Migration" yields the name,
-	// never a sentence fragment.
+	// never a sentence fragment. A match that collapses to a single token
+	// after stripping ("The Goal" → "Goal") is a sentence opening, not a
+	// name: single-word entities enter through the occurrence-gated
+	// single-cap path instead of bypassing it.
 	for _, m := range reCapNames.FindAllString(text, -1) {
 		label := stripDeterminers(m)
 		if label == "" {
 			continue
 		}
+		if len(strings.Fields(label)) == 1 && len(strings.Fields(m)) > 1 {
+			continue
+		}
 		add(label, classifyCapName(label))
 	}
 
-	// Single capitalized words — require ≥2 occurrences to filter noise.
+	// Single capitalized words — occurrence-gated and stopword-filtered.
+	// URLs and ISO dates are deliberately NOT entities: they are attributes
+	// of the fact (visible in the fact text itself, the TUI and the export),
+	// and as graph nodes they contributed meaningless co_mentioned cliques
+	// (URL↔date) while reading as noise in every surface that renders them.
 	capCounts := make(map[string]int)
 	for _, m := range reCaps.FindAllString(text, -1) {
+		lower := strings.ToLower(m)
+		if singleCapStop[lower] {
+			continue
+		}
 		if !seen[canonicalID(m)] {
 			capCounts[m]++
 		}
 	}
 	for label, count := range capCounts {
-		if count >= 2 {
-			add(label, "fact")
+		if count >= singleCapMinCount {
+			add(label, "concept")
 		}
-	}
-
-	// URLs → reference entity. Sentence-final punctuation is trimmed so the
-	// reference ID does not carry a period that no other mention shares.
-	for _, m := range reURL.FindAllString(text, -1) {
-		url := strings.TrimRight(m, ".,;:!?)")
-		if url != "" && strings.HasPrefix(url, "http") {
-			add(url, "reference")
-		}
-	}
-
-	// ISO dates → date entity.
-	for _, m := range reDate.FindAllString(text, -1) {
-		add(m, "date")
 	}
 
 	// @mentions → person entity.
@@ -217,20 +236,14 @@ func classifyCapName(name string) string {
 	switch {
 	case len(tokens) > 0 && orgSuffixes[strings.ToLower(tokens[len(tokens)-1])]:
 		return "organization"
-	case strings.Contains(lc, "corp") || strings.Contains(lc, "inc") ||
-		strings.Contains(lc, "ltd") || strings.Contains(lc, "llc") ||
-		strings.Contains(lc, "company"):
-		return "organization"
-	case strings.Contains(lc, "vp") || strings.Contains(lc, "ceo") ||
-		strings.Contains(lc, "cto") || strings.Contains(lc, "director") ||
-		strings.Contains(lc, "manager"):
+	case reRoleWord.MatchString(lc):
 		return "role"
 	default:
 		parts := strings.Fields(name)
 		if len(parts) == 2 && isProperNoun(parts[0]) && isProperNoun(parts[1]) {
 			return "person"
 		}
-		return "fact"
+		return "concept"
 	}
 }
 
@@ -257,7 +270,7 @@ type llmExtractor struct {
 
 const extractionPrompt = `Extract named entities from the following text.
 Return a JSON object with two arrays:
-- "nodes": [{"id":"<lowercase_id>","label":"<display_name>","entity_type":"<person|organization|project|decision|preference|fact>"}]
+- "nodes": [{"id":"<lowercase_id>","label":"<display_name>","entity_type":"<person|organization|project|decision|preference|concept>"}]
 - "edges": [{"from":"<id>","to":"<id>","relation":"<related_to|mentioned_with|contradicts>"}]
 
 Only include entities that are clearly identifiable. Return valid JSON only, no prose.

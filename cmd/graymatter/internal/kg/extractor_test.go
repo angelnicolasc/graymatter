@@ -1,6 +1,7 @@
 package kg
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -19,34 +20,34 @@ func TestRegexExtractor_MultiWordName(t *testing.T) {
 	}
 }
 
-func TestRegexExtractor_URLExtraction(t *testing.T) {
+// URLs and ISO dates stopped being entities by measurement (W2 of the
+// hardening playbook): as graph nodes they contributed meaningless
+// co_mentioned cliques (URL↔date) and read as noise in every surface that
+// renders them. They remain visible as attributes of the fact text itself.
+
+func TestRegexExtractor_URLsAreNotEntities(t *testing.T) {
 	e := NewExtractor(ExtractorConfig{})
 	nodes, _, err := e.Extract("See our docs at https://example.com/docs for details.")
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	found := map[string]bool{}
 	for _, n := range nodes {
-		found[n.Label] = true
-		found[n.EntityType] = true
-	}
-	if !found["https://example.com/docs"] {
-		t.Errorf("URL not extracted; nodes: %v", nodeLabels(nodes))
+		if strings.Contains(n.Label, "http") || n.EntityType == "reference" {
+			t.Errorf("URL leaked as entity: %q (%s); nodes: %v", n.Label, n.EntityType, nodeLabels(nodes))
+		}
 	}
 }
 
-func TestRegexExtractor_DateExtraction(t *testing.T) {
+func TestRegexExtractor_DatesAreNotEntities(t *testing.T) {
 	e := NewExtractor(ExtractorConfig{})
 	nodes, _, err := e.Extract("The meeting is on 2026-04-15.")
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	found := map[string]bool{}
 	for _, n := range nodes {
-		found[n.Label] = true
-	}
-	if !found["2026-04-15"] {
-		t.Errorf("date not extracted; nodes: %v", nodeLabels(nodes))
+		if n.EntityType == "date" || strings.Count(n.Label, "-") == 2 {
+			t.Errorf("date leaked as entity: %q; nodes: %v", n.Label, nodeLabels(nodes))
+		}
 	}
 }
 
@@ -78,7 +79,7 @@ func TestRegexExtractor_EmptyInput(t *testing.T) {
 
 func TestRegexExtractor_EdgesLinkAllPairs(t *testing.T) {
 	e := NewExtractor(ExtractorConfig{})
-	_, edges, err := e.Extract("Maria Rodriguez is at Acme Corp. See https://acme.example.com for info.")
+	_, edges, err := e.Extract("Maria Rodriguez is at Acme Corp with Ben Ito.")
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
@@ -220,21 +221,92 @@ func TestRegexExtractor_RoleTitles(t *testing.T) {
 	}
 }
 
-func TestRegexExtractor_URLTrailingPunctuationTrimmed(t *testing.T) {
+// --- W2 extractor floor (stopwords, occurrence threshold, word-boundary
+// roles, URL/date demotion). Each test pins one measured noise class from the
+// 320-fact corpus inventory; thresholds and lists cite that measurement.
+
+func TestRegexExtractor_SentenceStopwordsAreNotEntities(t *testing.T) {
 	e := NewExtractor(ExtractorConfig{})
-	nodes, _, err := e.Extract("Changelog lives at https://example.com/changelog.")
+	// "The" opens sentences and cleared the old occurrence threshold.
+	nodes, _, err := e.Extract("The result appeared in The American Economic Review. The review confirmed it.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
 	for _, n := range nodes {
-		found[n.ID] = true
+		if singleCapStop[strings.ToLower(n.Label)] {
+			t.Errorf("stopword leaked as entity: %q; nodes: %v", n.Label, nodeLabels(nodes))
+		}
 	}
-	if found["https://example.com/changelog."] {
-		t.Error("trailing period captured in reference id")
+}
+
+func TestRegexExtractor_SingleCapOccurrenceThreshold(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	// "Modigliani" appears twice (once inside the hyphenated pair) — below
+	// the measured threshold of 3, so the fragment must not become an entity.
+	nodes, _, err := e.Extract("The Modigliani-Miller result appeared in 1958. Modigliani objected to the simplification.")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !found["https://example.com/changelog"] {
-		t.Error("trimmed URL missing")
+	for _, n := range nodes {
+		if n.ID == "modigliani" {
+			t.Errorf("hyphen-split name fragment became an entity below threshold: %v", nodeLabels(nodes))
+		}
+	}
+}
+
+func TestRegexExtractor_RoleMatchUsesWordBoundaries(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	// "hector" contains "cto" as a substring; only a word-boundary match may
+	// call something a role.
+	nodes, _, err := e.Extract("Hector Salazar negotiated the renewal.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range nodes {
+		if n.ID == "hector salazar" && n.EntityType == "role" {
+			t.Errorf("substring role match: %q typed %q", n.Label, n.EntityType)
+		}
+		if n.ID == "hector salazar" && n.EntityType != "person" {
+			t.Errorf("hector salazar typed %q, want person", n.EntityType)
+		}
+	}
+}
+
+func TestRegexExtractor_InstitutionSuffixes(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	nodes, _, err := e.Extract("Harvard Business School hosts the program; the paper ran in Harvard Business Review.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, n := range nodes {
+		types[n.ID] = n.EntityType
+	}
+	for _, id := range []string{"harvard business school", "harvard business review"} {
+		if types[id] != "organization" {
+			t.Errorf("%s typed %q, want organization (all: %v)", id, types[id], types)
+		}
+	}
+}
+
+func TestRegexExtractor_ConceptFallbackType(t *testing.T) {
+	e := NewExtractor(ExtractorConfig{})
+	// Known measured limitation, kept deliberately: 2-token proper-noun
+	// strings default to person because the corpus measured ~5:1 in favour
+	// (50 correct persons vs 10 concepts). See golden_facts.json.
+	nodes, _, err := e.Extract("Six Sigma targets fewer than 3.4 defects per million opportunities.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]string{}
+	for _, n := range nodes {
+		found[n.ID] = n.EntityType
+	}
+	if found["six sigma"] != "person" {
+		t.Errorf("six sigma typed %q; the measured 2-token default is person", found["six sigma"])
+	}
+	if found["sigma"] != "" {
+		t.Error("fragment leaked as separate entity")
 	}
 }
 

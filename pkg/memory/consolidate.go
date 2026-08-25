@@ -209,7 +209,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 				continue
 			}
 			for _, id := range ids {
-				if upsertErr := graph.UpsertNode(id, id, "fact"); upsertErr != nil {
+				if upsertErr := graph.UpsertNode(id, id, "concept"); upsertErr != nil {
 					if s.cfg.OnConsolidateError != nil {
 						s.cfg.OnConsolidateError(agentID, fmt.Errorf("upsert node %s: %w", id, upsertErr))
 					}
