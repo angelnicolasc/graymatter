@@ -325,6 +325,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nodeList.SetItems(items)
 		m.kgEdgeCount = msg.edges
 		m.kgOrphans = msg.orphans
+		if sel, ok := m.nodeList.SelectedItem().(nodeItem); ok {
+			m.nodeDetail.SetContent(formatNodeDetail(sel.n))
+		}
 
 	case dashboardLoadedMsg:
 		m.dashboard = msg.data
@@ -364,6 +367,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd1, cmd2 tea.Cmd
 		m.nodeList, cmd1 = m.nodeList.Update(msg)
 		m.nodeDetail, cmd2 = m.nodeDetail.Update(msg)
+		// Keep the detail pane in sync with the highlighted node.
+		if _, isKey := msg.(tea.KeyMsg); isKey {
+			if sel, ok := m.nodeList.SelectedItem().(nodeItem); ok {
+				m.nodeDetail.SetContent(formatNodeDetail(sel.n))
+			}
+		}
 		cmds = append(cmds, cmd1, cmd2)
 	}
 
@@ -663,8 +672,18 @@ func (m *tuiModel) updateSizes() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-func formatFactDetail(f memory.Fact) string {
+func formatNodeDetail(n kg.Node) string {
 	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Entity:  %s\n", n.Label))
+	sb.WriteString(fmt.Sprintf("Type:    %s\n", n.EntityType))
+	sb.WriteString(fmt.Sprintf("ID:      %s\n", n.ID))
+	sb.WriteString(fmt.Sprintf("Weight:  %.4f\n", n.Weight))
+	sb.WriteString(fmt.Sprintf("First:   %s\n", n.FirstSeen.Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("Last:    %s\n", n.LastSeen.Format("2006-01-02 15:04")))
+	return sb.String()
+}
+
+func formatFactDetail(f memory.Fact) string {	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ID:      %s\n", f.ID))
 	sb.WriteString(fmt.Sprintf("Agent:   %s\n", f.AgentID))
 	sb.WriteString(fmt.Sprintf("Created: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05")))
