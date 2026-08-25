@@ -22,6 +22,12 @@ const maxUnixSocketPath = 100
 // runtimeDirPerm is the mode the fallback directory must have: owner only.
 const runtimeDirPerm = 0o700
 
+// secureDiscoveryFile tightens the discovery file's access after it lands on
+// its final name. On Unix this is a no-op: the 0600 mode bits written by
+// os.WriteFile are enforced by the kernel, and the OS permission model is
+// the primary gate for the whole data dir.
+func secureDiscoveryFile(_ string) error { return nil }
+
 // socketPath chooses where to bind the daemon socket. It prefers a socket
 // inside dataDir (nice for `ls .graymatter`), but deeply nested project
 // paths can blow past sun_path — so when the in-dir path is too long it
