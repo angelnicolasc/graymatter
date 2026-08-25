@@ -34,7 +34,7 @@ func TestTUI_DeleteAllowedInWriteMode(t *testing.T) {
 		readOnly: false,
 		memPane:  memPaneFacts,
 		// factList and agentList are zero-value: SelectedItem() returns nil,
-		// so the inner delete block is skipped — but no status is set either.
+		// so the inner delete block is skipped â€” but no status is set either.
 	}
 
 	_ = m.updateMemoryKey(keyMsg('d'))
@@ -65,5 +65,21 @@ func TestTUI_KillAllowedInWriteMode(t *testing.T) {
 
 	if strings.Contains(m.status, "read-only") {
 		t.Errorf("write-mode 'k' should not set read-only status, got %q", m.status)
+	}
+}
+
+// The runner writes "done" for completed sessions; statusStyle used to have
+// a case only for "success", so finished runs rendered as pending (?).
+func TestStatusStyle_RunnerDoneIsGreen(t *testing.T) {
+	got := statusStyle("done")
+	check, pending := string(rune(0x2713)), string(rune(0x25CB))
+	if strings.Contains(got, pending) {
+		t.Errorf("done rendered as pending: %q", got)
+	}
+	if !strings.Contains(got, check) || !strings.Contains(got, "done") {
+		t.Errorf("done should render with a check mark: %q", got)
+	}
+	if got := statusStyle("running"); !strings.Contains(got, "running") {
+		t.Errorf("running mangled: %q", got)
 	}
 }

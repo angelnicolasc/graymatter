@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -11,6 +12,7 @@ import (
 	"github.com/muesli/termenv"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 )
 
 // captureDir is where the ANSI dumps land. Unset, the test only logs, so it is
@@ -184,3 +186,43 @@ var errCaptureDead = errCapture{}
 type errCapture struct{}
 
 func (errCapture) Error() string { return "connection is shut down" }
+
+// TestTUI_GraphTabFitsViewport pins the whole-screen invariant: whatever the
+// tab, View() must never render more lines than the terminal height, and the
+// header (logo + tab bar) must stay visible. The Graph tab used to overflow
+// because its stats header (3 rows) was never discounted from the pane
+// heights, pushing the header off the top of the screen.
+func TestTUI_GraphTabFitsViewport(t *testing.T) {
+	st := seedForCapture(t)
+	ds, ok := st.(*directStore)
+	if !ok {
+		t.Fatalf("expected *directStore")
+	}
+	g, err := kg.Open(ds.store.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, label := range []string{"bbolt", "chromem-go", "RRF", "daemon", "Obsidian", "MCP", "decay", "tombstone"} {
+		if err := g.Upsert(kg.Node{ID: label, Label: label, EntityType: "concept", Weight: 1 - float64(i)*0.05}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, size := range [][2]int{{124, 36}, {190, 44}, {100, 30}, {80, 24}} {
+		m := newCaptureTUI(t, st)
+		m.width, m.height = size[0], size[1]
+		m.activeTab = tabGraph
+		m.updateSizes()
+		m = loadAll(t, m, "")
+		out := m.View()
+		lines := strings.Count(out, "\n") + 1
+		if lines > m.height {
+			t.Errorf("graph tab at %dx%d renders %d lines (viewport %d)", m.width, m.height, lines, m.height)
+		}
+		if !strings.Contains(out, "GRAYMATTER") {
+			t.Errorf("graph tab at %dx%d lost the header", m.width, m.height)
+		}
+		if !strings.Contains(out, "1-4") {
+			t.Errorf("graph tab at %dx%d lost the footer", m.width, m.height)
+		}
+	}
+}
