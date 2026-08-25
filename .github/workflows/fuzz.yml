@@ -1,0 +1,50 @@
+name: Fuzz
+
+# Nightly cadence for the fuzz targets. They are green in every PR (the seed
+# corpus runs as unit tests), but only a scheduled -fuzz run explores beyond
+# the seeds. A crash fails this workflow and the reproducer lands in
+# pkg/memory/testdata/fuzz, which is committed, so the next regular CI run
+# pins it as a unit test until it is fixed.
+
+on:
+  schedule:
+    # Nightly at 03:17 UTC — off the top of the hour, when scheduled-workflow
+    # congestion is lowest.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.7"
+          cache: true
+
+      # One target per step so a crash in the first does not hide the others'
+      # status, and so the log shows exactly which target broke.
+      - name: Fuzz Tokenize (60s)
+        run: go test -run xxx -fuzz FuzzTokenize -fuzztime 60s ./pkg/memory/
+
+      - name: Fuzz UnmarshalFact (60s)
+        run: go test -run xxx -fuzz FuzzUnmarshalFact -fuzztime 60s ./pkg/memory/
+
+      - name: Fuzz KeywordScore (60s)
+        run: go test -run xxx -fuzz FuzzKeywordScore -fuzztime 60s ./pkg/memory/
+
+      # A failing target leaves the reproducer in testdata/fuzz; upload it so
+      # the fix starts from the exact input, not from a log line.
+      - name: Upload crash corpus on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-crash-corpus
+          path: pkg/memory/testdata/fuzz
+          retention-days: 30
