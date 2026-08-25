@@ -88,6 +88,8 @@ func main() {
 		pluginCmd(),
 		serverCmd(),
 		contextSyncCmd(),
+		pinCmd(),
+		unpinCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

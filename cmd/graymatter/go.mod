@@ -16,6 +16,17 @@ go 1.25.5
 // workspace, where go.work's directives govern toolchain selection.
 toolchain go1.26.7
 
+// The library is developed one directory up in the same checkout; building
+// against the last published release instead silently compiles the binary
+// against a stale pkg/memory until CI's GOWORK=off step catches it — which it
+// only can when new API happens to be used. Pinning to the parent checkout
+// makes every build, workspace or not, test what this repo actually ships.
+//
+// replace directives are ignored by external consumers and by
+// `go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest`,
+// so released installs still resolve the real published version.
+replace github.com/angelnicolasc/graymatter => ../../
+
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/angelnicolasc/graymatter v0.12.1

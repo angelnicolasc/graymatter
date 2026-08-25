@@ -24,7 +24,7 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 | `memory_add` | `agent_id` (string), `text` (string) | — | Confirmation string |
 | `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Checkpoint ID + RFC3339 timestamp |
 | `checkpoint_resume` | `agent_id` (string) | — | JSON: `{id, created_at, state}` (latest checkpoint) or empty if none |
-| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`), **`agent`** (string), `text` (string) | `target` (string — old fact text for `update`/`forget`; target node ID for `link`) | Confirmation string |
+| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), **`agent`** (string), `text` (string) | `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
 
 > ℹ️ **`memory_reflect` names the agent parameter `agent`.** The other four tools use `agent_id`. `memory_reflect` also accepts `agent_id` as an alias, so either spelling works; when building calls programmatically, prefer the canonical name per tool.
 
@@ -177,6 +177,15 @@ The most powerful tool. Use it to maintain memory quality over time.
 | `update` | The corrected fact (required) | The old fact text to supersede (required) |
 | `forget` | The fact to remove (alternative to `target`) | The fact to remove (wins when both are set) |
 | `link` | Source node ID (required) | Target node ID in the knowledge graph (required) |
+| `pin` | The fact to pin (alternative to `target`) | The fact to pin (wins when both are set) |
+| `unpin` | The fact to unpin (alternative to `target`) | The fact to unpin (wins when both are set) |
+
+**Pin/unpin:** a pinned fact is exempt from decay, pruning and summarisation
+(ADR-010) — use it when the user declares something permanent: a standing
+obligation, an architecture decision, a security policy. Pins are visible
+(star in the TUI, counted by `status`, flagged in exports). Unpinning
+restores normal decay; a fact pinned for a long time inherits the accumulated
+staleness when unpinned, which is honest rather than silently reset.
 
 **Update workflow:**
 ```jsonc
@@ -306,9 +315,17 @@ Facts decay. A fact you never recall will eventually be pruned.
 { "tool": "memory_add", "args": { "agent_id": "agent", "text": "Critical security policy: …" }}
 // Then never search for it.
 
-// Better: keep important facts warm by including them in routine context-gathering.
+	// Better: keep important facts warm by including them in routine context-gathering.
 
-// Best: pin truly permanent rules to the shared namespace (see "Shared memory" below).
+	// Best: the user declared it permanent (standing obligation, architecture
+	// decision)? Pin it — memory_reflect action=pin exempts it from decay,
+	// pruning and summarisation entirely (ADR-010).
+	// ```
+	// { "tool": "memory_reflect", "args": { "action": "pin", "agent": "agent",
+	//     "text": "Critical security policy: …" }}
+	// ```
+	// A pinned fact never decays and is never pruned or summarised away;
+	// unpin when it stops being true.
 ```
 
 ### Cleanup schedule

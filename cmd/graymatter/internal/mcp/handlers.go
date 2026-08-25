@@ -230,6 +230,39 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		}
 		resultMsg = fmt.Sprintf("Linked %q → %q.", fromID, toID)
 
+	case "pin", "unpin":
+		// Same argument convention as forget: target or text, target wins.
+		wanted := target
+		if wanted == "" {
+			wanted = text
+		}
+		if wanted == "" {
+			return toolError(fmt.Sprintf("the fact to %s is required: pass it in target (or text)", action))
+		}
+		facts, err := s.backend.List(agentID)
+		if err != nil {
+			return toolError(fmt.Sprintf("list facts: %v", err))
+		}
+		victim, ok := findByText(facts, wanted)
+		if !ok {
+			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
+		}
+		// Pinning a retired fact would promise permanence for something that
+		// is no longer live; unpinning one is harmless flag hygiene.
+		if action == "pin" && victim.IsSuperseded() {
+			return toolError("cannot pin a superseded fact")
+		}
+		victim.Pinned = action == "pin"
+		if victim.Pinned {
+			victim.PinnedAt = time.Now().UTC()
+		} else {
+			victim.PinnedAt = time.Time{}
+		}
+		if err := s.backend.UpdateFact(agentID, victim); err != nil {
+			return toolError(fmt.Sprintf("%s failed: %v", action, err))
+		}
+		resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay, pruning and summarisation.", action, agentID)
+
 	default:
 		return toolError(fmt.Sprintf("unknown action %q", action))
 	}

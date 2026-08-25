@@ -115,6 +115,12 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	var decayErrs []error
 	nowT := s.now()
 	for i := range facts {
+		// Invariant I-1 (ADR-010): pinned facts are exempt from decay. The
+		// user declared them permanent; a dormant period must not collect
+		// them, and the decay write would only churn the store.
+		if facts[i].Pinned {
+			continue
+		}
 		hours := nowT.Sub(facts[i].AccessedAt).Hours()
 		facts[i].Weight = math.Min(facts[i].Weight, math.Exp(-lambda*hours))
 		if err := s.UpdateFact(agentID, facts[i]); err != nil {
@@ -128,8 +134,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	// Step 2: LLM summarisation when enabled and threshold exceeded.
 	// Strictly greater, unlike MaybeConsolidate's >= — see the note there.
 	if len(facts) > cfg.GetConsolidateThreshold() && cfg.GetConsolidateLLM() != "" {
-		sort.Slice(facts, func(i, j int) bool { return facts[i].Weight < facts[j].Weight })
-		batch := facts[:len(facts)/2]
+		batch := summarisationBatch(facts)
 
 		summary, err := summariseFacts(ctx, batch, cfg)
 		if err != nil && s.cfg.OnConsolidateError != nil {
@@ -152,12 +157,17 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		}
 	}
 
-	// Step 3: prune dead facts.
+	// Step 3: prune dead facts. Pinned facts are exempt (invariant I-1):
+	// pruning is the only thing that ever removes a fact, so a pin that
+	// didn't stop pruning would be a promise the store breaks.
 	facts, err = s.List(agentID)
 	if err != nil {
 		return err
 	}
 	for _, f := range facts {
+		if f.Pinned {
+			continue
+		}
 		if f.Weight < 0.01 {
 			// Best-effort; weight-zero facts will simply be ignored in future recalls.
 			_ = s.Delete(agentID, f.ID)
@@ -219,6 +229,25 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	}
 
 	return nil
+}
+
+// summarisationBatch selects the facts the LLM summariser may consume: the
+// weakest half of the unpinned facts, weakest first. Pinned facts are never
+// eligible (invariant I-1, ADR-010) — consolidation must not consume what the
+// user declared permanent, and pinned facts are precisely the rarely-accessed
+// ones the weight sort would surface first.
+func summarisationBatch(facts []Fact) []Fact {
+	live := make([]Fact, 0, len(facts))
+	for _, f := range facts {
+		if !f.Pinned {
+			live = append(live, f)
+		}
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].Weight < live[j].Weight })
+	return live[:len(live)/2]
 }
 
 func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (string, error) {

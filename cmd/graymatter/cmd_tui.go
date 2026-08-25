@@ -48,16 +48,29 @@ func (a agentItem) FilterValue() string { return a.id }
 type factItem struct{ fact memory.Fact }
 
 func (f factItem) Title() string {
-	preview := f.fact.Text
-	if len(preview) > 72 {
-		preview = preview[:69] + "..."
+	preview := truncateRunes(f.fact.Text, 72)
+	if f.fact.Pinned {
+		return "★ " + preview
 	}
 	return preview
 }
 func (f factItem) Description() string {
+	if f.fact.Pinned {
+		return fmt.Sprintf("pinned · weight %.3f · %s", f.fact.Weight, f.fact.CreatedAt.Format("2006-01-02"))
+	}
 	return fmt.Sprintf("weight %.3f · %s", f.fact.Weight, f.fact.CreatedAt.Format("2006-01-02"))
 }
 func (f factItem) FilterValue() string { return f.fact.Text }
+
+// truncateRunes shortens s to at most max runes without splitting multi-byte
+// characters.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-3]) + "..."
+}
 
 // --- Sessions tab ---
 
@@ -682,13 +695,16 @@ func formatNodeDetail(n kg.Node) string {
 	sb.WriteString(fmt.Sprintf("Last:    %s\n", n.LastSeen.Format("2006-01-02 15:04")))
 	return sb.String()
 }
-
-func formatFactDetail(f memory.Fact) string {	var sb strings.Builder
+func formatFactDetail(f memory.Fact) string {
+	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ID:      %s\n", f.ID))
 	sb.WriteString(fmt.Sprintf("Agent:   %s\n", f.AgentID))
 	sb.WriteString(fmt.Sprintf("Created: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("Weight:  %.4f\n", f.Weight))
 	sb.WriteString(fmt.Sprintf("Access:  %d times\n", f.AccessCount))
+	if f.Pinned {
+		sb.WriteString(fmt.Sprintf("Pinned:  yes (exempt from decay, pruning, summarisation)\n"))
+	}
 	if f.Confidence != "" {
 		sb.WriteString(fmt.Sprintf("Confidence: %s\n", f.Confidence))
 	}

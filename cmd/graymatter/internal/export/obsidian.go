@@ -117,6 +117,9 @@ func writeObsidianNote(outDir string, f memory.Fact, noteName string) error {
 	if f.Confidence != "" {
 		sb.WriteString(fmt.Sprintf("confidence: %s\n", f.Confidence))
 	}
+	if f.Pinned {
+		sb.WriteString("pinned: true\n")
+	}
 	sb.WriteString(fmt.Sprintf("tags:\n  - graymatter\n  - %s\n", sanitiseFilename(f.AgentID)))
 	sb.WriteString("---\n\n")
 	sb.WriteString(f.Text + "\n")

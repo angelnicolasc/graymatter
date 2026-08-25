@@ -47,6 +47,23 @@ type Fact struct {
 	// Added in v0.12.0. Facts written by earlier versions have no confidence
 	// key and load as inferred.
 	Confidence string `json:"confidence,omitempty"`
+
+	// Pinned exempts the fact from decay, pruning and summarisation: the
+	// user declared it permanent (a standing obligation, an architecture
+	// decision), and the forgetting curve must not collect it during a
+	// dormant period. The exemption is total and visible — pinned facts are
+	// marked in the TUI, counted by status, flagged in exports, and reported
+	// by doctor — because an invisible exemption would reintroduce the stale-
+	// fact problem ADR-001 exists to prevent, just where it hurts most.
+	// Unpinning restores normal decay from the fact's current weight.
+	//
+	// Added in v0.14.0. Facts written by earlier versions have no pinned key
+	// and load as unpinned.
+	Pinned bool `json:"pinned,omitempty"`
+
+	// PinnedAt records when the fact was pinned, for auditing. Zero when the
+	// fact is not pinned.
+	PinnedAt time.Time `json:"pinned_at,omitempty"`
 }
 
 // SupersededByAgent is the SupersededBy marker for a fact an agent retired

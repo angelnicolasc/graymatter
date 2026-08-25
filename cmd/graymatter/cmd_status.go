@@ -70,7 +70,15 @@ func runStatus(cmd *cobra.Command) error {
 	}
 
 	if jsonOut {
-		return encodeStatusJSON(out, mode, overview, kgState, tokSummary)
+		pinned := 0
+		for _, a := range overview.Agents {
+			for _, f := range view.Facts[a.Agent] {
+				if f.Pinned && !f.IsSuperseded() {
+					pinned++
+				}
+			}
+		}
+		return encodeStatusJSON(out, mode, overview, kgState, tokSummary, pinned)
 	}
 	return renderStatus(out, view)
 }
@@ -116,8 +124,17 @@ func renderStatus(out io.Writer, view statusView) error {
 		avgWeight = totalWeighted / float64(ov.TotalLiveFacts)
 	}
 
-	fmt.Fprintf(out, "STORE      %d agents · %d live facts · %d superseded · avg weight %.2f\n",
-		ov.TotalAgents, ov.TotalLiveFacts, ov.TotalTombstones, avgWeight)
+	pinnedTotal := 0
+	for _, a := range ov.Agents {
+		for _, f := range view.Facts[a.Agent] {
+			if f.Pinned && !f.IsSuperseded() {
+				pinnedTotal++
+			}
+		}
+	}
+
+	fmt.Fprintf(out, "STORE      %d agents · %d live facts · %d superseded · %d pinned · avg weight %.2f\n",
+		ov.TotalAgents, ov.TotalLiveFacts, ov.TotalTombstones, pinnedTotal, avgWeight)
 	fmt.Fprintf(out, "           oldest fact %s · newest %s · pending vector ops: %d\n",
 		relTime(oldest), relTime(newest), ov.PendingVectorOps)
 
@@ -209,13 +226,14 @@ func pct(part, whole uint64) float64 {
 	return float64(part) / float64(whole) * 100
 }
 
-func encodeStatusJSON(out io.Writer, mode string, ov *daemon.StoreOverviewResponse, kg *daemon.KGStateResponse, tok harness.TokenUsageSummary) error {
+func encodeStatusJSON(out io.Writer, mode string, ov *daemon.StoreOverviewResponse, kg *daemon.KGStateResponse, tok harness.TokenUsageSummary, pinned int) error {
 	payload := struct {
 		Mode     string                        `json:"mode"`
 		Store    *daemon.StoreOverviewResponse `json:"store"`
 		KG       *daemon.KGStateResponse       `json:"kg"`
 		Tokens30 *harness.TokenUsageSummary    `json:"tokens_30d"`
-	}{Mode: mode, Store: ov, KG: kg, Tokens30: &tok}
+		Pinned   int                           `json:"pinned"`
+	}{Mode: mode, Store: ov, KG: kg, Tokens30: &tok, Pinned: pinned}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)

@@ -262,6 +262,8 @@ graymatter init                                    # create .graymatter/ + .mcp.
 graymatter init --kg                               # persist KG activation for future daemons
 graymatter remember "agent" "text"                 # store a fact
 graymatter recall   "agent" "query"                # print context
+graymatter pin                                      # exempt a fact from decay/pruning (ADR-010)
+graymatter unpin                                    # restore normal decay
 graymatter export --format obsidian --include-graph # dump facts + entities to Obsidian
 graymatter tui                                     # 4-view terminal UI
 graymatter bench                                   # audit published numbers from the binary
@@ -357,6 +359,7 @@ condition under which it should be reversed.
 | [007](docs/decisions/007-supersede-tombstones.md) | Contradictions resolved by tombstone, never delete |
 | [008](docs/decisions/008-knowledge-graph-wiring.md) | KG auto-population ships gated and measured |
 | [009](docs/decisions/009-kg-sentinel-activation.md) | `init --kg` persists activation via sentinel file |
+| [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation |
 
 ---
 
