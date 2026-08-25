@@ -66,10 +66,9 @@ entities (person, organization, project) and links the ones that appear
 together. No manual tagging. No configuration. The graph builds itself from
 ordinary use.
 
-<!-- TODO: Generate retina screenshot of Obsidian graph view with populated vault -->
-<!-- Suggested: dark background, colored clusters by entity type, ~200+ nodes -->
+
 <p align="center">
-  <!-- <img src=".github/assets/kg-graph-view.png" alt="Knowledge Graph in Obsidian" width="800px" style="max-width: 900px;"> -->
+  <img src=".github/assets/kg-graph-view.png" alt="Knowledge Graph in Obsidian" width="800px" style="max-width: 900px;"> 
 </p>
 
 <p align="center">
@@ -92,7 +91,7 @@ You can't improve what you can't see.
 agent memory is doing — no extra setup required.
 
 <p align="center">
-  <img src=".github/assets/tui-graymatter.jpg" alt="GrayMatter-TUI" width="900px" style="max-width: 900px;">
+  <img src=".github/assets/tui-tour.gif" alt="GrayMatter-TUI" width="900px" style="max-width: 900px;">
 </p>
 
 **What you get at a glance:**
