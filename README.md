@@ -10,7 +10,7 @@
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
-  <img src="https://img.shields.io/badge/coverage-77.0%25-brightgreen" alt="Coverage 77.0%">
+  <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-core%2090%25%20%C2%B7%20cli%2081%25-brightgreen" alt="Coverage (multi-platform union): core 90%, CLI 81%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 <div align="center">
@@ -402,8 +402,11 @@ go test -count=1 ./pkg/memory/...
 cd cmd/graymatter && go test -count=1 ./...
 ```
 
-Core coverage: 74.8% (CI gate ≥ 70%). Fuzz targets: `FuzzTokenize`,
-`FuzzUnmarshalFact`, `FuzzKeywordScore`.
+Coverage, measured as the multi-platform union in CI (`coverage-union` job):
+core library ≈ 90%, CLI module ≈ 81%. Gates: core ≥ 82%, CLI ≥ 72%, and they
+only ratchet upward. Fuzz targets: `FuzzTokenize`, `FuzzUnmarshalFact`,
+`FuzzKeywordScore`, exercised nightly plus a nightly mutation-testing run
+whose surviving-mutant report feeds the test-writing queue.
 </details>
 
 <details>

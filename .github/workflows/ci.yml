@@ -171,13 +171,13 @@ jobs:
             exit 1
           fi
 
-      - name: Coverage gate — CLI union (≥65%, ratchets upward with phase-2 tests)
+      - name: Coverage gate — CLI union (≥72%, ratcheted after phase-2 tests)
         run: |
           TOTAL=$(go tool cover -func=union-cli.out \
             | grep '^total:' | awk '{print $3}' | tr -d '%')
           echo "CLI union coverage: ${TOTAL}%"
-          if awk "BEGIN{exit !($TOTAL < 65)}"; then
-            echo "::error::CLI union coverage ${TOTAL}% is below the 65% threshold."
+          if awk "BEGIN{exit !($TOTAL < 72)}"; then
+            echo "::error::CLI union coverage ${TOTAL}% is below the 72% threshold."
             exit 1
           fi
 
