@@ -34,6 +34,7 @@ func doctorCmd() *cobra.Command {
 	var (
 		audit     bool
 		graphMode bool
+		health    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "doctor [path]",
@@ -51,11 +52,19 @@ documents themselves: approx token cost per prompt (tokenizer declared in
 the output), near-duplicate paragraphs, staleness by git blame, size
 alerts at declared thresholds, and structural conflicts in managed
 blocks. Works on any project — no .graymatter directory required.
+
+With --health, audits the store itself instead of the setup: supersede
+loops, dumping bursts, critical facts near prune (pin suggestions), and
+duplicate density. Deterministic — the same store always produces the same
+report, because rules read only store contents and never the wall clock.
 Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if graphMode {
 				return runDoctorGraph(cmd)
+			}
+			if health {
+				return runDoctorHealth(cmd)
 			}
 			if audit {
 				root := "."
@@ -137,6 +146,7 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
 	cmd.Flags().BoolVar(&graphMode, "graph", false, "report knowledge-graph analytics (hubs, orphans, articulation points)")
+	cmd.Flags().BoolVar(&health, "health", false, "audit store health: supersede loops, dumping bursts, near-prune criticals, duplicates")
 	return cmd
 }
 
