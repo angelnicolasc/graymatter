@@ -77,12 +77,15 @@ func TestExport_IncludeGraph_WritesEntitiesCanvasAndFacts(t *testing.T) {
 		t.Errorf("expected fact note + 2 entity notes, found %d markdown files: %v", mds, entries)
 	}
 	// sanitizeFilename swaps spaces for underscores: "Data Pipeline" →
-	// "Data_Pipeline.md".
+	// "Data_Pipeline.md". Related links must use the label form so they
+	// resolve in Obsidian; the placeholder node's label is its ID.
 	entityNote := filepath.Join(out, "Data_Pipeline.md")
 	if data, err := os.ReadFile(entityNote); err != nil {
 		t.Errorf("entity note missing: %v", err)
-	} else if !strings.Contains(string(data), "[[etl-jobs]]") {
-		t.Errorf("entity note lacks typed backlink:\n%s", data)
+	} else if !strings.Contains(string(data), "[[etl-jobs|etl-jobs]]") {
+		t.Errorf("entity note Related link does not resolve to a note name:\n%s", data)
+	} else if _, err := os.Stat(filepath.Join(out, "etl-jobs.md")); err != nil {
+		t.Errorf("linked note missing from vault: %v", err)
 	}
 }
 

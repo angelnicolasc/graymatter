@@ -3,6 +3,7 @@ package kg
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,6 +248,37 @@ func TestExportObsidian(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("node file %q missing: %v", name, err)
 		}
+	}
+}
+
+// TestExportObsidian_RelatedLinksResolve pins the property users actually
+// consume: every [[wikilink]] in a Related section must name a file that
+// exists in the vault, or Obsidian drops the edge from the graph view.
+func TestExportObsidian_RelatedLinksResolve(t *testing.T) {
+	g, cleanup := openTestGraph(t)
+	defer cleanup()
+
+	_ = g.Upsert(Node{ID: "maria", Label: "Maria", EntityType: "person"})
+	_ = g.Upsert(Node{ID: "acme", Label: "Acme Corp", EntityType: "organization"})
+	_ = g.Link(Edge{From: "maria", To: "acme", Relation: "works_at"})
+
+	outDir := t.TempDir()
+	if err := g.ExportObsidian(outDir); err != nil {
+		t.Fatalf("ExportObsidian: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "Maria.md"))
+	if err != nil {
+		t.Fatalf("Maria.md missing: %v", err)
+	}
+	if !strings.Contains(string(data), "[[Acme_Corp|Acme Corp]]") {
+		t.Errorf("Related link not in resolvable label form:\n%s", data)
+	}
+	if strings.Contains(string(data), "[[acme]]") {
+		t.Errorf("Related link still uses the raw node ID:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "Acme_Corp.md")); err != nil {
+		t.Errorf("linked note missing from vault: %v", err)
 	}
 }
 
