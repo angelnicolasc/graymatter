@@ -343,7 +343,7 @@ func TestRecall_WithEmbedder(t *testing.T) {
 	}
 }
 
-// TestEmbedDimensionValidation verifies that checkEmbedDimensions logs a
+// TestEmbedDimensionValidation verifies that handleEmbedderLifecycle logs a
 // warning (does not error) when the stored dimension differs from the current
 // provider. We can't intercept log.Printf easily, so we verify the meta key is
 // written correctly and a mis-matched provider does not crash.
@@ -353,8 +353,8 @@ func TestEmbedDimensionValidation_RecordsOnFirstWrite(t *testing.T) {
 	// Provider A: 3-dimensional (tiny, for testing).
 	type fixedProvider struct{ dims int }
 	// Use a real keyword provider — it has Dimensions()=0, which we override via
-	// checkEmbedDimensions only when dims > 0. So we'll use nil embedder but call
-	// checkEmbedDimensions directly.
+	// handleEmbedderLifecycle only when dims > 0. So we'll use nil embedder but call
+	// handleEmbedderLifecycle directly.
 
 	s, err := Open(StoreConfig{DataDir: dir, Embedder: nil, DecayHalfLife: 720 * time.Hour})
 	if err != nil {
@@ -367,7 +367,7 @@ func TestEmbedDimensionValidation_RecordsOnFirstWrite(t *testing.T) {
 
 	// Simulate a mis-matched provider — must not panic, just warn.
 	mismatch := &errProvider{} // dims=768, matches → no warning expected here
-	s.checkEmbedDimensions(mismatch)
+	s.handleEmbedderLifecycle(mismatch)
 
 	_ = s.Close()
 }
