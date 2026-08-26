@@ -12,16 +12,20 @@ type EmbeddingMode int
 
 const (
 	// EmbeddingAuto detects the best available provider at runtime.
-	// Detection order: Ollama → OpenAI → Anthropic → keyword-only.
+	// Detection order: Ollama → OpenAI → Voyage → keyword-only.
 	EmbeddingAuto EmbeddingMode = iota
 	// EmbeddingOllama forces Ollama (requires a running Ollama instance).
 	EmbeddingOllama
-	// EmbeddingAnthropic forces Anthropic API (requires ANTHROPIC_API_KEY).
+	// EmbeddingAnthropic resolves to the Voyage-backed embeddings slot.
+	// Deprecated: Anthropic has no embeddings API; kept for numeric stability.
+	// Use EmbeddingVoyage with VOYAGE_API_KEY instead.
 	EmbeddingAnthropic
 	// EmbeddingKeyword disables vector search; uses keyword+recency scoring only.
 	EmbeddingKeyword
 	// EmbeddingOpenAI forces OpenAI Embeddings API (requires OPENAI_API_KEY).
 	EmbeddingOpenAI
+	// EmbeddingVoyage forces the Voyage AI Embeddings API (requires VOYAGE_API_KEY).
+	EmbeddingVoyage
 )
 
 // Config holds all GrayMatter configuration. All fields have sane defaults
@@ -52,9 +56,16 @@ type Config struct {
 	// Default: value of GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL env var, or "llama3.2"
 	OllamaConsolidateModel string
 
-	// AnthropicAPIKey for the Anthropic embeddings and consolidation endpoints.
+	// AnthropicAPIKey for the Anthropic consolidation endpoints.
 	// Default: value of ANTHROPIC_API_KEY env var.
 	AnthropicAPIKey string
+
+	// VoyageAPIKey for the Voyage AI embeddings endpoint (api.voyageai.com),
+	// which is what the third slot of the embedding chain actually dials.
+	// Before v0.15 that slot dialled an Anthropic embeddings endpoint that
+	// does not exist, silently degrading every store to keyword-only.
+	// Default: value of VOYAGE_API_KEY env var.
+	VoyageAPIKey string
 
 	// OpenAIAPIKey for the OpenAI Embeddings API (text-embedding-3-small).
 	// Default: value of OPENAI_API_KEY env var.
@@ -147,6 +158,7 @@ func DefaultConfig() Config {
 		OllamaModel:             envOrDefault("GRAYMATTER_OLLAMA_MODEL", "nomic-embed-text"),
 		OllamaConsolidateModel:  envOrDefault("GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL", "llama3.2"),
 		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		VoyageAPIKey:            os.Getenv("VOYAGE_API_KEY"),
 		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
 		OpenAIModel:             envOrDefault("GRAYMATTER_OPENAI_MODEL", "text-embedding-3-small"),
 		ConsolidateLLM:          resolveConsolidateLLM(),

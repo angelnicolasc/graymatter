@@ -385,7 +385,7 @@ GrayMatter degrades gracefully across four modes, always finding a way to work:
 |------|------|
 | Ollama | Local model available |
 | OpenAI | `OPENAI_API_KEY` set |
-| Anthropic | `ANTHROPIC_API_KEY` set |
+| Voyage AI | `VOYAGE_API_KEY` set — Anthropic has no embeddings API; this slot used to dial a nonexistent Anthropic endpoint and silently degrade to keyword-only (fixed in v0.15) |
 | Keyword-only | Nothing available — TF-IDF + recency, zero deps |
 
 ---
