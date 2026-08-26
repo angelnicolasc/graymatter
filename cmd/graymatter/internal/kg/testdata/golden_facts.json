@@ -1,6 +1,59 @@
 {
   "facts": [
     {
+      "text": "María Fernández cerró el trato con Logística Céspedes para la renovación anual.",
+      "want": [
+        { "label": "María Fernández", "type": "person" },
+        { "label": "Logística Céspedes", "type": "organization" }
+      ],
+      "forbid": ["el", "la"]
+    },
+    {
+      "text": "Jorge Ibáñez presentó el plan de contingencia al director de Grupo Ávila.",
+      "want": [
+        { "label": "Jorge Ibáñez", "type": "person" },
+        { "label": "Grupo Ávila", "type": "organization" },
+        { "label": "director", "type": "role" }
+      ],
+      "forbid": ["el", "al", "de"]
+    },
+    {
+      "text": "La integración entre Polar y Nexus quedó aprobada por el comité técnico.",
+      "want": [],
+      "forbid": ["la", "el"]
+    },
+    {
+      "text": "Sofía Herrera de Talleres Ibáñez reportó el incidente INC-2211 al VP Operations.",
+      "want": [
+        { "label": "Sofía Herrera", "type": "person" },
+        { "label": "VP Operations", "type": "role" }
+      ],
+      "forbid": ["el", "de", "al"]
+    },
+    {
+      "text": "Kenji Watanabe from Sakura Systems reviewed the quarterly numbers with Priya Sharma.",
+      "want": [
+        { "label": "Kenji Watanabe", "type": "person" },
+        { "label": "Priya Sharma", "type": "person" }
+      ],
+      "forbid": ["the", "from", "with"]
+    },
+    {
+      "text": "Ahmed El-Sayed escalated the latency regression to Cloudflare support.",
+      "want": [{ "label": "Ahmed El-Sayed", "type": "person" }],
+      "forbid": ["the", "to"]
+    },
+    {
+      "text": "Fatima Al-Rashid owns the vendor scorecard; route procurement questions to her desk.",
+      "want": [{ "label": "Fatima Al-Rashid", "type": "person" }],
+      "forbid": ["the", "to"]
+    },
+    {
+      "text": "The Kyoto deployment passed canary review; SRE lead Yuki Tanaka signed off.",
+      "want": [{ "label": "Yuki Tanaka", "type": "person" }],
+      "forbid": ["the"]
+    },
+    {
       "text": "Ingrid Olsen promoted Maria Rodriguez to program lead for the Ledgerline Rollout.",
       "want": [
         { "label": "Ingrid Olsen", "type": "person" },
