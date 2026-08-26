@@ -39,6 +39,13 @@ jobs:
       - name: Fuzz KeywordScore (60s)
         run: go test -run xxx -fuzz FuzzKeywordScore -fuzztime 60s ./pkg/memory/
 
+      # FuzzRenderBlock lives in the CLI module's contextblock package; it
+      # holds fact text to the block structure rules, so a crash here is a
+      # prompt-structure smuggling bug.
+      - name: Fuzz RenderBlock (60s)
+        working-directory: cmd/graymatter
+        run: go test -run xxx -fuzz FuzzRenderBlock -fuzztime 60s ./internal/contextblock/
+
       # A failing target leaves the reproducer in testdata/fuzz; upload it so
       # the fix starts from the exact input, not from a log line.
       - name: Upload crash corpus on failure

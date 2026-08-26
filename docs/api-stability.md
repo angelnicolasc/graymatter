@@ -26,7 +26,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Memory).RecallShared(query string) ([]string, error)` | |
 | `(*Memory).RecallAll(agentID, query string) ([]string, error)` | |
 | `(*Memory).Close() error` | |
-| `(*Memory).Store() *memory.Store` | |
+| `(*Memory).Advanced() AdvancedStore` | Narrow handle for CRUD, listing, raw bbolt access |
 | `(*Memory).Config() Config` | |
 | `Config` struct — all fields present in v0.1.0 | New fields may be added |
 | `DefaultConfig() Config` | |
@@ -137,12 +137,12 @@ now returns 8 facts. Pass `?k=5` for the old count.
 
 The following packages are implementation details and provide no stability guarantee:
 
-- `pkg/kg` — knowledge graph and entity extraction
-- `pkg/session` — session checkpointing
-- `pkg/harness` — agent runner
-- `pkg/mcp` — MCP server handlers
-- `pkg/server` — REST API server
-- `pkg/plugin` — plugin protocol
-- `pkg/export` — Obsidian / markdown export
-- `pkg/embedding` — embedding backend adapters
+- `cmd/graymatter/internal/kg` — knowledge graph and entity extraction
+- `cmd/graymatter/internal/session` — session checkpointing
+- `cmd/graymatter/internal/harness` — agent runner
+- `cmd/graymatter/internal/mcp` — MCP server handlers
+- `cmd/graymatter/internal/server` — REST API server
+- `cmd/graymatter/internal/plugin` — plugin protocol
+- `cmd/graymatter/internal/export` — Obsidian / markdown export
+- `pkg/embedding` — embedding backend adapters (public; see the stable table for its provider interface)
 - `cmd/` — CLI command implementations
