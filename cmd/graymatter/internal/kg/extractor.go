@@ -107,13 +107,18 @@ var (
 func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 	var nodes []Node
 	seen := make(map[string]bool)
+	// seenLabel tracks lowercased labels across types: the occurrence gate
+	// below must not recount a single-cap word that already entered as part
+	// of a multi-word name, whatever type that name was classified as.
+	seenLabel := make(map[string]bool)
 
 	add := func(label, entityType string) {
-		id := canonicalID(label)
+		id := canonicalID(label, entityType)
 		if id == "" || seen[id] {
 			return
 		}
 		seen[id] = true
+		seenLabel[strings.ToLower(strings.TrimSpace(label))] = true
 		nodes = append(nodes, Node{
 			ID:         id,
 			Label:      label,
@@ -179,7 +184,7 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 		if singleCapStop[lower] {
 			continue
 		}
-		if !seen[canonicalID(m)] {
+		if !seenLabel[lower] {
 			capCounts[m]++
 		}
 	}
@@ -256,9 +261,17 @@ func isProperNoun(s string) bool {
 	return unicode.IsUpper(runes[0]) && unicode.IsLower(runes[1])
 }
 
-// canonicalID produces a stable, lowercase ID from a label string.
-func canonicalID(label string) string {
-	return strings.ToLower(strings.TrimSpace(label))
+// canonicalID produces a stable, type-scoped ID from a label. Scoping by
+// entity type keeps distinct things distinct: "apple" the organization and
+// "apple" the concept must not merge into one node just because their labels
+// lowercase to the same string. Empty types fall back to "unknown", matching
+// the placeholder nodes Link auto-creates.
+func canonicalID(label, entityType string) string {
+	t := strings.ToLower(strings.TrimSpace(entityType))
+	if t == "" {
+		t = "unknown"
+	}
+	return t + ":" + strings.ToLower(strings.TrimSpace(label))
 }
 
 // --- LLM extractor (opt-in via ExtractorConfig.UseLLM=true) ---
@@ -336,7 +349,7 @@ func parseLLMExtractionJSON(raw string) ([]Node, []Edge, error) {
 	nodes := make([]Node, 0, len(r.Nodes))
 	for _, rn := range r.Nodes {
 		if rn.ID == "" && rn.Label != "" {
-			rn.ID = canonicalID(rn.Label)
+			rn.ID = canonicalID(rn.Label, rn.EntityType)
 		}
 		nodes = append(nodes, Node{
 			ID:         rn.ID,

@@ -281,7 +281,34 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		}
 	}
 
+	// Step 5: decay graph weights. Optional capability - existing
+	// GraphAccessor implementations keep compiling unchanged.
+	//
+	// The graph mirrors recallable memory; without this pass its weights
+	// only ever grew (upsert takes max), so a hub entity from a finished
+	// project stayed prominent forever. Same recompute-from-staleness rule
+	// as Step 1, for the same reason: multiplying re-applied whole elapsed
+	// periods per cycle and compounded forgetting.
+	s.mu.RLock()
+	graph = s.graph
+	s.mu.RUnlock()
+	if decayer, ok := graph.(GraphDecayer); ok {
+		if err := decayer.DecayGraph(halfLife); err != nil {
+			if s.cfg.OnConsolidateError != nil {
+				s.cfg.OnConsolidateError(agentID, fmt.Errorf("graph decay: %w", err))
+			}
+		}
+	}
+
 	return nil
+}
+
+// GraphDecayer is an optional GraphAccessor capability: lifecycle-driven
+// weight decay over graph state, invoked once per consolidation cycle.
+// Implementations must be idempotent - recomputing from staleness rather
+// than multiplying into weight - so running more often never forgets faster.
+type GraphDecayer interface {
+	DecayGraph(halfLife time.Duration) error
 }
 
 // textSignature fingerprints a fact's text for the extraction watermark.
