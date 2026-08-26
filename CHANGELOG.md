@@ -10,6 +10,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Retrieval vocabulary is now Unicode-native.** Tokenization segments words in any
+  script (accented Spanish stays whole instead of shattering at every accent; CJK text
+  yields tokens where it previously produced none) with an ASCII fast path for the common
+  case, and folds EN/ES plurals so "Rollbacks" meets "rollback". Recency anchors on last
+  access, not creation - the access-tracking machinery finally influences live ranking.
+  Measured honestly against all three corpora: headline numbers unchanged, because the
+  remaining misses are word-formation and compound-word problems, not segmentation - both
+  now precisely quantified in RESULTS-corpora.md as the decision record for fuller
+  stemming and adjacency indexing.
+
 - **The production write path stops fighting itself.** Recall access tracking used to spawn
   one goroutine holding one bbolt write transaction per returned fact - up to eight write
   transactions and eight goroutines per recall contending with real writers for
