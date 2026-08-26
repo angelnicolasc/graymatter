@@ -8,6 +8,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`graymatter doctor --embeddings` makes the silent keyword-only fallback visible.**
+  `Put` degrades a fact to keyword-only whenever the embedder errors and still returns nil,
+  so a broken backend was indistinguishable from an empty store. The store now records the
+  lifetime degradation count and the last error (`Store.EmbeddingHealth`, `Store.CountEmbeddings`),
+  and the new audit reports vector coverage over live facts, degraded writes, the retry
+  backlog, and which of the three honest states you are in: healthy channel, supported
+  keyword-only (ADR-005), or a failing backend hiding behind that silence. Deterministic like
+  `doctor --health` — reads only store bytes, byte-identical output per store, works with the
+  daemon down.
+
 ### Fixed
 
 - **The embeddings chain's third slot works.** It dialled
