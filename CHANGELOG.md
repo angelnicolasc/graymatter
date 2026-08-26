@@ -19,7 +19,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   path hands back exactly what landed, making confident writes O(1), race-free, and
   guaranteed to embed once.
 
-### Added
+- **Embedding provider switches self-heal.** Changing providers used to leave every old
+  vector in place behind a log warning - wrong-dimension embeddings silently poisoning
+  similarity search until someone rebuilt by hand. Open now detects the dimension change,
+  queues all live facts, adopts the new dimension durably, and re-embeds synchronously
+  before serving a single query. The reconciler itself learned the same trick: any queued
+  fact whose stored vector length disagrees with the active provider is re-embedded fresh
+  and persisted, tombstones never reach the index, and a mid-reindex failure keeps its
+  retry marker instead of vanishing.
 
 - **Two new retrieval-quality corpora extend measurement beyond the frozen English set.**
   `multilingual-es` (126 Spanish facts, 15 queries in two declared classes: ASCII-anchor
