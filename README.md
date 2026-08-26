@@ -10,6 +10,7 @@
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
+  <a href="https://glama.ai/mcp/servers/angelnicolasc/graymatter"><img src="https://glama.ai/mcp/servers/angelnicolasc/graymatter/badges/score.svg" alt="Glama MCP server score"></a>
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-core%2090%25%20%C2%B7%20cli%2081%25-brightgreen" alt="Coverage (multi-platform union): core 90%, CLI 81%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
