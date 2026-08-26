@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -308,5 +309,36 @@ func TestReadmeQualityTableMatchesMeasurement(t *testing.T) {
 		t.Errorf("README.md states MinRelevance keeps the same recall, but the "+
 			"measurement is adaptive %.0f%% against fixed-K %.0f%%. "+
 			"Update the sentence.", adaptive.HitRate, gm.HitRate)
+	}
+}
+
+// Hand-computed reference: n=10, k=7, z=1.96 gives
+//
+//	p=0.7, den=1.38416, center=0.64464, half=0.24773 -> [39.7%, 89.2%].
+//
+// The interval must contain the point estimate, stay inside [0,100], and
+// collapse toward the estimate as n grows.
+func TestWilsonInterval_KnownValues(t *testing.T) {
+	lo, hi := wilsonInterval(7, 10, 1.96)
+	if math.Abs(lo-39.7) > 0.15 || math.Abs(hi-89.2) > 0.15 {
+		t.Fatalf("wilson(7,10) = [%.1f, %.1f], want ~[39.7, 89.2]", lo, hi)
+	}
+
+	if lo, hi := wilsonInterval(0, 5, 1.96); lo != 0 || hi >= 60 {
+		t.Fatalf("wilson(0,5) = [%.1f, %.1f], want [0, <60]", lo, hi)
+	}
+	if lo, hi := wilsonInterval(5, 5, 1.96); hi != 100 || lo <= 45 {
+		t.Fatalf("wilson(5,5) = [%.1f, %.1f], want hi=100 and lo>45", lo, hi)
+	}
+
+	smallLo, _ := wilsonInterval(5, 8, 1.96)
+	bigLo, bigHi := wilsonInterval(5000, 8000, 1.96)
+	if bigHi-bigLo >= smallLo { // sanity: large-n interval far tighter
+		t.Fatalf("interval did not shrink with n: small half-width %.1f vs large %.1f", smallLo, bigHi-bigLo)
+	}
+
+	lo, hi = wilsonInterval(3, 0, 1.96)
+	if lo != 0 || hi != 0 {
+		t.Fatalf("n=0 must yield [0,0], got [%.1f, %.1f]", lo, hi)
 	}
 }

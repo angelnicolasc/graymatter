@@ -1,0 +1,421 @@
+{"id":"lh-0001","session":1,"domain":"deploy","kind":"decision","text":"We decided deploys roll out canary-first: 5% for one hour before full rollout."}
+{"id":"lh-0002","session":2,"domain":"billing","kind":"decision","text":"Decision recorded: billing stays on Polar after the migration review; Stripe integration work is cancelled."}
+{"id":"lh-0003","session":1,"domain":"incidents","kind":"decision","text":"The pager escalation policy changed: page the on-call directly, skip the manager hop. (owner follow-up scheduled)."}
+{"id":"lh-0004","session":2,"domain":"people","kind":"decision","text":"Dana owns the vendor-review rota from Q3 onwards; route vendor questions to her."}
+{"id":"lh-0005","session":1,"domain":"roadmap","kind":"decision","text":"Decision recorded: the offline-sync milestone was pushed to next year; mobile polish takes its slot."}
+{"id":"lh-0006","session":2,"domain":"deploy","kind":"decision","text":"Rollback authority sits with the releasing engineer alone; no committee needed. (owner follow-up scheduled)."}
+{"id":"lh-0007","session":1,"domain":"billing","kind":"decision","text":"Invoice disputes go through support triage first, never straight to finance."}
+{"id":"lh-0008","session":2,"domain":"people","kind":"decision","text":"Decision recorded: interview loops cap at four stages; any more needs a written exception."}
+{"id":"lh-0009","session":40,"domain":"deploy","kind":"variant","text":"Deploy process discussion: someone proposed rolling everything out at once. This line was later revised; see the original decision."}
+{"id":"lh-0010","session":41,"domain":"billing","kind":"variant","text":"Billing platform options were compared during the pricing review. This line was later revised; see the original decision."}
+{"id":"lh-0011","session":42,"domain":"incidents","kind":"variant","text":"Incident response meeting covered paging paths and escalation steps. This line was later revised; see the original decision."}
+{"id":"lh-0012","session":43,"domain":"people","kind":"variant","text":"Team roles were shuffled during the planning session. This line was later revised; see the original decision."}
+{"id":"lh-0013","session":44,"domain":"roadmap","kind":"variant","text":"Roadmap planning session discussed offline-sync and mobile priorities. This line was later revised; see the original decision."}
+{"id":"lh-0014","session":45,"domain":"deploy","kind":"variant","text":"Postmortem action items mentioned clarifying rollback permissions. This line was later revised; see the original decision."}
+{"id":"lh-0015","session":46,"domain":"billing","kind":"variant","text":"Finance workflow notes mentioned invoice handling changes. This line was later revised; see the original decision."}
+{"id":"lh-0016","session":47,"domain":"people","kind":"variant","text":"Hiring process review talked about interview stage counts. This line was later revised; see the original decision."}
+{"id":"lh-0017","session":6,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter."}
+{"id":"lh-0018","session":6,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently."}
+{"id":"lh-0019","session":6,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC."}
+{"id":"lh-0020","session":6,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 6 note 3)"}
+{"id":"lh-0021","session":6,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 6 note 4)"}
+{"id":"lh-0022","session":6,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 6 note 5)"}
+{"id":"lh-0023","session":6,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today."}
+{"id":"lh-0024","session":6,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 6 note 7)"}
+{"id":"lh-0025","session":6,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 6 note 8)"}
+{"id":"lh-0026","session":7,"domain":"incidents","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan."}
+{"id":"lh-0027","session":7,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 7 note 1)"}
+{"id":"lh-0028","session":7,"domain":"roadmap","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan."}
+{"id":"lh-0029","session":7,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 7 note 3)"}
+{"id":"lh-0030","session":7,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated."}
+{"id":"lh-0031","session":7,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 7 note 5)"}
+{"id":"lh-0032","session":7,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month."}
+{"id":"lh-0033","session":7,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation."}
+{"id":"lh-0034","session":7,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week."}
+{"id":"lh-0035","session":8,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 8 note 0)"}
+{"id":"lh-0036","session":8,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 8 note 1)"}
+{"id":"lh-0037","session":8,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline."}
+{"id":"lh-0038","session":8,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 8 note 3)"}
+{"id":"lh-0039","session":8,"domain":"deploy","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 8 note 4)"}
+{"id":"lh-0040","session":8,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 8 note 5)"}
+{"id":"lh-0041","session":8,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 8 note 6)"}
+{"id":"lh-0042","session":8,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 8 note 7)"}
+{"id":"lh-0043","session":8,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 8 note 8)"}
+{"id":"lh-0044","session":9,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 9 note 0)"}
+{"id":"lh-0045","session":9,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 9 note 1)"}
+{"id":"lh-0046","session":9,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 9 note 2)"}
+{"id":"lh-0047","session":9,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 9 note 3)"}
+{"id":"lh-0048","session":9,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 9 note 4)"}
+{"id":"lh-0049","session":9,"domain":"incidents","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan."}
+{"id":"lh-0050","session":9,"domain":"roadmap","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 9 note 6)"}
+{"id":"lh-0051","session":9,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 9 note 7)"}
+{"id":"lh-0052","session":9,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 9 note 8)"}
+{"id":"lh-0053","session":10,"domain":"incidents","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 10 note 0)"}
+{"id":"lh-0054","session":10,"domain":"roadmap","kind":"note","text":"Security training deadline set for the end of the month (session 10 note 1)"}
+{"id":"lh-0055","session":10,"domain":"roadmap","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 10 note 2)"}
+{"id":"lh-0056","session":10,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 10 note 3)"}
+{"id":"lh-0057","session":10,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 10 note 4)"}
+{"id":"lh-0058","session":10,"domain":"roadmap","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 10 note 5)"}
+{"id":"lh-0059","session":10,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 10 note 6)"}
+{"id":"lh-0060","session":10,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 10 note 7)"}
+{"id":"lh-0061","session":10,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 10 note 8)"}
+{"id":"lh-0062","session":11,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 11 note 0)"}
+{"id":"lh-0063","session":11,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 11 note 1)"}
+{"id":"lh-0064","session":11,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 11 note 2)"}
+{"id":"lh-0065","session":11,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 11 note 3)"}
+{"id":"lh-0066","session":11,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 11 note 4)"}
+{"id":"lh-0067","session":11,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 11 note 5)"}
+{"id":"lh-0068","session":11,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 11 note 6)"}
+{"id":"lh-0069","session":11,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 11 note 7)"}
+{"id":"lh-0070","session":11,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 11 note 8)"}
+{"id":"lh-0071","session":12,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 12 note 0)"}
+{"id":"lh-0072","session":12,"domain":"incidents","kind":"note","text":"Security training deadline set for the end of the month (session 12 note 1)"}
+{"id":"lh-0073","session":12,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 12 note 2)"}
+{"id":"lh-0074","session":12,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 12 note 3)"}
+{"id":"lh-0075","session":12,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 12 note 4)"}
+{"id":"lh-0076","session":12,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 12 note 5)"}
+{"id":"lh-0077","session":12,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 12 note 6)"}
+{"id":"lh-0078","session":12,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 12 note 7)"}
+{"id":"lh-0079","session":12,"domain":"roadmap","kind":"note","text":"Security training deadline set for the end of the month (session 12 note 8)"}
+{"id":"lh-0080","session":13,"domain":"incidents","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 13 note 0)"}
+{"id":"lh-0081","session":13,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 13 note 1)"}
+{"id":"lh-0082","session":13,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 13 note 2)"}
+{"id":"lh-0083","session":13,"domain":"billing","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 13 note 3)"}
+{"id":"lh-0084","session":13,"domain":"people","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 13 note 4)"}
+{"id":"lh-0085","session":13,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 13 note 5)"}
+{"id":"lh-0086","session":13,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 13 note 6)"}
+{"id":"lh-0087","session":13,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 13 note 7)"}
+{"id":"lh-0088","session":13,"domain":"roadmap","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 13 note 8)"}
+{"id":"lh-0089","session":14,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 14 note 0)"}
+{"id":"lh-0090","session":14,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 14 note 1)"}
+{"id":"lh-0091","session":14,"domain":"billing","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 14 note 2)"}
+{"id":"lh-0092","session":14,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 14 note 3)"}
+{"id":"lh-0093","session":14,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 14 note 4)"}
+{"id":"lh-0094","session":14,"domain":"people","kind":"note","text":"Security training deadline set for the end of the month (session 14 note 5)"}
+{"id":"lh-0095","session":14,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 14 note 6)"}
+{"id":"lh-0096","session":14,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 14 note 7)"}
+{"id":"lh-0097","session":14,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 14 note 8)"}
+{"id":"lh-0098","session":15,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 15 note 0)"}
+{"id":"lh-0099","session":15,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 15 note 1)"}
+{"id":"lh-0100","session":15,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 15 note 2)"}
+{"id":"lh-0101","session":15,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 15 note 3)"}
+{"id":"lh-0102","session":15,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 15 note 4)"}
+{"id":"lh-0103","session":15,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 15 note 5)"}
+{"id":"lh-0104","session":15,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 15 note 6)"}
+{"id":"lh-0105","session":15,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 15 note 7)"}
+{"id":"lh-0106","session":15,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 15 note 8)"}
+{"id":"lh-0107","session":16,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month (session 16 note 0)"}
+{"id":"lh-0108","session":16,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 16 note 1)"}
+{"id":"lh-0109","session":16,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 16 note 2)"}
+{"id":"lh-0110","session":16,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 16 note 3)"}
+{"id":"lh-0111","session":16,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 16 note 4)"}
+{"id":"lh-0112","session":16,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 16 note 5)"}
+{"id":"lh-0113","session":16,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 16 note 6)"}
+{"id":"lh-0114","session":16,"domain":"deploy","kind":"note","text":"Security training deadline set for the end of the month (session 16 note 7)"}
+{"id":"lh-0115","session":16,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 16 note 8)"}
+{"id":"lh-0116","session":17,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 17 note 0)"}
+{"id":"lh-0117","session":17,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 17 note 1)"}
+{"id":"lh-0118","session":17,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 17 note 2)"}
+{"id":"lh-0119","session":17,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 17 note 3)"}
+{"id":"lh-0120","session":17,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 17 note 4)"}
+{"id":"lh-0121","session":17,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 17 note 5)"}
+{"id":"lh-0122","session":17,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 17 note 6)"}
+{"id":"lh-0123","session":17,"domain":"billing","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 17 note 7)"}
+{"id":"lh-0124","session":17,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 17 note 8)"}
+{"id":"lh-0125","session":18,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 18 note 0)"}
+{"id":"lh-0126","session":18,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 18 note 1)"}
+{"id":"lh-0127","session":18,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 18 note 2)"}
+{"id":"lh-0128","session":18,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 18 note 3)"}
+{"id":"lh-0129","session":18,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 18 note 4)"}
+{"id":"lh-0130","session":18,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 18 note 5)"}
+{"id":"lh-0131","session":18,"domain":"billing","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 18 note 6)"}
+{"id":"lh-0132","session":18,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 18 note 7)"}
+{"id":"lh-0133","session":18,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 18 note 8)"}
+{"id":"lh-0134","session":19,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 19 note 0)"}
+{"id":"lh-0135","session":19,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 19 note 1)"}
+{"id":"lh-0136","session":19,"domain":"people","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 19 note 2)"}
+{"id":"lh-0137","session":19,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 19 note 3)"}
+{"id":"lh-0138","session":19,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 19 note 4)"}
+{"id":"lh-0139","session":19,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 19 note 5)"}
+{"id":"lh-0140","session":19,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 19 note 6)"}
+{"id":"lh-0141","session":19,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 19 note 7)"}
+{"id":"lh-0142","session":19,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 19 note 8)"}
+{"id":"lh-0143","session":20,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 20 note 0)"}
+{"id":"lh-0144","session":20,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 20 note 1)"}
+{"id":"lh-0145","session":20,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 20 note 2)"}
+{"id":"lh-0146","session":20,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 20 note 3)"}
+{"id":"lh-0147","session":20,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month (session 20 note 4)"}
+{"id":"lh-0148","session":20,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 20 note 5)"}
+{"id":"lh-0149","session":20,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 20 note 6)"}
+{"id":"lh-0150","session":20,"domain":"billing","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 20 note 7)"}
+{"id":"lh-0151","session":20,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 20 note 8)"}
+{"id":"lh-0152","session":21,"domain":"people","kind":"note","text":"Security training deadline set for the end of the month (session 21 note 0)"}
+{"id":"lh-0153","session":21,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 21 note 1)"}
+{"id":"lh-0154","session":21,"domain":"roadmap","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 21 note 2)"}
+{"id":"lh-0155","session":21,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 21 note 3)"}
+{"id":"lh-0156","session":21,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month (session 21 note 4)"}
+{"id":"lh-0157","session":21,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 21 note 5)"}
+{"id":"lh-0158","session":21,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 21 note 6)"}
+{"id":"lh-0159","session":21,"domain":"incidents","kind":"note","text":"Security training deadline set for the end of the month (session 21 note 7)"}
+{"id":"lh-0160","session":21,"domain":"people","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 21 note 8)"}
+{"id":"lh-0161","session":22,"domain":"incidents","kind":"note","text":"Security training deadline set for the end of the month (session 22 note 0)"}
+{"id":"lh-0162","session":22,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 22 note 1)"}
+{"id":"lh-0163","session":22,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 22 note 2)"}
+{"id":"lh-0164","session":22,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 22 note 3)"}
+{"id":"lh-0165","session":22,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 22 note 4)"}
+{"id":"lh-0166","session":22,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 22 note 5)"}
+{"id":"lh-0167","session":22,"domain":"roadmap","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 22 note 6)"}
+{"id":"lh-0168","session":22,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 22 note 7)"}
+{"id":"lh-0169","session":22,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 22 note 8)"}
+{"id":"lh-0170","session":23,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 23 note 0)"}
+{"id":"lh-0171","session":23,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 23 note 1)"}
+{"id":"lh-0172","session":23,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 23 note 2)"}
+{"id":"lh-0173","session":23,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 23 note 3)"}
+{"id":"lh-0174","session":23,"domain":"billing","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 23 note 4)"}
+{"id":"lh-0175","session":23,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 23 note 5)"}
+{"id":"lh-0176","session":23,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 23 note 6)"}
+{"id":"lh-0177","session":23,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 23 note 7)"}
+{"id":"lh-0178","session":23,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 23 note 8)"}
+{"id":"lh-0179","session":24,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 24 note 0)"}
+{"id":"lh-0180","session":24,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 24 note 1)"}
+{"id":"lh-0181","session":24,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 24 note 2)"}
+{"id":"lh-0182","session":24,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 24 note 3)"}
+{"id":"lh-0183","session":24,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 24 note 4)"}
+{"id":"lh-0184","session":24,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 24 note 5)"}
+{"id":"lh-0185","session":24,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 24 note 6)"}
+{"id":"lh-0186","session":24,"domain":"deploy","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 24 note 7)"}
+{"id":"lh-0187","session":24,"domain":"people","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 24 note 8)"}
+{"id":"lh-0188","session":25,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 25 note 0)"}
+{"id":"lh-0189","session":25,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 25 note 1)"}
+{"id":"lh-0190","session":25,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 25 note 2)"}
+{"id":"lh-0191","session":25,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 25 note 3)"}
+{"id":"lh-0192","session":25,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 25 note 4)"}
+{"id":"lh-0193","session":25,"domain":"roadmap","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 25 note 5)"}
+{"id":"lh-0194","session":25,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 25 note 6)"}
+{"id":"lh-0195","session":25,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 25 note 7)"}
+{"id":"lh-0196","session":25,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 25 note 8)"}
+{"id":"lh-0197","session":26,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 26 note 0)"}
+{"id":"lh-0198","session":26,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 26 note 1)"}
+{"id":"lh-0199","session":26,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 26 note 2)"}
+{"id":"lh-0200","session":26,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 26 note 3)"}
+{"id":"lh-0201","session":26,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 26 note 4)"}
+{"id":"lh-0202","session":26,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 26 note 5)"}
+{"id":"lh-0203","session":26,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 26 note 6)"}
+{"id":"lh-0204","session":26,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 26 note 7)"}
+{"id":"lh-0205","session":26,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 26 note 8)"}
+{"id":"lh-0206","session":27,"domain":"incidents","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 27 note 0)"}
+{"id":"lh-0207","session":27,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 27 note 1)"}
+{"id":"lh-0208","session":27,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 27 note 2)"}
+{"id":"lh-0209","session":27,"domain":"incidents","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 27 note 3)"}
+{"id":"lh-0210","session":27,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 27 note 4)"}
+{"id":"lh-0211","session":27,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 27 note 5)"}
+{"id":"lh-0212","session":27,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 27 note 6)"}
+{"id":"lh-0213","session":27,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 27 note 7)"}
+{"id":"lh-0214","session":27,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 27 note 8)"}
+{"id":"lh-0215","session":28,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 28 note 0)"}
+{"id":"lh-0216","session":28,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 28 note 1)"}
+{"id":"lh-0217","session":28,"domain":"roadmap","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 28 note 2)"}
+{"id":"lh-0218","session":28,"domain":"roadmap","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 28 note 3)"}
+{"id":"lh-0219","session":28,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 28 note 4)"}
+{"id":"lh-0220","session":28,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 28 note 5)"}
+{"id":"lh-0221","session":28,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 28 note 6)"}
+{"id":"lh-0222","session":28,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 28 note 7)"}
+{"id":"lh-0223","session":28,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 28 note 8)"}
+{"id":"lh-0224","session":29,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 29 note 0)"}
+{"id":"lh-0225","session":29,"domain":"deploy","kind":"note","text":"Security training deadline set for the end of the month (session 29 note 1)"}
+{"id":"lh-0226","session":29,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 29 note 2)"}
+{"id":"lh-0227","session":29,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 29 note 3)"}
+{"id":"lh-0228","session":29,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 29 note 4)"}
+{"id":"lh-0229","session":29,"domain":"roadmap","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 29 note 5)"}
+{"id":"lh-0230","session":29,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 29 note 6)"}
+{"id":"lh-0231","session":29,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 29 note 7)"}
+{"id":"lh-0232","session":29,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 29 note 8)"}
+{"id":"lh-0233","session":30,"domain":"incidents","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 30 note 0)"}
+{"id":"lh-0234","session":30,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 30 note 1)"}
+{"id":"lh-0235","session":30,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 30 note 2)"}
+{"id":"lh-0236","session":30,"domain":"billing","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 30 note 3)"}
+{"id":"lh-0237","session":30,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 30 note 4)"}
+{"id":"lh-0238","session":30,"domain":"incidents","kind":"note","text":"Security training deadline set for the end of the month (session 30 note 5)"}
+{"id":"lh-0239","session":30,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 30 note 6)"}
+{"id":"lh-0240","session":30,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 30 note 7)"}
+{"id":"lh-0241","session":30,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 30 note 8)"}
+{"id":"lh-0242","session":31,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 31 note 0)"}
+{"id":"lh-0243","session":31,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 31 note 1)"}
+{"id":"lh-0244","session":31,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 31 note 2)"}
+{"id":"lh-0245","session":31,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 31 note 3)"}
+{"id":"lh-0246","session":31,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 31 note 4)"}
+{"id":"lh-0247","session":31,"domain":"people","kind":"note","text":"Security training deadline set for the end of the month (session 31 note 5)"}
+{"id":"lh-0248","session":31,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 31 note 6)"}
+{"id":"lh-0249","session":31,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 31 note 7)"}
+{"id":"lh-0250","session":31,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 31 note 8)"}
+{"id":"lh-0251","session":32,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 32 note 0)"}
+{"id":"lh-0252","session":32,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 32 note 1)"}
+{"id":"lh-0253","session":32,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 32 note 2)"}
+{"id":"lh-0254","session":32,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 32 note 3)"}
+{"id":"lh-0255","session":32,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 32 note 4)"}
+{"id":"lh-0256","session":32,"domain":"roadmap","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 32 note 5)"}
+{"id":"lh-0257","session":32,"domain":"roadmap","kind":"note","text":"Security training deadline set for the end of the month (session 32 note 6)"}
+{"id":"lh-0258","session":32,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 32 note 7)"}
+{"id":"lh-0259","session":32,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 32 note 8)"}
+{"id":"lh-0260","session":33,"domain":"roadmap","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 33 note 0)"}
+{"id":"lh-0261","session":33,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 33 note 1)"}
+{"id":"lh-0262","session":33,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 33 note 2)"}
+{"id":"lh-0263","session":33,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 33 note 3)"}
+{"id":"lh-0264","session":33,"domain":"incidents","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 33 note 4)"}
+{"id":"lh-0265","session":33,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 33 note 5)"}
+{"id":"lh-0266","session":33,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 33 note 6)"}
+{"id":"lh-0267","session":33,"domain":"roadmap","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 33 note 7)"}
+{"id":"lh-0268","session":33,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 33 note 8)"}
+{"id":"lh-0269","session":34,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 34 note 0)"}
+{"id":"lh-0270","session":34,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 34 note 1)"}
+{"id":"lh-0271","session":34,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 34 note 2)"}
+{"id":"lh-0272","session":34,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 34 note 3)"}
+{"id":"lh-0273","session":34,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 34 note 4)"}
+{"id":"lh-0274","session":34,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 34 note 5)"}
+{"id":"lh-0275","session":34,"domain":"billing","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 34 note 6)"}
+{"id":"lh-0276","session":34,"domain":"roadmap","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 34 note 7)"}
+{"id":"lh-0277","session":34,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 34 note 8)"}
+{"id":"lh-0278","session":35,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 35 note 0)"}
+{"id":"lh-0279","session":35,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 35 note 1)"}
+{"id":"lh-0280","session":35,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 35 note 2)"}
+{"id":"lh-0281","session":35,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 35 note 3)"}
+{"id":"lh-0282","session":35,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 35 note 4)"}
+{"id":"lh-0283","session":35,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 35 note 5)"}
+{"id":"lh-0284","session":35,"domain":"people","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 35 note 6)"}
+{"id":"lh-0285","session":35,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 35 note 7)"}
+{"id":"lh-0286","session":35,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 35 note 8)"}
+{"id":"lh-0287","session":36,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 36 note 0)"}
+{"id":"lh-0288","session":36,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 36 note 1)"}
+{"id":"lh-0289","session":36,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 36 note 2)"}
+{"id":"lh-0290","session":36,"domain":"deploy","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 36 note 3)"}
+{"id":"lh-0291","session":36,"domain":"people","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 36 note 4)"}
+{"id":"lh-0292","session":36,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 36 note 5)"}
+{"id":"lh-0293","session":36,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 36 note 6)"}
+{"id":"lh-0294","session":36,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 36 note 7)"}
+{"id":"lh-0295","session":36,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 36 note 8)"}
+{"id":"lh-0296","session":37,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 37 note 0)"}
+{"id":"lh-0297","session":37,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 37 note 1)"}
+{"id":"lh-0298","session":37,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 37 note 2)"}
+{"id":"lh-0299","session":37,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 37 note 3)"}
+{"id":"lh-0300","session":37,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 37 note 4)"}
+{"id":"lh-0301","session":37,"domain":"incidents","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 37 note 5)"}
+{"id":"lh-0302","session":37,"domain":"people","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 37 note 6)"}
+{"id":"lh-0303","session":37,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 37 note 7)"}
+{"id":"lh-0304","session":37,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 37 note 8)"}
+{"id":"lh-0305","session":38,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 38 note 0)"}
+{"id":"lh-0306","session":38,"domain":"people","kind":"note","text":"Security training deadline set for the end of the month (session 38 note 1)"}
+{"id":"lh-0307","session":38,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 38 note 2)"}
+{"id":"lh-0308","session":38,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 38 note 3)"}
+{"id":"lh-0309","session":38,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 38 note 4)"}
+{"id":"lh-0310","session":38,"domain":"people","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 38 note 5)"}
+{"id":"lh-0311","session":38,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 38 note 6)"}
+{"id":"lh-0312","session":38,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 38 note 7)"}
+{"id":"lh-0313","session":38,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 38 note 8)"}
+{"id":"lh-0314","session":39,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 39 note 0)"}
+{"id":"lh-0315","session":39,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 39 note 1)"}
+{"id":"lh-0316","session":39,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 39 note 2)"}
+{"id":"lh-0317","session":39,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 39 note 3)"}
+{"id":"lh-0318","session":39,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 39 note 4)"}
+{"id":"lh-0319","session":39,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 39 note 5)"}
+{"id":"lh-0320","session":39,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 39 note 6)"}
+{"id":"lh-0321","session":39,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 39 note 7)"}
+{"id":"lh-0322","session":39,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 39 note 8)"}
+{"id":"lh-0323","session":40,"domain":"deploy","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 40 note 0)"}
+{"id":"lh-0324","session":40,"domain":"billing","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 40 note 1)"}
+{"id":"lh-0325","session":40,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 40 note 2)"}
+{"id":"lh-0326","session":40,"domain":"deploy","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 40 note 3)"}
+{"id":"lh-0327","session":40,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 40 note 4)"}
+{"id":"lh-0328","session":40,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 40 note 5)"}
+{"id":"lh-0329","session":40,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 40 note 6)"}
+{"id":"lh-0330","session":40,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 40 note 7)"}
+{"id":"lh-0331","session":40,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 40 note 8)"}
+{"id":"lh-0332","session":41,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 41 note 0)"}
+{"id":"lh-0333","session":41,"domain":"billing","kind":"note","text":"Customer call: Contoso Retail asked about SSO availability on the mid-tier plan (session 41 note 1)"}
+{"id":"lh-0334","session":41,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 41 note 2)"}
+{"id":"lh-0335","session":41,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 41 note 3)"}
+{"id":"lh-0336","session":41,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 41 note 4)"}
+{"id":"lh-0337","session":41,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month (session 41 note 5)"}
+{"id":"lh-0338","session":41,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 41 note 6)"}
+{"id":"lh-0339","session":41,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 41 note 7)"}
+{"id":"lh-0340","session":41,"domain":"roadmap","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 41 note 8)"}
+{"id":"lh-0341","session":42,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 42 note 0)"}
+{"id":"lh-0342","session":42,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 42 note 1)"}
+{"id":"lh-0343","session":42,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 42 note 2)"}
+{"id":"lh-0344","session":42,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 42 note 3)"}
+{"id":"lh-0345","session":42,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 42 note 4)"}
+{"id":"lh-0346","session":42,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 42 note 5)"}
+{"id":"lh-0347","session":42,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 42 note 6)"}
+{"id":"lh-0348","session":42,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 42 note 7)"}
+{"id":"lh-0349","session":42,"domain":"billing","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 42 note 8)"}
+{"id":"lh-0350","session":43,"domain":"deploy","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 43 note 0)"}
+{"id":"lh-0351","session":43,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 43 note 1)"}
+{"id":"lh-0352","session":43,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 43 note 2)"}
+{"id":"lh-0353","session":43,"domain":"people","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 43 note 3)"}
+{"id":"lh-0354","session":43,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 43 note 4)"}
+{"id":"lh-0355","session":43,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 43 note 5)"}
+{"id":"lh-0356","session":43,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 43 note 6)"}
+{"id":"lh-0357","session":43,"domain":"billing","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 43 note 7)"}
+{"id":"lh-0358","session":43,"domain":"billing","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 43 note 8)"}
+{"id":"lh-0359","session":44,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 0)"}
+{"id":"lh-0360","session":44,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 1)"}
+{"id":"lh-0361","session":44,"domain":"incidents","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 44 note 2)"}
+{"id":"lh-0362","session":44,"domain":"people","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 3)"}
+{"id":"lh-0363","session":44,"domain":"people","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 44 note 4)"}
+{"id":"lh-0364","session":44,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 5)"}
+{"id":"lh-0365","session":44,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 44 note 6)"}
+{"id":"lh-0366","session":44,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 7)"}
+{"id":"lh-0367","session":44,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 44 note 8)"}
+{"id":"lh-0368","session":45,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 45 note 0)"}
+{"id":"lh-0369","session":45,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 45 note 1)"}
+{"id":"lh-0370","session":45,"domain":"billing","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 45 note 2)"}
+{"id":"lh-0371","session":45,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 45 note 3)"}
+{"id":"lh-0372","session":45,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 45 note 4)"}
+{"id":"lh-0373","session":45,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 45 note 5)"}
+{"id":"lh-0374","session":45,"domain":"deploy","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 45 note 6)"}
+{"id":"lh-0375","session":45,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 45 note 7)"}
+{"id":"lh-0376","session":45,"domain":"roadmap","kind":"note","text":"Security training deadline set for the end of the month (session 45 note 8)"}
+{"id":"lh-0377","session":46,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 46 note 0)"}
+{"id":"lh-0378","session":46,"domain":"deploy","kind":"note","text":"Customer call: Globex Logistics asked about SSO availability on the mid-tier plan (session 46 note 1)"}
+{"id":"lh-0379","session":46,"domain":"people","kind":"note","text":"Security training deadline set for the end of the month (session 46 note 2)"}
+{"id":"lh-0380","session":46,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 46 note 3)"}
+{"id":"lh-0381","session":46,"domain":"incidents","kind":"note","text":"Security training deadline set for the end of the month (session 46 note 4)"}
+{"id":"lh-0382","session":46,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 46 note 5)"}
+{"id":"lh-0383","session":46,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 46 note 6)"}
+{"id":"lh-0384","session":46,"domain":"billing","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 46 note 7)"}
+{"id":"lh-0385","session":46,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 46 note 8)"}
+{"id":"lh-0386","session":47,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 47 note 0)"}
+{"id":"lh-0387","session":47,"domain":"incidents","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 47 note 1)"}
+{"id":"lh-0388","session":47,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 47 note 2)"}
+{"id":"lh-0389","session":47,"domain":"roadmap","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 47 note 3)"}
+{"id":"lh-0390","session":47,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 47 note 4)"}
+{"id":"lh-0391","session":47,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 47 note 5)"}
+{"id":"lh-0392","session":47,"domain":"people","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 47 note 6)"}
+{"id":"lh-0393","session":47,"domain":"deploy","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 47 note 7)"}
+{"id":"lh-0394","session":47,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 47 note 8)"}
+{"id":"lh-0395","session":48,"domain":"billing","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 48 note 0)"}
+{"id":"lh-0396","session":48,"domain":"roadmap","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 48 note 1)"}
+{"id":"lh-0397","session":48,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 48 note 2)"}
+{"id":"lh-0398","session":48,"domain":"people","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 48 note 3)"}
+{"id":"lh-0399","session":48,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 48 note 4)"}
+{"id":"lh-0400","session":48,"domain":"billing","kind":"note","text":"Security training deadline set for the end of the month (session 48 note 5)"}
+{"id":"lh-0401","session":48,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 48 note 6)"}
+{"id":"lh-0402","session":48,"domain":"deploy","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 48 note 7)"}
+{"id":"lh-0403","session":48,"domain":"billing","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 48 note 8)"}
+{"id":"lh-0404","session":49,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 49 note 0)"}
+{"id":"lh-0405","session":49,"domain":"billing","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 49 note 1)"}
+{"id":"lh-0406","session":49,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 49 note 2)"}
+{"id":"lh-0407","session":49,"domain":"roadmap","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 49 note 3)"}
+{"id":"lh-0408","session":49,"domain":"deploy","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 49 note 4)"}
+{"id":"lh-0409","session":49,"domain":"incidents","kind":"note","text":"Customer call: Northwind asked about SSO availability on the mid-tier plan (session 49 note 5)"}
+{"id":"lh-0410","session":49,"domain":"roadmap","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 49 note 6)"}
+{"id":"lh-0411","session":49,"domain":"incidents","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 49 note 7)"}
+{"id":"lh-0412","session":49,"domain":"incidents","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 49 note 8)"}
+{"id":"lh-0413","session":50,"domain":"roadmap","kind":"note","text":"Azure peering latency graphs reviewed; nothing actionable this week (session 50 note 0)"}
+{"id":"lh-0414","session":50,"domain":"deploy","kind":"note","text":"Stood up the staging refresh cron; runs nightly at 02:00 UTC (session 50 note 1)"}
+{"id":"lh-0415","session":50,"domain":"incidents","kind":"note","text":"Flaky test quarantined in the checkout flow pending investigation (session 50 note 2)"}
+{"id":"lh-0416","session":50,"domain":"incidents","kind":"note","text":"Docs pass on the quickstart finished; screenshots still outdated (session 50 note 3)"}
+{"id":"lh-0417","session":50,"domain":"deploy","kind":"note","text":"Support backlog burned down below fifty tickets for the first time this quarter (session 50 note 4)"}
+{"id":"lh-0418","session":50,"domain":"incidents","kind":"note","text":"Onboarding notes: new engineer paired with the payments team today (session 50 note 5)"}
+{"id":"lh-0419","session":50,"domain":"incidents","kind":"note","text":"Vendor contract renewal reminder filed for the analytics pipeline (session 50 note 6)"}
+{"id":"lh-0420","session":50,"domain":"deploy","kind":"note","text":"Sprint review moved to Thursday 15:00 permanently (session 50 note 7)"}
+{"id":"lh-0421","session":50,"domain":"roadmap","kind":"note","text":"Security training deadline set for the end of the month (session 50 note 8)"}
