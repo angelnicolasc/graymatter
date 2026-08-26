@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,11 +28,14 @@ func writeFileForTest(path string) error {
 // data loss or a stuck pending queue rather than a loud error.
 
 // failingVectorStore is a VectorStore whose AddDocument always fails: the
-// stand-in for an Ollama outage mid-write.
-type failingVectorStore struct{ calls int }
+// stand-in for an Ollama outage mid-write. The attempt counter is atomic
+// because Put's inline attempt and the background reconcile loop both call
+// AddDocument concurrently - an unsynchronized increment here is a data race
+// the race detector catches stochastically on CI (seen on windows runners).
+type failingVectorStore struct{ calls int64 }
 
 func (f *failingVectorStore) AddDocument(context.Context, string, string, string, []float32, map[string]string) error {
-	f.calls++
+	atomic.AddInt64(&f.calls, 1)
 	return errors.New("vector backend down")
 }
 func (f *failingVectorStore) Query(context.Context, string, []float32, int) ([]VectorResult, error) {
@@ -255,7 +259,7 @@ func TestPut_VectorFailureRecordsPendingAndReportsHook(t *testing.T) {
 	if n := s.PendingVectorCount(); n != 1 {
 		t.Errorf("pending = %d, want 1 (the reconciler's job now)", n)
 	}
-	if vs.calls == 0 {
+	if atomic.LoadInt64(&vs.calls) == 0 {
 		t.Error("vector backend was never attempted")
 	}
 }
