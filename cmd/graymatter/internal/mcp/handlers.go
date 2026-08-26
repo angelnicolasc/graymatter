@@ -311,12 +311,15 @@ func newFactID(backend Backend, agentID string, before []memory.Fact) string {
 	return ""
 }
 
-// supersedeFact retires a fact: it is tombstoned so Recall skips it from the
-// next query onward, and its weight is zeroed so ordinary decay pruning
-// collects it in due course. The fact itself is not deleted — storage is
-// append-only, and an audit has to be able to see what was retired and why.
+// supersedeFact retires a fact: it is tombstoned so Recall skips it from
+// the next query onward. Its weight is left exactly as decay left it —
+// zeroing it here would drop it below the prune floor (<0.01), so the next
+// consolidation cycle would collect the receipt milliseconds after writing
+// it, destroying the audit trail ADR-007 keeps tombstones for. The fact
+// itself is not deleted — storage is append-only, and an audit has to be
+// able to see what was retired and why; ordinary decay collects the receipt
+// in due course, on the same curve as every other fact.
 func (s *Server) supersedeFact(agentID string, f memory.Fact, supersededBy string) error {
 	f.SupersededBy = supersededBy
-	f.Weight = 0
 	return s.backend.UpdateFact(agentID, f)
 }
