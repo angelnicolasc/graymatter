@@ -2,8 +2,10 @@ package memory
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // FuzzTokenize ensures tokenize never panics on arbitrary Unicode input.
@@ -34,10 +36,16 @@ func FuzzTokenize(f *testing.F) {
 			if len(tok) <= 1 {
 				t.Errorf("tokenize produced single-char token %q from input %q", tok, input)
 			}
-			// Must be lowercase ASCII/digit only (by construction).
+			// Tokens must be case-folded: equal to their own ToLower. Unicode
+			// scripts without case (CJK, Hebrew...) satisfy this trivially;
+			// the invariant catches accidental mixed-case leakage.
+			if tok != strings.ToLower(tok) {
+				t.Errorf("tokenize produced non-lowercased token %q from input %q", tok, input)
+			}
+			// No separator characters may leak into a token.
 			for _, r := range tok {
-				if !('a' <= r && r <= 'z') && !('0' <= r && r <= '9') {
-					t.Errorf("tokenize produced non-lowercase token %q (rune %q)", tok, r)
+				if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+					t.Errorf("tokenize produced token %q with separator rune %q", tok, r)
 				}
 			}
 		}

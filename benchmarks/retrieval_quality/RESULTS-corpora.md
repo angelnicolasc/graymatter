@@ -4,6 +4,34 @@ Protocol and predictions committed beforehand: see PREDICTIONS-corpora.md.
 Keyword embedder everywhere (no LLM, no network). Wilson 95% intervals now
 rendered by the runner itself.
 
+## Addendum — after retrieval-v2 core (Unicode tokenizer + plural folding +
+recency anchored on last access)
+
+The engine shipped whole-word Unicode segmentation and conservative EN/ES
+plural folding. Measured effect across all three corpora: **neutral on the
+headline numbers** - frozen 83% [44,97] unchanged (q2 still misses), ES
+aggregate 60% [36,80] with an identical per-query grid, long-horizon still
+100%. That neutrality is itself informative:
+
+1. The ES misses that remain are NOT segmentation. They are verb morphology
+   ("reenviados" vs "reenvió") and noun derivation ("renovaciones" vs
+   "renovación") - word-formation changes no plural rule covers. Closing them
+   needs Snowball-class stemmers, which means a dependency decision the repo
+   has so far declined; this corpus now quantifies exactly what that decision
+   would buy.
+2. The frozen q2 miss ("roll back a bad deploy" vs a fact about "Rollbacks")
+   is a COMPOUND-word problem: two query tokens against one document token.
+   Plural folding cannot bridge it; candidate fixes are adjacency-pair
+   indexing or compound-aware lookup, both ranking-surface changes that
+   deserve their own pre-registered measurement.
+3. What v2 core did fix, structurally: accented words stay whole (no more
+   tel/fono accidental fragments), CJK text produces tokens at all, tokens
+   are case-folded for every script, and recency now honours access time -
+   so the next retrieval change lands on a foundation whose behaviour is
+   measured rather than assumed.
+
+---
+
 ## multilingual-es — 126 facts / 15 queries / 15 sessions
 
 | System | HitRate [95% CI] | Dead | Tokens/q |
