@@ -8,6 +8,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Obsidian entity export no longer loses entities to filename collisions.** Two
+  distinct labels that sanitize identically ("Acme Corp" / "Acme_Corp") wrote the same note
+  file — the second silently overwrote the first, taking its Related links and MOC entry
+  with it. `EntityNoteNames` is now the single naming authority for an export: colliding
+  names get a deterministic `-2`/`-3` suffix in canonical-ID order, and node files, Related
+  links and the entities index all resolve through it.
+
+- **Ollama auto-detection requires an actual Ollama.** The probe counted any HTTP status
+  below 500 as "reachable", so a captive portal or corporate proxy answering 404 for
+  `/api/tags` made AutoDetect select the Ollama provider on networks without Ollama; every
+  embedding failed and Put's silent degradation turned that into keyword-only memory with a
+  latency tax on every write.
+
 ---
 
 ## [0.14.0] - 2026-08-25

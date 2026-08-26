@@ -264,74 +264,6 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 	return resultNodes, resultEdges, err
 }
 
-// Decay applies exponential decay to all node and edge weights based on LastSeen.
-// Nodes and edges with weight below the pruneThreshold (0.01) are deleted.
-func (g *Graph) Decay(halfLife time.Duration) error {
-	if halfLife == 0 {
-		halfLife = 720 * time.Hour
-	}
-	lambda := math.Log(2) / halfLife.Hours()
-
-	return g.db.Update(func(tx *bolt.Tx) error {
-		// Decay nodes.
-		nb := tx.Bucket(bucketNodes)
-		if nb != nil {
-			var toDelete [][]byte
-			if err := nb.ForEach(func(k, v []byte) error {
-				var n Node
-				if err := json.Unmarshal(v, &n); err != nil {
-					return nil
-				}
-				hours := time.Since(n.LastSeen).Hours()
-				n.Weight *= math.Exp(-lambda * hours)
-				if n.Weight < 0.01 {
-					toDelete = append(toDelete, k)
-					return nil
-				}
-				data, err := json.Marshal(n)
-				if err != nil {
-					return err
-				}
-				return nb.Put(k, data)
-			}); err != nil {
-				return err
-			}
-			for _, k := range toDelete {
-				_ = nb.Delete(k)
-			}
-		}
-
-		// Decay edges.
-		eb := tx.Bucket(bucketEdges)
-		if eb != nil {
-			var toDelete [][]byte
-			if err := eb.ForEach(func(k, v []byte) error {
-				var e Edge
-				if err := json.Unmarshal(v, &e); err != nil {
-					return nil
-				}
-				hours := time.Since(e.CreatedAt).Hours()
-				e.Weight *= math.Exp(-lambda * hours)
-				if e.Weight < 0.01 {
-					toDelete = append(toDelete, k)
-					return nil
-				}
-				data, err := json.Marshal(e)
-				if err != nil {
-					return err
-				}
-				return eb.Put(k, data)
-			}); err != nil {
-				return err
-			}
-			for _, k := range toDelete {
-				_ = eb.Delete(k)
-			}
-		}
-		return nil
-	})
-}
-
 // ExportObsidian writes one Markdown file per node + a graph-canvas.json file
 // (Obsidian canvas format) to outDir.
 func (g *Graph) ExportObsidian(outDir string) error {
@@ -356,6 +288,12 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		labelBy[n.ID] = n.Label
 	}
 
+	// One naming authority for this export: distinct entities whose labels
+	// sanitize to the same filename ("A B" vs "A_B") each keep their own
+	// note instead of silently overwriting each other. Every writer below -
+	// node files, Related links, the MOC - resolves through this one map.
+	names := EntityNoteNames(nodes)
+
 	// Write one .md file per node.
 	for _, n := range nodes {
 		content := fmt.Sprintf("---\nid: %s\nentity_type: %s\ntags:\n  - entity\n  - %s\nfirst_seen: %s\nlast_seen: %s\nweight: %.4f\n---\n\n# %s\n\n**Type:** %s\n",
@@ -366,8 +304,8 @@ func (g *Graph) ExportObsidian(outDir string) error {
 		for _, e := range edges {
 			if e.From == n.ID {
 				label := labelBy[e.To]
-				target := e.To
-				if label != "" {
+				target, ok := names[e.To]
+				if !ok && label != "" {
 					target = SanitizeFilename(label)
 				}
 				line := fmt.Sprintf("- [[%s|%s]] (%s)", target, label, e.Relation)
@@ -381,7 +319,7 @@ func (g *Graph) ExportObsidian(outDir string) error {
 			content += "\n## Related\n" + strings.Join(related, "\n") + "\n"
 		}
 
-		fname := SanitizeFilename(n.Label) + ".md"
+		fname := names[n.ID] + ".md"
 		if err := os.WriteFile(filepath.Join(outDir, fname), []byte(content), 0o644); err != nil {
 			return fmt.Errorf("kg: write node file: %w", err)
 		}
@@ -389,7 +327,7 @@ func (g *Graph) ExportObsidian(outDir string) error {
 
 	// MOC (Map of Content) grouped by entity type, so the vault has a single
 	// entry point into the graph.
-	if err := writeEntitiesMOC(outDir, nodes); err != nil {
+	if err := writeEntitiesMOC(outDir, nodes, names); err != nil {
 		return fmt.Errorf("kg: write entities index: %w", err)
 	}
 
@@ -513,7 +451,7 @@ func edgeKey(from, to, relation string) string {
 
 // writeEntitiesMOC writes _graphs/entities-index.md: one section per entity
 // type linking every entity note, so the vault has a single graph entry point.
-func writeEntitiesMOC(outDir string, nodes []Node) error {
+func writeEntitiesMOC(outDir string, nodes []Node, names map[string]string) error {
 	mocDir := filepath.Join(outDir, "_graphs")
 	if err := os.MkdirAll(mocDir, 0o755); err != nil {
 		return err
@@ -538,7 +476,7 @@ func writeEntitiesMOC(outDir string, nodes []Node) error {
 	for _, t := range types {
 		fmt.Fprintf(&sb, "## %s (%d)\n\n", t, len(byType[t]))
 		for _, n := range byType[t] {
-			fmt.Fprintf(&sb, "- [[%s|%s]]\n", SanitizeFilename(n.Label), n.Label)
+			fmt.Fprintf(&sb, "- [[%s|%s]]\n", names[n.ID], n.Label)
 		}
 		sb.WriteString("\n")
 	}
@@ -610,6 +548,35 @@ func WriteGraphConfig(vaultRoot string) error {
 // PLACEHOLDER maps an entity label to a filename-safe note name. It is
 // the single authority for entity note naming: ExportObsidian writes notes
 // with it and every wikilink to an entity must use it, or the link will not
+// EntityNoteNames assigns each node its Obsidian note filename (without
+// .md). Deterministic for a given node slice: labels sanitize to their base
+// name, and when two distinct nodes sanitize to the same name ("A B" and
+// "A_B" both become "A_B") the later one in canonical-ID order gets a
+// numeric suffix, so both notes exist instead of the second write silently
+// destroying the first. ExportObsidian writes by these names; anything that
+// links to entity notes from inside this package must resolve through it.
+func EntityNoteNames(nodes []Node) map[string]string {
+	ordered := make([]Node, len(nodes))
+	copy(ordered, nodes)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+
+	used := make(map[string]bool, len(ordered))
+	names := make(map[string]string, len(ordered))
+	for _, n := range ordered {
+		base := SanitizeFilename(n.Label)
+		if base == "" {
+			base = "entity"
+		}
+		name := base
+		for i := 2; used[name]; i++ {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		used[name] = true
+		names[n.ID] = name
+	}
+	return names
+}
+
 // resolve in Obsidian. Covers the characters Obsidian's link syntax and
 // Windows filenames both reject, and trims trailing dots/spaces.
 func SanitizeFilename(s string) string {

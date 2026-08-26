@@ -6,6 +6,13 @@ import "strings"
 // of every entity extracted from text, so a fact note can link back to its
 // entity notes with [[target]] — the bidirectional fact<->entity layer that
 // makes the Obsidian graph view connect both sides.
+//
+// Known limitation: when two entities' labels sanitize to the same name,
+// ExportObsidian disambiguates the second one ("A_B-2"); links produced here
+// still use the unsuffixed form, so that rare case yields an unresolved
+// link in Obsidian rather than a wrong-note merge. Resolving it needs the
+// full node list at link time, which this text-only surface deliberately
+// does not have.
 func EntityWikilinkTargets(text string) []string {
 	ex := NewExtractor(ExtractorConfig{})
 	nodes, _, err := ex.Extract(text)

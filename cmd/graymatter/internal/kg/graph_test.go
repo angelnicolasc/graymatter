@@ -165,65 +165,6 @@ func TestNeighbors_Depth2(t *testing.T) {
 	}
 }
 
-func TestDecay_PrunesLowWeight(t *testing.T) {
-	g, cleanup := openTestGraph(t)
-	defer cleanup()
-
-	// Insert a node with a tiny weight that will drop below 0.01 after decay.
-	n := Node{
-		ID:         "dying",
-		Label:      "Dying Node",
-		EntityType: "fact",
-		Weight:     0.001, // already below prune threshold
-		LastSeen:   time.Now().Add(-1000 * time.Hour),
-	}
-	if err := g.Upsert(n); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-
-	// Insert a healthy node.
-	healthy := Node{ID: "healthy", Label: "Healthy", EntityType: "fact", Weight: 1.0}
-	if err := g.Upsert(healthy); err != nil {
-		t.Fatalf("Upsert healthy: %v", err)
-	}
-
-	if err := g.Decay(720 * time.Hour); err != nil {
-		t.Fatalf("Decay: %v", err)
-	}
-
-	nodes, err := g.AllNodes()
-	if err != nil {
-		t.Fatalf("AllNodes after decay: %v", err)
-	}
-	for _, node := range nodes {
-		if node.ID == "dying" {
-			t.Error("dying node should have been pruned")
-		}
-	}
-}
-
-func TestDecay_HealthyNodeSurvives(t *testing.T) {
-	g, cleanup := openTestGraph(t)
-	defer cleanup()
-
-	n := Node{ID: "alive", Label: "Alive", EntityType: "fact", Weight: 1.0}
-	if err := g.Upsert(n); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-
-	if err := g.Decay(720 * time.Hour); err != nil {
-		t.Fatalf("Decay: %v", err)
-	}
-
-	nodes, err := g.AllNodes()
-	if err != nil {
-		t.Fatalf("AllNodes: %v", err)
-	}
-	if len(nodes) != 1 {
-		t.Errorf("expected 1 node to survive, got %d", len(nodes))
-	}
-}
-
 func TestExportObsidian(t *testing.T) {
 	g, cleanup := openTestGraph(t)
 	defer cleanup()
@@ -300,5 +241,62 @@ func TestLink_ErrorOnEmptyEndpoints(t *testing.T) {
 	}
 	if err := g.Link(Edge{From: "a", To: "", Relation: "x"}); err == nil {
 		t.Error("expected error for empty To, got nil")
+	}
+}
+
+func TestEntityNoteNamesResolveCollisionsDeterministically(t *testing.T) {
+	nodes := []Node{
+		{ID: "b-node", Label: "A B", EntityType: "concept"},
+		{ID: "a-node", Label: "A_B", EntityType: "concept"},
+		{ID: "c-node", Label: "Acme Corp", EntityType: "organization"},
+	}
+	names := EntityNoteNames(nodes)
+
+	// Both colliders keep their own note; canonical-ID order assigns the
+	// base name to a-node and the -2 suffix to b-node.
+	if names["a-node"] != "A_B" {
+		t.Errorf("a-node = %q, want A_B (base name goes to lowest ID)", names["a-node"])
+	}
+	if names["b-node"] != "A_B-2" {
+		t.Errorf("b-node = %q, want A_B-2", names["b-node"])
+	}
+	if names["c-node"] != "Acme_Corp" {
+		t.Errorf("c-node = %q, want Acme_Corp", names["c-node"])
+	}
+
+	// Determinism: same input, same output, regardless of input order.
+	shuffled := []Node{nodes[2], nodes[0], nodes[1]}
+	again := EntityNoteNames(shuffled)
+	for id, name := range names {
+		if again[id] != name {
+			t.Fatalf("assignment drifted for %s: %q vs %q", id, name, again[id])
+		}
+	}
+}
+
+func TestExportObsidianCollidingLabelsWriteDistinctFiles(t *testing.T) {
+	g, cleanup := openTestGraph(t)
+	defer cleanup()
+
+	// Both labels sanitize to "Acme_Corp"; without the disambiguation the
+	// second write silently destroyed the first note.
+	_ = g.Upsert(Node{ID: "acme-org", Label: "Acme Corp", EntityType: "organization"})
+	_ = g.Upsert(Node{ID: "acme-txt", Label: "Acme_Corp", EntityType: "concept"})
+
+	outDir := t.TempDir()
+	if err := g.ExportObsidian(outDir); err != nil {
+		t.Fatalf("ExportObsidian: %v", err)
+	}
+
+	first := filepath.Join(outDir, "Acme_Corp.md")
+	second := filepath.Join(outDir, "Acme_Corp-2.md")
+	for _, p := range []string{first, second} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("expected distinct note %s: %v", p, err)
+		}
+		if !strings.Contains(string(data), "id: ") {
+			t.Errorf("note %s missing frontmatter", p)
+		}
 	}
 }

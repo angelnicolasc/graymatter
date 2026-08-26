@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -874,9 +875,7 @@ func marshalJSON(v any) ([]byte, error) {
 }
 
 func sortFactsByTime(facts []Fact) {
-	for i := 1; i < len(facts); i++ {
-		for j := i; j > 0 && facts[j].CreatedAt.After(facts[j-1].CreatedAt); j-- {
-			facts[j], facts[j-1] = facts[j-1], facts[j]
-		}
-	}
+	sort.SliceStable(facts, func(i, j int) bool {
+		return facts[i].CreatedAt.After(facts[j].CreatedAt)
+	})
 }
