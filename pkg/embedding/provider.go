@@ -98,6 +98,9 @@ func AutoDetect(cfg Config) Provider {
 }
 
 // ollamaReachable does a fast HEAD probe to check if Ollama is up.
+// Only a 200 counts as reachable: a captive portal or proxy answers 404/302
+// for unknown paths, and treating that as "Ollama is here" sends every
+// embedding into guaranteed-failing calls whose failures Put then swallows.
 func ollamaReachable(baseURL string) bool {
 	if baseURL == "" {
 		return false
@@ -108,5 +111,5 @@ func ollamaReachable(baseURL string) bool {
 		return false
 	}
 	_ = resp.Body.Close()
-	return resp.StatusCode < 500
+	return resp.StatusCode == http.StatusOK
 }
