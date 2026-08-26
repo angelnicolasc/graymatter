@@ -1,0 +1,8 @@
+{"id":"lh-q-01","domain":"deploy","asked_at_session":50,"text":"What did we decide about canary deployments?","gold":["lh-0001"],"forbidden":["lh-0009","lh-0014"]}
+{"id":"lh-q-02","domain":"billing","asked_at_session":50,"text":"Which billing provider did we settle on?","gold":["lh-0002"],"forbidden":["lh-0010","lh-0015"]}
+{"id":"lh-q-03","domain":"incidents","asked_at_session":50,"text":"How does pager escalation work now?","gold":["lh-0003"],"forbidden":["lh-0011"]}
+{"id":"lh-q-04","domain":"people","asked_at_session":50,"text":"Who owns the vendor-review rota?","gold":["lh-0004"],"forbidden":["lh-0012","lh-0016"]}
+{"id":"lh-q-05","domain":"roadmap","asked_at_session":50,"text":"What happened to the offline-sync milestone?","gold":["lh-0005"],"forbidden":["lh-0013"]}
+{"id":"lh-q-06","domain":"deploy","asked_at_session":50,"text":"Who can authorize a rollback?","gold":["lh-0006"],"forbidden":["lh-0009","lh-0014"]}
+{"id":"lh-q-07","domain":"billing","asked_at_session":50,"text":"Where do invoice disputes go?","gold":["lh-0007"],"forbidden":["lh-0010","lh-0015"]}
+{"id":"lh-q-08","domain":"people","asked_at_session":50,"text":"How many interview stages are allowed?","gold":["lh-0008"],"forbidden":["lh-0012","lh-0016"]}

@@ -1,0 +1,15 @@
+{"id":"es-ascii-01","domain":"producto","asked_at_session":16,"text":"¿Cómo va la integración con Polar?","gold":["es-114"]}
+{"id":"es-ascii-02","domain":"producto","asked_at_session":16,"text":"Estado de la integración Nexus","gold":["es-123"]}
+{"id":"es-ascii-03","domain":"soporte","asked_at_session":16,"text":"Qué pasó con el pedido ORD-4471","gold":["es-100"]}
+{"id":"es-ascii-04","domain":"soporte","asked_at_session":16,"text":"Reclamación del pedido ORD-9083","gold":["es-097"]}
+{"id":"es-ascii-05","domain":"facturacion","asked_at_session":16,"text":"Correo de facturación de Grupo Ávila","gold":["es-122"]}
+{"id":"es-ascii-06","domain":"ventas","asked_at_session":16,"text":"A qué email contactar a Talleres Ibáñez","gold":["es-125"]}
+{"id":"es-ascii-07","domain":"facturacion","asked_at_session":16,"text":"Renovación Plan Delta sin aumento","gold":["es-096"]}
+{"id":"es-ascii-08","domain":"producto","asked_at_session":16,"text":"Retraso de la integración Polar","gold":["es-114"]}
+{"id":"es-ascii-09","domain":"soporte","asked_at_session":16,"text":"Pedido reenviado ORD-4471","gold":["es-100"]}
+{"id":"es-ascii-10","domain":"ventas","asked_at_session":16,"text":"Contacto email de Logística Céspedes","gold":["es-122"]}
+{"id":"es-puro-01","domain":"soporte","asked_at_session":16,"text":"Quién pidió que no lo llamen por teléfono","gold":["es-002"]}
+{"id":"es-puro-02","domain":"facturacion","asked_at_session":16,"text":"Renovaciones acordadas sin aumento hasta diciembre","gold":["es-005"]}
+{"id":"es-puro-03","domain":"soporte","asked_at_session":16,"text":"Pedidos reenviados después de una reclamación","gold":["es-003"]}
+{"id":"es-puro-04","domain":"ventas","asked_at_session":16,"text":"Confirmaciones de integración con retraso de una semana","gold":["es-001"]}
+{"id":"es-puro-05","domain":"facturacion","asked_at_session":16,"text":"Correspondencia que debe ir por correo electrónico","gold":["es-002"]}

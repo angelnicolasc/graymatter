@@ -1,0 +1,126 @@
+{"id":"es-001","session":1,"domain":"ventas","kind":"producto","text":"Esteban de Logística Céspedes confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-002","session":1,"domain":"soporte","kind":"email","text":"Camila pidió que toda la correspondencia de Grupo Ávila vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-003","session":1,"domain":"facturacion","kind":"pedido","text":"El pedido ORD-4471 de Cafetal Ortega se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-004","session":1,"domain":"producto","kind":"producto","text":"Rodrigo de Cafetal Ortega confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-005","session":1,"domain":"ventas","kind":"plan","text":"Renovación acordada con Clínica Nogal (Esteban): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-006","session":1,"domain":"soporte","kind":"plan","text":"Renovación acordada con Editorial Bruma (Lucía): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-007","session":1,"domain":"facturacion","kind":"email","text":"Rodrigo pidió que toda la correspondencia de Grupo Ávila vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-008","session":1,"domain":"producto","kind":"plan","text":"Renovación acordada con Grupo Ávila (Esteban): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-009","session":1,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Grupo Ávila se reenvió tras la reclamación de Valentina; el anterior llegó dañado."}
+{"id":"es-010","session":1,"domain":"soporte","kind":"plan","text":"Renovación acordada con Logística Céspedes (Valentina): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-011","session":2,"domain":"ventas","kind":"email","text":"Jorge pidió que toda la correspondencia de Editorial Bruma vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-012","session":2,"domain":"soporte","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (María): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-013","session":2,"domain":"facturacion","kind":"producto","text":"Andrés de Logística Céspedes confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-014","session":2,"domain":"producto","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Valentina; el anterior llegó dañado."}
+{"id":"es-015","session":2,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Logística Céspedes se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-016","session":2,"domain":"facturacion","kind":"email","text":"Rodrigo pidió que toda la correspondencia de Cafetal Ortega vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-017","session":2,"domain":"producto","kind":"email","text":"Esteban pidió que toda la correspondencia de Logística Céspedes vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-018","session":2,"domain":"ventas","kind":"email","text":"Camila pidió que toda la correspondencia de Grupo Ávila vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-019","session":2,"domain":"soporte","kind":"producto","text":"María de Cafetal Ortega confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-020","session":3,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Rodrigo; el anterior llegó dañado."}
+{"id":"es-021","session":3,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Talleres Ibáñez se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-022","session":3,"domain":"facturacion","kind":"pedido","text":"El pedido ORD-4471 de Editorial Bruma se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-023","session":3,"domain":"ventas","kind":"plan","text":"Renovación acordada con Cafetal Ortega (Valentina): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-024","session":3,"domain":"soporte","kind":"producto","text":"Esteban de Grupo Ávila confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-025","session":3,"domain":"facturacion","kind":"pedido","text":"El pedido ORD-9083 de Clínica Nogal se reenvió tras la reclamación de Jorge; el anterior llegó dañado."}
+{"id":"es-026","session":3,"domain":"ventas","kind":"producto","text":"Lucía de Editorial Bruma confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-027","session":3,"domain":"soporte","kind":"producto","text":"Lucía de Editorial Bruma confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-028","session":4,"domain":"ventas","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (Andrés): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-029","session":4,"domain":"soporte","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (Rodrigo): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-030","session":4,"domain":"facturacion","kind":"plan","text":"Renovación acordada con Clínica Nogal (Rodrigo): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-031","session":4,"domain":"producto","kind":"email","text":"Rodrigo pidió que toda la correspondencia de Editorial Bruma vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-032","session":4,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Esteban; el anterior llegó dañado."}
+{"id":"es-033","session":4,"domain":"soporte","kind":"plan","text":"Renovación acordada con Editorial Bruma (Rodrigo): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-034","session":4,"domain":"ventas","kind":"producto","text":"Valentina de Cafetal Ortega confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-035","session":4,"domain":"soporte","kind":"pedido","text":"El pedido ORD-4471 de Logística Céspedes se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-036","session":5,"domain":"ventas","kind":"plan","text":"Renovación acordada con Editorial Bruma (Camila): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-037","session":5,"domain":"soporte","kind":"email","text":"Rodrigo pidió que toda la correspondencia de Logística Céspedes vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-038","session":5,"domain":"producto","kind":"plan","text":"Renovación acordada con Clínica Nogal (Jorge): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-039","session":5,"domain":"ventas","kind":"producto","text":"Andrés de Talleres Ibáñez confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-040","session":5,"domain":"facturacion","kind":"plan","text":"Renovación acordada con Logística Céspedes (Rodrigo): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-041","session":5,"domain":"producto","kind":"plan","text":"Renovación acordada con Logística Céspedes (María): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-042","session":5,"domain":"ventas","kind":"producto","text":"Jorge de Grupo Ávila confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-043","session":5,"domain":"soporte","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Camila; el anterior llegó dañado."}
+{"id":"es-044","session":6,"domain":"ventas","kind":"producto","text":"Andrés de Editorial Bruma confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-045","session":6,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Editorial Bruma se reenvió tras la reclamación de Esteban; el anterior llegó dañado."}
+{"id":"es-046","session":6,"domain":"facturacion","kind":"pedido","text":"El pedido ORD-9083 de Clínica Nogal se reenvió tras la reclamación de Andrés; el anterior llegó dañado."}
+{"id":"es-047","session":6,"domain":"producto","kind":"email","text":"Camila pidió que toda la correspondencia de Clínica Nogal vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-048","session":6,"domain":"ventas","kind":"email","text":"Camila pidió que toda la correspondencia de Logística Céspedes vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-049","session":6,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Cafetal Ortega se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-050","session":6,"domain":"producto","kind":"producto","text":"Camila de Grupo Ávila confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-051","session":6,"domain":"ventas","kind":"producto","text":"Rodrigo de Clínica Nogal confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-052","session":6,"domain":"soporte","kind":"email","text":"Esteban pidió que toda la correspondencia de Grupo Ávila vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-053","session":7,"domain":"soporte","kind":"producto","text":"Jorge de Grupo Ávila confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-054","session":7,"domain":"facturacion","kind":"email","text":"Jorge pidió que toda la correspondencia de Editorial Bruma vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-055","session":7,"domain":"producto","kind":"plan","text":"Renovación acordada con Editorial Bruma (Jorge): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-056","session":7,"domain":"ventas","kind":"plan","text":"Renovación acordada con Logística Céspedes (Rodrigo): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-057","session":7,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Logística Céspedes se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-058","session":7,"domain":"facturacion","kind":"producto","text":"Camila de Editorial Bruma confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-059","session":7,"domain":"producto","kind":"pedido","text":"El pedido ORD-9083 de Talleres Ibáñez se reenvió tras la reclamación de Jorge; el anterior llegó dañado."}
+{"id":"es-060","session":7,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Talleres Ibáñez se reenvió tras la reclamación de Andrés; el anterior llegó dañado."}
+{"id":"es-061","session":7,"domain":"soporte","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-062","session":8,"domain":"ventas","kind":"producto","text":"Esteban de Talleres Ibáñez confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-063","session":8,"domain":"facturacion","kind":"email","text":"Jorge pidió que toda la correspondencia de Cafetal Ortega vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-064","session":8,"domain":"producto","kind":"pedido","text":"El pedido ORD-9083 de Clínica Nogal se reenvió tras la reclamación de Rodrigo; el anterior llegó dañado."}
+{"id":"es-065","session":8,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Cafetal Ortega se reenvió tras la reclamación de Esteban; el anterior llegó dañado."}
+{"id":"es-066","session":8,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Editorial Bruma se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-067","session":8,"domain":"facturacion","kind":"email","text":"María pidió que toda la correspondencia de Cafetal Ortega vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-068","session":8,"domain":"producto","kind":"producto","text":"Valentina de Talleres Ibáñez confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-069","session":8,"domain":"ventas","kind":"email","text":"Jorge pidió que toda la correspondencia de Grupo Ávila vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-070","session":9,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Talleres Ibáñez se reenvió tras la reclamación de Lucía; el anterior llegó dañado."}
+{"id":"es-071","session":9,"domain":"soporte","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (Andrés): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-072","session":9,"domain":"facturacion","kind":"plan","text":"Renovación acordada con Grupo Ávila (Rodrigo): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-073","session":9,"domain":"producto","kind":"pedido","text":"El pedido ORD-9083 de Cafetal Ortega se reenvió tras la reclamación de Andrés; el anterior llegó dañado."}
+{"id":"es-074","session":9,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Talleres Ibáñez se reenvió tras la reclamación de Andrés; el anterior llegó dañado."}
+{"id":"es-075","session":9,"domain":"soporte","kind":"email","text":"Esteban pidió que toda la correspondencia de Clínica Nogal vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-076","session":9,"domain":"facturacion","kind":"producto","text":"Andrés de Cafetal Ortega confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-077","session":9,"domain":"producto","kind":"email","text":"María pidió que toda la correspondencia de Logística Céspedes vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-078","session":9,"domain":"ventas","kind":"producto","text":"Esteban de Clínica Nogal confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-079","session":9,"domain":"soporte","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Andrés; el anterior llegó dañado."}
+{"id":"es-080","session":10,"domain":"ventas","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (Lucía): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-081","session":10,"domain":"soporte","kind":"email","text":"Camila pidió que toda la correspondencia de Talleres Ibáñez vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-082","session":10,"domain":"producto","kind":"email","text":"Esteban pidió que toda la correspondencia de Talleres Ibáñez vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-083","session":10,"domain":"ventas","kind":"plan","text":"Renovación acordada con Cafetal Ortega (Jorge): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-084","session":10,"domain":"facturacion","kind":"producto","text":"Valentina de Talleres Ibáñez confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-085","session":10,"domain":"producto","kind":"producto","text":"Rodrigo de Editorial Bruma confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-086","session":11,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Grupo Ávila se reenvió tras la reclamación de Jorge; el anterior llegó dañado."}
+{"id":"es-087","session":11,"domain":"producto","kind":"producto","text":"Lucía de Grupo Ávila confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-088","session":11,"domain":"ventas","kind":"email","text":"Camila pidió que toda la correspondencia de Editorial Bruma vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-089","session":11,"domain":"producto","kind":"pedido","text":"El pedido ORD-4471 de Editorial Bruma se reenvió tras la reclamación de Valentina; el anterior llegó dañado."}
+{"id":"es-090","session":11,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Editorial Bruma se reenvió tras la reclamación de Rodrigo; el anterior llegó dañado."}
+{"id":"es-091","session":11,"domain":"soporte","kind":"producto","text":"Andrés de Clínica Nogal confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-092","session":12,"domain":"ventas","kind":"plan","text":"Renovación acordada con Cafetal Ortega (Esteban): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-093","session":12,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Editorial Bruma se reenvió tras la reclamación de Camila; el anterior llegó dañado."}
+{"id":"es-094","session":12,"domain":"facturacion","kind":"producto","text":"María de Cafetal Ortega confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-095","session":12,"domain":"producto","kind":"email","text":"Esteban pidió que toda la correspondencia de Talleres Ibáñez vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-096","session":12,"domain":"ventas","kind":"plan","text":"Renovación acordada con Clínica Nogal (Lucía): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-097","session":12,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Talleres Ibáñez se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-098","session":12,"domain":"facturacion","kind":"email","text":"Lucía pidió que toda la correspondencia de Editorial Bruma vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-099","session":12,"domain":"ventas","kind":"producto","text":"Valentina de Logística Céspedes confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-100","session":12,"domain":"soporte","kind":"pedido","text":"El pedido ORD-4471 de Clínica Nogal se reenvió tras la reclamación de Jorge; el anterior llegó dañado."}
+{"id":"es-101","session":13,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Talleres Ibáñez se reenvió tras la reclamación de Valentina; el anterior llegó dañado."}
+{"id":"es-102","session":13,"domain":"soporte","kind":"producto","text":"Lucía de Logística Céspedes confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-103","session":13,"domain":"facturacion","kind":"producto","text":"Rodrigo de Grupo Ávila confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-104","session":13,"domain":"producto","kind":"plan","text":"Renovación acordada con Grupo Ávila (Valentina): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-105","session":13,"domain":"ventas","kind":"plan","text":"Renovación acordada con Clínica Nogal (Valentina): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-106","session":13,"domain":"soporte","kind":"producto","text":"Esteban de Editorial Bruma confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-107","session":13,"domain":"facturacion","kind":"email","text":"Esteban pidió que toda la correspondencia de Logística Céspedes vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-108","session":13,"domain":"producto","kind":"plan","text":"Renovación acordada con Grupo Ávila (María): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-109","session":13,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Editorial Bruma se reenvió tras la reclamación de María; el anterior llegó dañado."}
+{"id":"es-110","session":14,"domain":"ventas","kind":"producto","text":"Andrés de Editorial Bruma confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-111","session":14,"domain":"soporte","kind":"producto","text":"Lucía de Logística Céspedes confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-112","session":14,"domain":"producto","kind":"plan","text":"Renovación acordada con Cafetal Ortega (Andrés): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-113","session":14,"domain":"ventas","kind":"producto","text":"Camila de Logística Céspedes confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-114","session":14,"domain":"soporte","kind":"producto","text":"Valentina de Logística Céspedes confirmó que la integración con Polar va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-115","session":14,"domain":"facturacion","kind":"email","text":"Lucía pidió que toda la correspondencia de Editorial Bruma vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-116","session":14,"domain":"producto","kind":"plan","text":"Renovación acordada con Cafetal Ortega (Camila): permanece en el Plan Ándes hasta diciembre sin aumento."}
+{"id":"es-117","session":14,"domain":"ventas","kind":"pedido","text":"El pedido ORD-4471 de Grupo Ávila se reenvió tras la reclamación de Jorge; el anterior llegó dañado."}
+{"id":"es-118","session":14,"domain":"soporte","kind":"pedido","text":"El pedido ORD-9083 de Clínica Nogal se reenvió tras la reclamación de Camila; el anterior llegó dañado."}
+{"id":"es-119","session":15,"domain":"ventas","kind":"producto","text":"Esteban de Logística Céspedes confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-120","session":15,"domain":"soporte","kind":"producto","text":"María de Clínica Nogal confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-121","session":15,"domain":"facturacion","kind":"producto","text":"Camila de Editorial Bruma confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-122","session":15,"domain":"producto","kind":"email","text":"María pidió que toda la correspondencia de Grupo Ávila vaya al correo soporte@avila.example y no al teléfono."}
+{"id":"es-123","session":15,"domain":"soporte","kind":"producto","text":"Camila de Logística Céspedes confirmó que la integración con Nexus va con retraso de una semana por el cambio de proveedor."}
+{"id":"es-124","session":15,"domain":"facturacion","kind":"plan","text":"Renovación acordada con Talleres Ibáñez (Valentina): permanece en el Plan Delta hasta diciembre sin aumento."}
+{"id":"es-125","session":15,"domain":"producto","kind":"email","text":"Valentina pidió que toda la correspondencia de Editorial Bruma vaya al correo compras@ibanez.example y no al teléfono."}
+{"id":"es-126","session":15,"domain":"ventas","kind":"pedido","text":"El pedido ORD-9083 de Grupo Ávila se reenvió tras la reclamación de Camila; el anterior llegó dañado."}
