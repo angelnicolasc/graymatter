@@ -617,6 +617,13 @@ func (s *Store) RecallShared(ctx context.Context, query string, topK int) ([]str
 
 // RecallAll merges agent-scoped and shared-scoped results, deduplicates, and
 // re-ranks by Reciprocal Rank Fusion. It returns at most topK combined facts.
+//
+// The two inputs are each a fused ranking (whatever Recall produced for that
+// namespace); their ranks are combined with the same k=60 RRF constant Recall
+// uses internally, so neither namespace structurally outranks the other: a
+// shared fact ranked 1 for the query beats an agent fact ranked 8. Before
+// this, results were concatenated agent-first and truncated, which starved
+// the shared namespace whenever the agent list filled its topK.
 func (s *Store) RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error) {
 	agentResults, err := s.Recall(ctx, agentID, query, topK)
 	if err != nil {
@@ -626,26 +633,87 @@ func (s *Store) RecallAll(ctx context.Context, agentID, query string, topK int) 
 	if err != nil {
 		return nil, fmt.Errorf("recall shared: %w", err)
 	}
+	return fuseRecallResults(agentResults, sharedResults, topK), nil
+}
 
-	// Deduplicate and merge, preserving agent-scoped results first.
-	seen := make(map[string]bool, len(agentResults)+len(sharedResults))
-	merged := make([]string, 0, len(agentResults)+len(sharedResults))
-	for _, f := range agentResults {
-		if !seen[f] {
-			seen[f] = true
-			merged = append(merged, f)
+// fuseRecallResults merges two recall rankings with Reciprocal Rank Fusion
+// (k=60, Cormack/Clarke/Buettcher SIGIR 2009 — the same constant and
+// rationale as the per-agent fusion in recall.go). A text appearing in both
+// lists accumulates both contributions, which also deduplicates it.
+//
+// The result order is total, per the api-stability determinism guarantee:
+// fused score descending, then agent-list position ascending (a tie means
+// the agent-scoped copy is the more specific of the two), then shared-list
+// position, then text — so equal scores resolve identically on every call.
+func fuseRecallResults(agentResults, sharedResults []string, topK int) []string {
+	const k = 60.0
+
+	agentRank := make(map[string]int, len(agentResults))
+	for i, t := range agentResults {
+		agentRank[t] = i + 1
+	}
+	sharedRank := make(map[string]int, len(sharedResults))
+	for i, t := range sharedResults {
+		sharedRank[t] = i + 1
+	}
+
+	fused := make(map[string]float64, len(agentResults)+len(sharedResults))
+	add := func(ranks map[string]int) {
+		for t, r := range ranks {
+			fused[t] += 1 / (k + float64(r))
 		}
 	}
-	for _, f := range sharedResults {
-		if !seen[f] {
-			seen[f] = true
-			merged = append(merged, f)
+	add(agentRank)
+	add(sharedRank)
+
+	type entry struct {
+		text string
+		in   map[string]int // which list(s) placed it, text → 1-based rank
+		sc   float64
+	}
+	entries := make([]entry, 0, len(fused))
+	for t, sc := range fused {
+		e := entry{text: t, sc: sc, in: make(map[string]int, 2)}
+		if r, ok := agentRank[t]; ok {
+			e.in["agent"] = r
 		}
+		if r, ok := sharedRank[t]; ok {
+			e.in["shared"] = r
+		}
+		entries = append(entries, e)
 	}
-	if len(merged) > topK {
-		merged = merged[:topK]
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.sc != b.sc {
+			return a.sc > b.sc
+		}
+		ra, oka := a.in["agent"]
+		rb, okb := b.in["agent"]
+		switch {
+		case oka && okb && ra != rb:
+			return ra < rb
+		case oka != okb:
+			return oka // agent-listed text wins ties over shared-only
+		}
+		sa, oksa := a.in["shared"]
+		sb, oksb := b.in["shared"]
+		switch {
+		case oksa && oksb && sa != sb:
+			return sa < sb
+		case oksa != oksb:
+			return oksa
+		}
+		return a.text < b.text
+	})
+
+	if topK > len(entries) {
+		topK = len(entries)
 	}
-	return merged, nil
+	result := make([]string, 0, topK)
+	for _, e := range entries[:topK] {
+		result = append(result, e.text)
+	}
+	return result
 }
 
 // SetKG wires an optional knowledge graph and entity extractor into the store.
