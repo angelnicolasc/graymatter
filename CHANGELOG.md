@@ -23,6 +23,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`RecallAll` now performs the RRF fusion its documentation always claimed.** The
+  implementation concatenated agent-first and truncated, so the shared namespace starved
+  whenever the agent list filled its topK — while `docs/api-stability.md` listed `RecallAll`
+  under the deterministic-ordering guarantee and the doc-comment promised Reciprocal Rank
+  Fusion. The two namespace rankings are now fused with the same k=60 constant Recall uses
+  internally (a shared fact ranked 1 beats an agent fact ranked 8), identical texts across
+  namespaces accumulate both contributions and appear once, and ties resolve through a total
+  order so repeated calls return identical output.
+
 - **`memory_reflect` forget/update receipts survive consolidation.** The MCP surface
   zeroed a retired fact's weight on top of tombstoning it, which drops it under the prune
   floor (<0.01) — so the next consolidation cycle collected the receipt milliseconds after
