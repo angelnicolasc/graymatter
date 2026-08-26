@@ -279,13 +279,17 @@ func Open(cfg StoreConfig) (*Store, error) {
 	_ = s.loadAgents()
 
 	if !readOnly {
-		// Validate embedding dimensions against the stored value; warn on mismatch.
+		// Detect an embedding-provider switch and self-heal: every live fact
+		// is queued for re-indexing under the new provider before the store
+		// starts serving, and the synchronous drain below finishes the pass
+		// so no mixed-dimension window ever reaches a query.
 		if cfg.Embedder != nil {
-			s.checkEmbedDimensions(cfg.Embedder)
+			s.handleEmbedderLifecycle(cfg.Embedder)
 		}
 
 		// Drain any vector writes that did not complete on the previous run
-		// (crash between bbolt commit and vector upsert, or transient failures).
+		// (crash between bbolt commit and vector upsert, or transient failures)
+		// - and, after a provider switch, the full re-index queued above.
 		s.reconcileVectors()
 
 		// Background reconcile loop: retries pending vectors on a cadence so the
@@ -792,6 +796,10 @@ func (s *Store) reconcileVectors() {
 	if len(pending) == 0 {
 		return
 	}
+	// The active dimension decides whether a fact's stored embedding is
+	// still valid: a length mismatch means the provider switched after this
+	// vector was written, and reusing it would poison similarity search.
+	targetDims, _ := s.storedEmbedDims()
 	ctx := s.shutdownCtx
 	for agentID, factIDs := range pending {
 		for _, factID := range factIDs {
@@ -804,19 +812,66 @@ func (s *Store) reconcileVectors() {
 				s.clearPendingVector(agentID, factID)
 				continue
 			}
-			if len(f.Embedding) == 0 {
+			if f.IsSuperseded() {
+				// Retired facts never reach the index; drop the stale intent.
 				s.clearPendingVector(agentID, factID)
 				continue
 			}
-			if err := s.addToVector(ctx, agentID, f); err != nil {
+			if len(f.Embedding) == 0 && (targetDims <= 0 || s.embedder == nil) {
+				s.clearPendingVector(agentID, factID)
+				continue
+			}
+			if err := s.reindexFact(ctx, agentID, &f, targetDims); err != nil {
 				if s.cfg.OnVectorIndexError != nil {
 					s.cfg.OnVectorIndexError(agentID, factID, err)
 				}
-				continue
+				continue // marker stays: retried on the next cadence tick
 			}
 			s.clearPendingVector(agentID, factID)
 		}
 	}
+}
+
+// reindexFact lands one fact in the vector store under the active dimension.
+// When the stored embedding's length disagrees with targetDims - or is
+// absent while a provider exists - the fact is re-embedded fresh and the new
+// vector is persisted, so later retries never repeat the embedding work.
+func (s *Store) reindexFact(ctx context.Context, agentID string, f *Fact, targetDims int) error {
+	if targetDims > 0 && len(f.Embedding) != targetDims && s.embedder != nil {
+		fresh, err := s.embedder.Embed(ctx, f.Text)
+		if err != nil {
+			return fmt.Errorf("re-embed for switched provider: %w", err)
+		}
+		if len(fresh) == 0 {
+			return fmt.Errorf("re-embed returned no vector")
+		}
+		f.Embedding = fresh
+		if err := s.UpdateFact(agentID, *f); err != nil {
+			return fmt.Errorf("persist re-embedded fact: %w", err)
+		}
+	}
+	return s.addToVector(ctx, agentID, *f)
+}
+
+// storedEmbedDims returns the dimension recorded for this store and whether
+// one has been recorded at all.
+func (s *Store) storedEmbedDims() (int, bool) {
+	const metaKeyDims = "embed_dims"
+	var dims int
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketMeta)
+		if b == nil {
+			return nil
+		}
+		if v := b.Get([]byte(metaKeyDims)); v != nil {
+			return json.Unmarshal(v, &dims)
+		}
+		return nil
+	})
+	if err != nil || dims <= 0 {
+		return 0, false
+	}
+	return dims, true
 }
 
 // vectorReconcileLoop runs reconcileVectors on a fixed cadence until shutdown.
@@ -923,34 +978,90 @@ func (s *Store) loadFact(agentID, factID string) (Fact, bool) {
 	return f, ok
 }
 
-// checkEmbedDimensions reads the stored embedding dimension from the meta bucket
-// and warns if the current provider's dimension differs. On first use it records
-// the current dimension so future opens can detect provider switches.
-func (s *Store) checkEmbedDimensions(emb embedding.Provider) {
+// handleEmbedderLifecycle reconciles the active provider with the store's
+// recorded embedding state. First provider ever seen: record its dimensions.
+// Same dimensions as before: nothing to do. Different dimensions - the
+// signature of a provider switch: queue every live fact for re-indexing and
+// adopt the new dimension durably. The caller's synchronous reconcileVectors
+// drain then re-embeds the queue before the store serves a single query, so
+// stale vectors from the old provider can never poison search results.
+func (s *Store) handleEmbedderLifecycle(emb embedding.Provider) {
 	const metaKeyDims = "embed_dims"
-	currentDims := emb.Dimensions()
-	if currentDims <= 0 {
+	current := emb.Dimensions()
+	if current <= 0 {
 		return // provider doesn't know its dims yet (e.g. Ollama before first call)
 	}
 
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	var stored int
+	haveStored := false
+	_ = s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketMeta)
-		stored := b.Get([]byte(metaKeyDims))
-		if stored == nil {
-			val, _ := json.Marshal(currentDims)
-			return b.Put([]byte(metaKeyDims), val)
-		}
-		var storedDims int
-		if err := json.Unmarshal(stored, &storedDims); err != nil {
+		if b == nil {
 			return nil
 		}
-		if storedDims != currentDims {
-			log.Printf("graymatter: WARNING embedding dimension mismatch: stored=%d current=%d (provider=%s). "+
-				"Vector search results may be inaccurate. Consider re-indexing your data.",
-				storedDims, currentDims, emb.Name())
+		if v := b.Get([]byte(metaKeyDims)); v != nil {
+			if err := json.Unmarshal(v, &stored); err == nil {
+				haveStored = true
+			}
 		}
 		return nil
 	})
+	if !haveStored {
+		s.recordEmbedDimensions(current)
+		return
+	}
+	if stored == current {
+		return
+	}
+
+	log.Printf("graymatter: embedding provider switch detected (stored dims %d -> %d via %s). "+
+		"Re-indexing all live facts under the new provider before serving.",
+		stored, current, emb.Name())
+
+	queued := 0
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		mb := tx.Bucket(bucketMeta)
+		if mb == nil {
+			return fmt.Errorf("meta bucket missing")
+		}
+		val, _ := json.Marshal(current)
+		// Adopt the new dimension durably first: a crash mid-reindex must not
+		// lose the intent, and the reconciler compares against this value.
+		if err := mb.Put([]byte(metaKeyDims), val); err != nil {
+			return err
+		}
+		parent := tx.Bucket(bucketFacts)
+		pendingRoot := tx.Bucket(bucketPendingVector)
+		if parent == nil || pendingRoot == nil {
+			return nil // nothing stored yet
+		}
+		return parent.ForEach(func(agentKey, _ []byte) error {
+			agentBucket := parent.Bucket(agentKey)
+			if agentBucket == nil {
+				return nil
+			}
+			pending, err := pendingRoot.CreateBucketIfNotExists(agentKey)
+			if err != nil {
+				return err
+			}
+			return agentBucket.ForEach(func(factKey, factVal []byte) error {
+				if factVal == nil {
+					return nil
+				}
+				f, err := unmarshalFact(factVal)
+				if err != nil || f.IsSuperseded() {
+					return nil // retired facts never reach the index
+				}
+				queued++
+				return pending.Put(factKey, []byte{1})
+			})
+		})
+	})
+	if err != nil {
+		log.Printf("graymatter: reindex queueing failed (dims adopted; retried on next open): %v", err)
+		return
+	}
+	log.Printf("graymatter: %d fact(s) queued for re-index under %s", queued, emb.Name())
 }
 
 // recordEmbedDimensions writes the embedding dimension to meta if not already set.
