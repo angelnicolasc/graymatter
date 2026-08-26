@@ -10,6 +10,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Two new retrieval-quality corpora extend measurement beyond the frozen English set.**
+  `multilingual-es` (126 Spanish facts, 15 queries in two declared classes: ASCII-anchor
+  reachable vs accent-dependent) and `long-horizon` (421 facts across 50 sessions with
+  genuinely tombstoned late variants). Both ship with deterministic generators. First
+  measured baselines: Spanish overall 60% [36–80] for GrayMatter fixed-K against a 27%
+  window; long-horizon **100% [68–100] HitRate at 0% Dead and 145 tokens/q** while the
+  window and recency-only scoring both return none of the early decisions. Every table now
+  prints its Wilson 95% interval — six-query point estimates are not laws of nature.
+
 - **`graymatter doctor --embeddings` makes the silent keyword-only fallback visible.**
   `Put` degrades a fact to keyword-only whenever the embedder errors and still returns nil,
   so a broken backend was indistinguishable from an empty store. The store now records the
