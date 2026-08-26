@@ -1,0 +1,9 @@
+# Smithery listing — https://smithery.ai
+# stdio transport served by the pre-installed graymatter binary.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+  commandFunction: |-
+    () => ({ command: "graymatter", args: ["mcp", "serve"] })
