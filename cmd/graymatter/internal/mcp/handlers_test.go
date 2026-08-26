@@ -148,6 +148,22 @@ func factWeight(t *testing.T, mem *graymatter.Memory, agentID, text string) floa
 	return -1
 }
 
+// factSuperseded reports whether the fact with the given text is retired,
+// or false if absent.
+func factSuperseded(t *testing.T, mem *graymatter.Memory, agentID, text string) bool {
+	t.Helper()
+	facts, err := mem.Advanced().List(agentID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, f := range facts {
+		if f.Text == text {
+			return f.IsSuperseded()
+		}
+	}
+	return false
+}
+
 func TestMemoryReflect_ForgetViaText(t *testing.T) {
 	s, mem := newTestServer(t)
 	ctx := context.Background()
@@ -170,8 +186,10 @@ func TestMemoryReflect_ForgetViaText(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget via text should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, mem, "a1", fact); w != 0 {
-		t.Errorf("fact weight after forget = %v, want 0", w)
+	// The tombstone keeps the weight decay gave it: zeroing it here would let
+	// the next consolidation prune collect the receipt at once (ADR-007).
+	if w := factWeight(t, mem, "a1", fact); w <= 0 {
+		t.Errorf("fact weight after forget = %v, want it preserved so the receipt survives pruning", w)
 	}
 }
 
@@ -195,8 +213,8 @@ func TestMemoryReflect_ForgetViaTarget(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget via target should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, mem, "a1", fact); w != 0 {
-		t.Errorf("fact weight after forget = %v, want 0", w)
+	if w := factWeight(t, mem, "a1", fact); w <= 0 {
+		t.Errorf("fact weight after forget = %v, want it preserved so the receipt survives pruning", w)
 	}
 }
 
@@ -223,11 +241,11 @@ func TestMemoryReflect_ForgetTargetWinsOverText(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("forget should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, mem, "a1", "fact B"); w != 0 {
-		t.Errorf("target fact B weight = %v, want 0 (target must win)", w)
+	if !factSuperseded(t, mem, "a1", "fact B") {
+		t.Errorf("target fact B not retired (target must win)")
 	}
-	if w := factWeight(t, mem, "a1", "fact A"); w == 0 {
-		t.Errorf("text fact A was forgotten, but target should have won")
+	if factSuperseded(t, mem, "a1", "fact A") {
+		t.Errorf("text fact A was retired, but target should have won")
 	}
 }
 
@@ -315,8 +333,13 @@ func TestMemoryReflect_UpdateSupersedes(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("update should succeed, got error: %s", resultText(t, res))
 	}
-	if w := factWeight(t, mem, "a1", oldFact); w != 0 {
-		t.Errorf("old fact weight = %v, want 0", w)
+	// Retirement is signalled by the tombstone; the weight is deliberately
+	// preserved so the receipt survives pruning (ADR-007).
+	if !factSuperseded(t, mem, "a1", oldFact) {
+		t.Errorf("old fact not superseded after update")
+	}
+	if w := factWeight(t, mem, "a1", oldFact); w <= 0 {
+		t.Errorf("old fact weight = %v, want preserved (> 0)", w)
 	}
 	if w := factWeight(t, mem, "a1", newFact); w <= 0 {
 		t.Errorf("new fact weight = %v, want > 0", w)
