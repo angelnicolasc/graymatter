@@ -8,6 +8,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.15.0] - 2026-08-26
+
+### What users get
+
+- **Embedding provider switches self-heal.** Change providers and the store re-indexes
+  itself under the new provider before serving a single query - stale vectors can no
+  longer poison search, and `doctor --embeddings` shows the whole channel's state:
+  coverage, degraded writes, retry backlog.
+- **The write path is production-grade.** Recall bookkeeping dropped from eight write
+  transactions per query to one; confident writes are O(1), race-free, and embed exactly
+  once.
+- **Retrieval speaks every script.** Unicode-native tokenization with plural folding and
+  access-anchored recency - measured across three corpora, headline numbers unchanged,
+  remaining gaps quantified as decision records rather than folklore.
+- **The knowledge graph lives and dies with memory.** Entity IDs are type-scoped (stores
+  migrate automatically on open), and graph weights decay through the same idempotent
+  lifecycle rule as facts.
+- **LLM extraction is opt-in and failure-proof.** `GRAYMATTER_KG_LLM_EXTRACT=1` enables
+  Anthropic-backed entity extraction; every failure mode degrades to the deterministic
+  regex extractor, never to silence.
+
 ### Changed
 
 - **Retrieval vocabulary is now Unicode-native.** Tokenization segments words in any
@@ -116,6 +139,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `/api/tags` made AutoDetect select the Ollama provider on networks without Ollama; every
   embedding failed and Put's silent degradation turned that into keyword-only memory with a
   latency tax on every write.
+
+### Added
+
+- **Opt-in LLM entity extraction with a deterministic safety net.**
+  `GRAYMATTER_KG_LLM_EXTRACT=1` enables Anthropic-backed extraction for the knowledge
+  graph - cloud API, no local hardware. Every failure mode degrades per-text to the
+  regex extractor: unreachable endpoint, invalid JSON, empty answer. A schema gate drops
+  model-emitted types and relations outside the declared vocabulary and ignores
+  model-provided IDs entirely - identity derives from label+type under the typed scheme.
+
+### Compatibility notes
+
+- **Knowledge-graph migration runs once on first open.** Stores written by v0.14 wipe
+  their derived graph state (nodes/edges are re-extractable from facts) and reset the
+  extraction watermark; the next consolidation cycle rebuilds the graph under typed IDs.
+  Facts, sessions and checkpoints are untouched.
+- **Ranking outputs shift across the board** (Unicode tokenization, plural folding,
+  recency anchored on access). If you diff recall output between versions, pin versions -
+  the golden fixtures were regenerated under the documented `-update` policy.
+- **`EmbeddingAnthropic` / `ModeAnthropic` resolve to Voyage AI now.** With
+  `VOYAGE_API_KEY` set they work end-to-end; without one they resolve straight to
+  keyword-only instead of constructing a provider guaranteed to fail.
+- **A provider switch blocks `Open()` while re-indexing.** One-time cost proportional to
+  live fact count; progress is logged and the store serves nothing stale in the meantime.
+- **MCP forget/update receipts persist until decay collects them**, matching ADR-007 -
+  they leave recall immediately but stay listed/exportable/auditable.
 
 ---
 
