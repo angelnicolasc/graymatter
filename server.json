@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.angelnicolasc/graymatter",
   "title": "GrayMatter",
-  "description": "Persistent agent memory as a single Go binary: knowledge graph, TUI observability, zero infrastructure.",
+  "description": "Persistent agent memory as a single Go binary: knowledge graph, TUI observability, zero infra.",
   "repository": {
     "url": "https://github.com/angelnicolasc/graymatter",
     "source": "github"
