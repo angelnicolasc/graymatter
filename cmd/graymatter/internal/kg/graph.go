@@ -20,8 +20,19 @@ import (
 )
 
 var (
-	bucketNodes = []byte("kg_nodes")
-	bucketEdges = []byte("kg_edges")
+	bucketNodes   = []byte("kg_nodes")
+	bucketEdges   = []byte("kg_edges")
+	bucketKGMeta  = []byte("kg_meta")
+	metaKeyScheme = "id_scheme"
+
+	// idSchemeVersion is the node-ID scheme this build writes. v1 IDs were
+	// bare lowercased labels, which merged distinct entities ("apple" the
+	// organization and "apple" the concept collapsed into one node). v2 IDs
+	// are type-scoped ("<type>:<label>"). Stores written under a different
+	// version are wiped on open and re-extracted from their facts by the
+	// next consolidation cycle - the extraction watermark makes that
+	// incremental pass rebuild everything exactly once.
+	idSchemeVersion = "2"
 )
 
 // Node represents a named entity in the knowledge graph.
@@ -55,13 +66,41 @@ type Graph struct {
 	db *bolt.DB
 }
 
-// Open initialises the kg_nodes and kg_edges buckets in db and returns a Graph.
+// Open initialises the kg buckets in db and returns a Graph. A store whose
+// graph was written under an older node-ID scheme is wiped here: nodes are
+// derivable state (re-extracted from facts via the watermark), so rebuilding
+// beats migrating by guesswork.
 func Open(db *bolt.DB) (*Graph, error) {
 	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{bucketNodes, bucketEdges} {
+		for _, name := range [][]byte{bucketNodes, bucketEdges, bucketKGMeta} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
+		}
+		mb := tx.Bucket(bucketKGMeta)
+		if string(mb.Get([]byte(metaKeyScheme))) != idSchemeVersion {
+			// Wrong or absent scheme: drop derived graph state. The
+			// consolidation watermark lives in its own bucket; clearing it
+			// schedules every fact for one fresh extraction pass.
+			for _, name := range [][]byte{bucketNodes, bucketEdges} {
+				if b := tx.Bucket(name); b != nil {
+					if err := tx.DeleteBucket(name); err != nil {
+						return err
+					}
+					if _, err := tx.CreateBucket(name); err != nil {
+						return err
+					}
+				}
+			}
+			if wb := tx.Bucket([]byte("kg_extracted")); wb != nil {
+				if err := tx.DeleteBucket([]byte("kg_extracted")); err != nil {
+					return err
+				}
+				if _, err := tx.CreateBucket([]byte("kg_extracted")); err != nil {
+					return err
+				}
+			}
+			return mb.Put([]byte(metaKeyScheme), []byte(idSchemeVersion))
 		}
 		return nil
 	}); err != nil {
@@ -262,6 +301,115 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 		return nil
 	})
 	return resultNodes, resultEdges, err
+}
+
+// DecayGraph recomputes node and edge weights from staleness and deletes
+// anything below the 0.01 prune floor. Called once per consolidation cycle
+// through the memory.GraphDecayer capability (wired via GraphAdapter).
+func (g *Graph) DecayGraph(halfLife time.Duration) error {
+	return g.DecayGraphAt(time.Now(), halfLife)
+}
+
+// DecayGraphAt is DecayGraph with an injected clock, so tests can assert
+// idempotency without racing the wall clock.
+//
+// Weight is recomputed from LastSeen, never multiplied into: multiplying
+// re-applied the entire elapsed period on every call, so decay frequency -
+// not elapsed time - drove forgetting. min() keeps decay from handing weight
+// back to a node a concurrent upsert just refreshed, mirroring the fact-decay
+// rule in pkg/memory.
+func (g *Graph) DecayGraphAt(now time.Time, halfLife time.Duration) error {
+	if halfLife <= 0 {
+		halfLife = 720 * time.Hour
+	}
+	lambda := math.Log(2) / halfLife.Hours()
+
+	return g.db.Update(func(tx *bolt.Tx) error {
+		for _, bucket := range [][]byte{bucketNodes, bucketEdges} {
+			b := tx.Bucket(bucket)
+			if b == nil {
+				continue
+			}
+			var toDelete [][]byte
+			if err := b.ForEach(func(k, v []byte) error {
+				if v == nil {
+					return nil // sub-bucket; not ours
+				}
+				hours, err := stalenessHours(bucket, k, v, now)
+				if err != nil {
+					return nil // unparseable entries are prune's problem, not decay's
+				}
+				w, err := weightOf(v)
+				if err != nil {
+					return nil
+				}
+				w = math.Min(w, math.Exp(-lambda*hours))
+				if w < 0.01 {
+					toDelete = append(toDelete, k)
+					return nil
+				}
+				nv, err := withWeight(v, w)
+				if err != nil {
+					return err
+				}
+				return b.Put(k, nv)
+			}); err != nil {
+				return err
+			}
+			for _, k := range toDelete {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// stalenessHours returns hours since the entry's freshness anchor: LastSeen
+// for nodes, CreatedAt for edges.
+func stalenessHours(bucket, key, val []byte, now time.Time) (float64, error) {
+	anchor := time.Time{}
+	if string(bucket) == string(bucketNodes) {
+		var n Node
+		if err := json.Unmarshal(val, &n); err != nil {
+			return 0, err
+		}
+		anchor = n.LastSeen
+	} else {
+		var e Edge
+		if err := json.Unmarshal(val, &e); err != nil {
+			return 0, err
+		}
+		anchor = e.CreatedAt
+	}
+	if anchor.IsZero() {
+		return 0, nil
+	}
+	return now.Sub(anchor).Hours(), nil
+}
+
+// weightOf extracts the weight field without mutating the rest of the record.
+func weightOf(val []byte) (float64, error) {
+	m := map[string]any{}
+	if err := json.Unmarshal(val, &m); err != nil {
+		return 1, err
+	}
+	if w, ok := m["weight"].(float64); ok {
+		return w, nil
+	}
+	return 1, nil
+}
+
+// withWeight rewrites only the weight field of a JSON record, preserving
+// every other byte-level field exactly as stored.
+func withWeight(val []byte, w float64) ([]byte, error) {
+	m := map[string]any{}
+	if err := json.Unmarshal(val, &m); err != nil {
+		return nil, err
+	}
+	m["weight"] = w
+	return json.Marshal(m)
 }
 
 // ExportObsidian writes one Markdown file per node + a graph-canvas.json file

@@ -99,18 +99,25 @@ func TestRegexExtractor_EdgesLinkAllPairs(t *testing.T) {
 
 func TestCanonicalID(t *testing.T) {
 	tests := []struct {
-		input string
+		label string
+		typ   string
 		want  string
 	}{
-		{"Maria Rodriguez", "maria rodriguez"},
-		{"  ACME Corp  ", "acme corp"},
-		{"", ""},
+		{"Maria Rodriguez", "person", "person:maria rodriguez"},
+		{"  ACME Corp  ", " organization ", "organization:acme corp"},
+		{"Apple", "organization", "organization:apple"},
+		{"Apple", "concept", "concept:apple"}, // same label, different type: distinct nodes
+		{"Maria", "", "unknown:maria"},        // empty type falls back to unknown
 	}
 	for _, tc := range tests {
-		got := canonicalID(tc.input)
+		got := canonicalID(tc.label, tc.typ)
 		if got != tc.want {
-			t.Errorf("canonicalID(%q) = %q, want %q", tc.input, got, tc.want)
+			t.Errorf("canonicalID(%q,%q) = %q, want %q", tc.label, tc.typ, got, tc.want)
 		}
+	}
+
+	if canonicalID("apple", "organization") == canonicalID("apple", "concept") {
+		t.Fatal("type-scoped IDs must keep same-label different-type entities distinct")
 	}
 }
 
@@ -158,7 +165,7 @@ func TestRegexExtractor_UnicodeNamesSurvive(t *testing.T) {
 	}
 	found := map[string]string{}
 	for _, n := range nodes {
-		found[n.ID] = n.EntityType
+		found[strings.ToLower(n.Label)] = n.EntityType
 	}
 	if got := found["sebastián yañez"]; got != "person" {
 		t.Errorf("accented name missing or mistyped: %v", found)
@@ -176,7 +183,7 @@ func TestRegexExtractor_DeterminerStripped(t *testing.T) {
 	}
 	found := map[string]bool{}
 	for _, n := range nodes {
-		found[n.ID] = true
+		found[strings.ToLower(n.Label)] = true
 	}
 	if !found["atlas migration"] {
 		t.Errorf("name without determiner missing: %v", nodeLabels(nodes))
@@ -194,7 +201,7 @@ func TestRegexExtractor_OrgSuffixesRecognized(t *testing.T) {
 	}
 	types := map[string]string{}
 	for _, n := range nodes {
-		types[n.ID] = n.EntityType
+		types[strings.ToLower(n.Label)] = n.EntityType
 	}
 	for _, id := range []string{"juniper labs", "willow creek capital", "vertex analytics"} {
 		if types[id] != "organization" {
@@ -211,7 +218,7 @@ func TestRegexExtractor_RoleTitles(t *testing.T) {
 	}
 	types := map[string]string{}
 	for _, n := range nodes {
-		types[n.ID] = n.EntityType
+		types[strings.ToLower(n.Label)] = n.EntityType
 	}
 	if types["vp finance"] != "role" {
 		t.Errorf("'vp finance' typed %q, want role", types["vp finance"])
@@ -248,7 +255,7 @@ func TestRegexExtractor_SingleCapOccurrenceThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, n := range nodes {
-		if n.ID == "modigliani" {
+		if strings.ToLower(n.Label) == "modigliani" {
 			t.Errorf("hyphen-split name fragment became an entity below threshold: %v", nodeLabels(nodes))
 		}
 	}
@@ -263,10 +270,10 @@ func TestRegexExtractor_RoleMatchUsesWordBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, n := range nodes {
-		if n.ID == "hector salazar" && n.EntityType == "role" {
+		if strings.ToLower(n.Label) == "hector salazar" && n.EntityType == "role" {
 			t.Errorf("substring role match: %q typed %q", n.Label, n.EntityType)
 		}
-		if n.ID == "hector salazar" && n.EntityType != "person" {
+		if strings.ToLower(n.Label) == "hector salazar" && n.EntityType != "person" {
 			t.Errorf("hector salazar typed %q, want person", n.EntityType)
 		}
 	}
@@ -280,7 +287,7 @@ func TestRegexExtractor_InstitutionSuffixes(t *testing.T) {
 	}
 	types := map[string]string{}
 	for _, n := range nodes {
-		types[n.ID] = n.EntityType
+		types[strings.ToLower(n.Label)] = n.EntityType
 	}
 	for _, id := range []string{"harvard business school", "harvard business review"} {
 		if types[id] != "organization" {
@@ -300,7 +307,7 @@ func TestRegexExtractor_ConceptFallbackType(t *testing.T) {
 	}
 	found := map[string]string{}
 	for _, n := range nodes {
-		found[n.ID] = n.EntityType
+		found[strings.ToLower(n.Label)] = n.EntityType
 	}
 	if found["six sigma"] != "person" {
 		t.Errorf("six sigma typed %q; the measured 2-token default is person", found["six sigma"])

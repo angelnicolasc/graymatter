@@ -52,7 +52,7 @@ func TestExtractorGoldenCorpus(t *testing.T) {
 		}
 
 		for _, w := range f.Want {
-			n, ok := byID[strings.ToLower(w.Label)]
+			n, ok := byID[anyNodeWithLabel(nodes, w.Label)]
 			if !ok {
 				t.Errorf("%q: expected entity %q missing; got %v", f.Text, w.Label, nodeLabels(nodes))
 				continue
@@ -62,7 +62,7 @@ func TestExtractorGoldenCorpus(t *testing.T) {
 			}
 		}
 		for _, id := range f.Forbid {
-			if _, ok := byID[strings.ToLower(id)]; ok {
+			if _, ok := byID[anyNodeWithLabel(nodes, id)]; ok {
 				t.Errorf("%q: forbidden entity %q present; got %v", f.Text, id, nodeLabels(nodes))
 			}
 		}
@@ -82,4 +82,16 @@ func TestExtractorGoldenCorpus(t *testing.T) {
 			}
 		}
 	}
+}
+
+// anyNodeWithLabel returns the ID of the first node with the given display
+// label, or an ID that matches nothing. Node IDs are type-scoped since the
+// v2 scheme, so label-based expectations look nodes up by label.
+func anyNodeWithLabel(nodes []Node, label string) string {
+	for _, n := range nodes {
+		if strings.EqualFold(n.Label, label) {
+			return n.ID
+		}
+	}
+	return "\x00no-such-node"
 }

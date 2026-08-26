@@ -126,6 +126,10 @@ func resolveGoldPath() (string, bool) {
 // scoreFact runs the extractor over one labeled fact and folds the outcome
 // into the running counters: ID-level TP/FP/FN for the gate, strict
 // (ID+type-correct) hits, per-type fidelity stats, and a capped FP sample.
+// Matching is by normalized LABEL, not node ID: node IDs are type-scoped
+// since the v2 scheme ("<type>:<label>"), while the gold fixture's id field
+// predates that change. The label is the stable identity the bench measures;
+// gold ids remain in the fixture for provenance.
 func scoreFact(ex kg.EntityExtractor, f goldFact, tpID, fpID, fnID, tpStrict *int, perType map[string]*typeStats, fps *[]fpSample) {
 	nodes, _, err := ex.Extract(f.Text)
 	if err != nil {
@@ -135,11 +139,11 @@ func scoreFact(ex kg.EntityExtractor, f goldFact, tpID, fpID, fnID, tpStrict *in
 
 	goldSet := map[string]goldEntity{}
 	for _, g := range f.Gold {
-		goldSet[strings.ToLower(g.ID)] = g
+		goldSet[strings.ToLower(g.Label)] = g
 	}
 	exSet := map[string]string{}
 	for _, n := range nodes {
-		exSet[strings.ToLower(n.ID)] = n.EntityType
+		exSet[strings.ToLower(n.Label)] = n.EntityType
 	}
 
 	for id, exType := range exSet {
@@ -162,7 +166,7 @@ func scoreFact(ex kg.EntityExtractor, f goldFact, tpID, fpID, fnID, tpStrict *in
 		}
 	}
 	for _, g := range f.Gold {
-		if _, ok := exSet[strings.ToLower(g.ID)]; !ok {
+		if _, ok := exSet[strings.ToLower(g.Label)]; !ok {
 			*fnID++
 			ts := typeStatFor(perType, g.Type)
 			ts.missed++
@@ -204,7 +208,7 @@ type typedRow struct {
 
 func printReport(r report) {
 	fmt.Println("Extraction precision — regex extractor vs hand-labeled corpus")
-	fmt.Println("Matcher: canonical-ID exact match (lowercased); type reported separately")
+	fmt.Println("Matcher: normalized-label exact match; type reported separately")
 	fmt.Printf("Corpus: %d labeled facts\n\n", r.Facts)
 	fmt.Printf("ID-level:   TP %d   FP %d   FN %d\n", r.TP, r.FP, r.FN)
 	fmt.Printf("Precision   %.3f\n", r.Precision)

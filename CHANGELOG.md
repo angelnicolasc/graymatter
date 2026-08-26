@@ -10,6 +10,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+### Added
+
 - **Two new retrieval-quality corpora extend measurement beyond the frozen English set.**
   `multilingual-es` (126 Spanish facts, 15 queries in two declared classes: ASCII-anchor
   reachable vs accent-dependent) and `long-horizon` (421 facts across 50 sessions with
@@ -18,6 +20,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   window; long-horizon **100% [68–100] HitRate at 0% Dead and 145 tokens/q** while the
   window and recency-only scoring both return none of the early decisions. Every table now
   prints its Wilson 95% interval — six-query point estimates are not laws of nature.
+
+- **The knowledge graph now decays with memory.** Node and edge weights only ever grew
+  (upsert took max), so a hub entity from a finished project stayed prominent forever, and
+  the graph's old decay helper was dead code carrying the multiplicative bug the fact side
+  had already fixed. Consolidation gained a Step 5 behind an optional `GraphDecayer`
+  capability: weights recompute from staleness (`min(w, exp(-λ·staleness))`, idempotent -
+  running cycles more often never forget faster) and sub-floor entries prune. The shipped
+  `kg.GraphAdapter` implements it; custom `GraphAccessor`s without the capability are
+  untouched.
+
+- **Entity IDs are type-scoped.** `canonicalID` now yields `<type>:<label>`, so "apple" the
+  organization and "apple" the concept stay distinct nodes instead of merging into one.
+  Stores written under the v1 scheme are wiped on open - nodes are derivable state - and
+  the extraction watermark resets so the next consolidation cycle rebuilds the graph from
+  facts exactly once. The extraction bench now matches on normalized label (the stable
+  identity) rather than scheme-specific IDs; measured precision under label matching:
+  **0.973**, recall 0.785 on the 105-fact labeled corpus.
 
 - **`graymatter doctor --embeddings` makes the silent keyword-only fallback visible.**
   `Put` degrades a fact to keyword-only whenever the embedder errors and still returns nil,

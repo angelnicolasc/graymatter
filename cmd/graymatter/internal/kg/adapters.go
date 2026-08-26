@@ -1,6 +1,8 @@
 package kg
 
 import (
+	"time"
+
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -53,6 +55,12 @@ func (a *GraphAdapter) NeighborTexts(nodeID string, depth int) ([]string, error)
 	return out, nil
 }
 
+// DecayGraph implements memory.GraphDecayer: consolidation calls it once per
+// cycle so graph weights follow the same lifecycle as fact weights.
+func (a *GraphAdapter) DecayGraph(halfLife time.Duration) error {
+	return a.g.DecayGraph(halfLife)
+}
+
 // ExtractorAdapter wraps EntityExtractor to satisfy memory.EntityExtractorAccessor.
 type ExtractorAdapter struct {
 	e EntityExtractor
@@ -100,3 +108,7 @@ func (a *ExtractorAdapter) ExtractTyped(text string) ([]memory.EntityRef, []memo
 	}
 	return refs, links, nil
 }
+
+// Compile-time proof the adapter carries the optional decay capability;
+// consolidation type-asserts this interface at Step 5.
+var _ memory.GraphDecayer = (*GraphAdapter)(nil)

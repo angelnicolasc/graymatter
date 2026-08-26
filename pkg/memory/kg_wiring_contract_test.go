@@ -1,4 +1,4 @@
-package memory
+﻿package memory
 
 import (
 	"context"
@@ -227,5 +227,44 @@ func TestPutConfident_ValidatesAndPersists(t *testing.T) {
 	stored, _ := s.List("c-agent")
 	if len(stored) != 1 || stored[0].Confidence != "verified" {
 		t.Fatalf("confidence not persisted: %+v", stored)
+	}
+}
+
+// decayRecordingKG implements GraphAccessor plus the optional GraphDecayer
+// capability, and counts decay invocations.
+type decayRecordingKG struct {
+	recordingKG
+	decayCalls []time.Duration
+}
+
+func (g *decayRecordingKG) DecayGraph(halfLife time.Duration) error {
+	g.decayCalls = append(g.decayCalls, halfLife)
+	return nil
+}
+
+// A graph that carries the capability gets exactly one decay pass per
+// consolidation cycle, with the configured half-life. This is the executable
+// end of the Step 5 wiring; the removed dead DecayGraph never had a caller.
+func TestConsolidate_DecaysCapableGraphsOncePerCycle(t *testing.T) {
+	s := newKGWiringStore(t)
+	ctx := context.Background()
+	kg := &decayRecordingKG{}
+	ex := &recordingExtractor{}
+	s.SetKG(kg, ex)
+
+	for i := 0; i < 25; i++ {
+		if err := s.Put(ctx, "decay-agent", fmt.Sprintf("Maria Rodriguez discussed entity topic %d in depth", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &testConsolidateCfg{llm: "", halfLife: 48 * time.Hour, threshold: 20}
+	if err := s.Consolidate(ctx, "decay-agent", cfg); err != nil {
+		t.Fatalf("Consolidate: %v", err)
+	}
+	if len(kg.decayCalls) != 1 {
+		t.Fatalf("decay calls = %d, want exactly 1 per cycle", len(kg.decayCalls))
+	}
+	if kg.decayCalls[0] != 48*time.Hour {
+		t.Errorf("half-life passed = %v, want the configured 48h", kg.decayCalls[0])
 	}
 }
