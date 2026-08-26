@@ -306,18 +306,23 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 // DecayGraph recomputes node and edge weights from staleness and deletes
 // anything below the 0.01 prune floor. Called once per consolidation cycle
 // through the memory.GraphDecayer capability (wired via GraphAdapter).
+func (g *Graph) DecayGraph(halfLife time.Duration) error {
+	return g.DecayGraphAt(time.Now(), halfLife)
+}
+
+// DecayGraphAt is DecayGraph with an injected clock, so tests can assert
+// idempotency without racing the wall clock.
 //
 // Weight is recomputed from LastSeen, never multiplied into: multiplying
 // re-applied the entire elapsed period on every call, so decay frequency -
 // not elapsed time - drove forgetting. min() keeps decay from handing weight
 // back to a node a concurrent upsert just refreshed, mirroring the fact-decay
 // rule in pkg/memory.
-func (g *Graph) DecayGraph(halfLife time.Duration) error {
+func (g *Graph) DecayGraphAt(now time.Time, halfLife time.Duration) error {
 	if halfLife <= 0 {
 		halfLife = 720 * time.Hour
 	}
 	lambda := math.Log(2) / halfLife.Hours()
-	now := time.Now()
 
 	return g.db.Update(func(tx *bolt.Tx) error {
 		for _, bucket := range [][]byte{bucketNodes, bucketEdges} {

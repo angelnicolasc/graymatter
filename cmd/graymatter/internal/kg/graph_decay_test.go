@@ -45,22 +45,35 @@ func TestDecayGraph_IdempotentWithinInstant(t *testing.T) {
 	defer cleanup()
 
 	halfLife := 720 * time.Hour
-	if err := g.DecayGraph(halfLife); err != nil {
+	// Fixed clock: idempotency is a property of the arithmetic, not of how
+	// fast the machine moves between two calls.
+	now := time.Now()
+	if err := g.DecayGraphAt(now, halfLife); err != nil {
 		t.Fatalf("first decay: %v", err)
 	}
 	w1 := nodeWeight(t, g, "person:maria")
 
-	if err := g.DecayGraph(halfLife); err != nil {
+	if err := g.DecayGraphAt(now, halfLife); err != nil {
 		t.Fatalf("second decay: %v", err)
 	}
 	w2 := nodeWeight(t, g, "person:maria")
 
-	if math.Abs(w1-w2) > 1e-9 {
-		t.Fatalf("decay is not idempotent: first %.6f, second %.6f - re-running cycles must not forget faster", w1, w2)
+	if w1 != w2 {
+		t.Fatalf("decay is not idempotent at a fixed instant: first %.12f, second %.12f", w1, w2)
 	}
 	// One half-life stale halves the weight (min() keeps it from going lower).
 	if math.Abs(w1-0.5) > 0.01 {
 		t.Fatalf("weight after one half-life = %.4f, want ~0.5", w1)
+	}
+
+	// The wall-clock wrapper stays honest: real elapsed time may decay
+	// further but must never resurrect weight (min() rule).
+	if err := g.DecayGraph(halfLife); err != nil {
+		t.Fatal(err)
+	}
+	w3 := nodeWeight(t, g, "person:maria")
+	if w3 > w1+1e-9 {
+		t.Fatalf("weight rose across real elapsed time: %.6f -> %.6f", w1, w3)
 	}
 }
 
