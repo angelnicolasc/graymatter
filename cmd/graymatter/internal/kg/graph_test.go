@@ -243,3 +243,60 @@ func TestLink_ErrorOnEmptyEndpoints(t *testing.T) {
 		t.Error("expected error for empty To, got nil")
 	}
 }
+
+func TestEntityNoteNamesResolveCollisionsDeterministically(t *testing.T) {
+	nodes := []Node{
+		{ID: "b-node", Label: "A B", EntityType: "concept"},
+		{ID: "a-node", Label: "A_B", EntityType: "concept"},
+		{ID: "c-node", Label: "Acme Corp", EntityType: "organization"},
+	}
+	names := EntityNoteNames(nodes)
+
+	// Both colliders keep their own note; canonical-ID order assigns the
+	// base name to a-node and the -2 suffix to b-node.
+	if names["a-node"] != "A_B" {
+		t.Errorf("a-node = %q, want A_B (base name goes to lowest ID)", names["a-node"])
+	}
+	if names["b-node"] != "A_B-2" {
+		t.Errorf("b-node = %q, want A_B-2", names["b-node"])
+	}
+	if names["c-node"] != "Acme_Corp" {
+		t.Errorf("c-node = %q, want Acme_Corp", names["c-node"])
+	}
+
+	// Determinism: same input, same output, regardless of input order.
+	shuffled := []Node{nodes[2], nodes[0], nodes[1]}
+	again := EntityNoteNames(shuffled)
+	for id, name := range names {
+		if again[id] != name {
+			t.Fatalf("assignment drifted for %s: %q vs %q", id, name, again[id])
+		}
+	}
+}
+
+func TestExportObsidianCollidingLabelsWriteDistinctFiles(t *testing.T) {
+	g, cleanup := openTestGraph(t)
+	defer cleanup()
+
+	// Both labels sanitize to "Acme_Corp"; without the disambiguation the
+	// second write silently destroyed the first note.
+	_ = g.Upsert(Node{ID: "acme-org", Label: "Acme Corp", EntityType: "organization"})
+	_ = g.Upsert(Node{ID: "acme-txt", Label: "Acme_Corp", EntityType: "concept"})
+
+	outDir := t.TempDir()
+	if err := g.ExportObsidian(outDir); err != nil {
+		t.Fatalf("ExportObsidian: %v", err)
+	}
+
+	first := filepath.Join(outDir, "Acme_Corp.md")
+	second := filepath.Join(outDir, "Acme_Corp-2.md")
+	for _, p := range []string{first, second} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("expected distinct note %s: %v", p, err)
+		}
+		if !strings.Contains(string(data), "id: ") {
+			t.Errorf("note %s missing frontmatter", p)
+		}
+	}
+}
