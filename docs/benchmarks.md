@@ -79,10 +79,29 @@ go run ./benchmarks/retrieval_quality
 One of its three pre-registered predictions failed, and it is written up there
 in full.
 
+## The retrieval-quality harness: three corpora
+
+Relevance runs through a separate harness with its own gates - this document
+deliberately publishes none of its numbers. What that harness now covers:
+
+| Corpus | Facts | Queries | Purpose |
+|---|---|---|---|
+| frozen-v2 | 78 | 6 | Canonical English benchmark, byte-checked since v0.10 |
+| multilingual-es | 126 | 15 | Spanish retrieval, per declared query class |
+| long-horizon | 421 | 8 | Decisions planted early, queried at session 50, late paraphrases genuinely tombstoned |
+
+Hit rates publish Wilson confidence intervals; predictions are committed
+before runs and misses investigated in writing. Full tables and per-query
+grids: [RESULTS.md](../benchmarks/RESULTS.md) and
+[RESULTS-corpora.md](../benchmarks/RESULTS-corpora.md).
+
 ## Reproducing
 
 ```bash
 go run ./benchmarks/token_count
+go run ./benchmarks/retrieval_quality
+go run ./benchmarks/retrieval_quality -fixtures benchmarks/fixtures/multilingual-es
+go run ./benchmarks/retrieval_quality -fixtures benchmarks/fixtures/long-horizon
 ```
 
 No API key, no network, no LLM. The store is created in a temporary directory
