@@ -204,6 +204,7 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	}
 	result := make([]string, 0, topK)
 	seen := make(map[string]bool, topK)
+	touched := make([]Fact, 0, topK)
 	for _, sc := range allScored[:topK] {
 		f, ok := factByID[sc.id]
 		if !ok {
@@ -211,15 +212,16 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		}
 		result = append(result, f.Text)
 		seen[f.Text] = true
-		// Update access metadata (best-effort, non-blocking).
+		// Access metadata rides on one batched transaction after the loop.
+		// The previous shape spawned one goroutine holding one bbolt write
+		// transaction PER RETURNED FACT - up to eight write txns and eight
+		// goroutines per recall, contending with writers under load for
+		// bookkeeping. One txn for the batch carries the same information.
 		f.AccessCount++
 		f.AccessedAt = nowT.UTC()
-		s.wg.Add(1)
-		go func(fact Fact) {
-			defer s.wg.Done()
-			_ = s.UpdateFact(fact.AgentID, fact)
-		}(*f)
+		touched = append(touched, *f)
 	}
+	s.touchFacts(touched)
 
 	// Enrich with knowledge graph neighbors (optional; graph may be nil).
 	s.mu.RLock()

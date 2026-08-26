@@ -365,29 +365,34 @@ func (s *Store) PutConfident(ctx context.Context, agentID, text, confidence stri
 	default:
 		return fmt.Errorf("confidence must be verified|inferred|unverified, got %q", confidence)
 	}
-	if err := s.Put(ctx, agentID, text); err != nil {
-		return err
-	}
-	// Attach the marker by updating the just-written fact in place: one
-	// extra transaction on the cold path, zero API churn.
-	stored, err := s.List(agentID)
+	// The write path hands back the fact it just committed, so attaching the
+	// marker is one direct update. The previous implementation re-listed the
+	// whole agent and text-scanned for the new arrival - O(N) per confident
+	// write and racy against concurrent writers.
+	f, err := s.putReturningFact(ctx, agentID, text)
 	if err != nil {
 		return err
 	}
-	for i := range stored {
-		if stored[i].Text == text && stored[i].Confidence == "" {
-			stored[i].Confidence = confidence
-			return s.UpdateFact(agentID, stored[i])
-		}
+	if f.Confidence != "" {
+		return nil // a same-text write raced ahead and already stamped one
 	}
-	return nil
+	f.Confidence = confidence
+	return s.UpdateFact(agentID, f)
 }
 
 // This closes the crash window between the bbolt write and the vector write:
 // after a crash, reconcileVectors() at Open() drains the pending bucket.
 func (s *Store) Put(ctx context.Context, agentID, text string) error {
+	_, err := s.putReturningFact(ctx, agentID, text)
+	return err
+}
+
+// putReturningFact is the single durable write path: it commits the fact and
+// returns exactly what landed, so callers never have to find their own write
+// again by scanning.
+func (s *Store) putReturningFact(ctx context.Context, agentID, text string) (Fact, error) {
 	if s.readOnly {
-		return ErrStoreReadOnly
+		return Fact{}, ErrStoreReadOnly
 	}
 	start := time.Now()
 
@@ -429,7 +434,7 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("put fact: %w", err)
+		return Fact{}, fmt.Errorf("put fact: %w", err)
 	}
 
 	if hasEmbedding {
@@ -451,7 +456,7 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 	if s.cfg.OnPut != nil {
 		s.cfg.OnPut(agentID, f.ID, time.Since(start))
 	}
-	return nil
+	return f, nil
 }
 
 // Delete removes a fact by ID for agentID, together with its KG extraction
@@ -554,6 +559,43 @@ func (s *Store) Stats(agentID string) (MemoryStats, error) {
 	}
 	st.AvgWeight = weightSum / float64(len(facts))
 	return st, nil
+}
+
+// touchFacts persists access-metadata bumps for a recall batch in ONE
+// transaction. Best-effort by contract: a lost bump is statistical noise on
+// decay/recency curves measured in days, never a correctness event, so an
+// error here degrades to a log-free no-op rather than failing the recall
+// that already returned its results.
+func (s *Store) touchFacts(facts []Fact) {
+	if len(facts) == 0 {
+		return
+	}
+	_ = s.db.Update(func(tx *bolt.Tx) error {
+		for i := range facts {
+			parent := tx.Bucket(bucketFacts)
+			if parent == nil {
+				return nil
+			}
+			b := parent.Bucket([]byte(facts[i].AgentID))
+			if b == nil {
+				continue
+			}
+			data, err := facts[i].marshal()
+			if err != nil {
+				continue
+			}
+			// Update, never create: if the fact vanished mid-recall (forget
+			// racing the batch), a Put here would resurrect it - the exact
+			// class of bug the UpdateFact guard closed.
+			if b.Get([]byte(facts[i].ID)) == nil {
+				continue
+			}
+			if err := b.Put([]byte(facts[i].ID), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // UpdateFact persists a modified fact (used by consolidation + decay).

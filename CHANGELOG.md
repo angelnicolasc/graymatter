@@ -8,7 +8,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Added
+### Changed
+
+- **The production write path stops fighting itself.** Recall access tracking used to spawn
+  one goroutine holding one bbolt write transaction per returned fact - up to eight write
+  transactions and eight goroutines per recall contending with real writers for
+  bookkeeping; it now flushes as one batched transaction, update-never-create, so a fact
+  deleted mid-recall cannot be resurrected by its own bump. `PutConfident` no longer
+  re-lists the entire agent namespace and text-scans for the fact it just wrote: the write
+  path hands back exactly what landed, making confident writes O(1), race-free, and
+  guaranteed to embed once.
 
 ### Added
 
