@@ -89,7 +89,7 @@ func Run(opts RunOptions) error {
 	// agree.
 	kgAuto := kgAutoEnabled(absDir, opts.KG)
 	if kgAuto {
-		extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
+		extractor := kg.NewExtractorAdapter(kg.ExtractorFromEnv())
 		adv.SetKG(adapter, extractor)
 		logf("daemon: knowledge graph auto-population enabled")
 	}

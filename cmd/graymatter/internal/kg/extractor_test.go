@@ -122,15 +122,15 @@ func TestCanonicalID(t *testing.T) {
 }
 
 func TestParseLLMExtractionJSON_Valid(t *testing.T) {
-	raw := `{"nodes":[{"id":"maria","label":"Maria","entity_type":"person"}],"edges":[{"from":"maria","to":"acme","relation":"works_at"}]}`
+	raw := `{"nodes":[{"id":"maria","label":"Maria","entity_type":"person"}],"edges":[{"from":"maria","to":"acme","relation":"related_to"}]}`
 	nodes, edges, err := parseLLMExtractionJSON(raw)
 	if err != nil {
 		t.Fatalf("parseLLMExtractionJSON: %v", err)
 	}
-	if len(nodes) != 1 || nodes[0].ID != "maria" {
+	if len(nodes) != 1 || nodes[0].ID != "person:maria" {
 		t.Errorf("nodes = %v", nodes)
 	}
-	if len(edges) != 1 || edges[0].Relation != "works_at" {
+	if len(edges) != 1 || edges[0].Relation != "related_to" {
 		t.Errorf("edges = %v", edges)
 	}
 }

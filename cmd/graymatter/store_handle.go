@@ -166,7 +166,7 @@ func maybeWireKG(adv graymatter.AdvancedStore) error {
 		return fmt.Errorf("knowledge graph: %w", err)
 	}
 	graphAdapter := kg.NewGraphAdapter(g)
-	extractor := kg.NewExtractorAdapter(kg.NewExtractor(kg.ExtractorConfig{}))
+	extractor := kg.NewExtractorAdapter(kg.ExtractorFromEnv())
 	adv.SetKG(graphAdapter, extractor)
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"unicode"
@@ -41,9 +42,29 @@ func NewExtractor(cfg ExtractorConfig) EntityExtractor {
 		if model == "" {
 			model = "claude-haiku-4-5-20251001"
 		}
-		return &llmExtractor{apiKey: cfg.APIKey, model: model}
+		return NewLLMExtractor(cfg.APIKey, model)
 	}
 	return &regexExtractor{}
+}
+
+// NewLLMExtractor builds the LLM-backed extractor with its deterministic
+// safety net. Every failure mode - unreachable endpoint, invalid JSON, a
+// node with an unknown type - degrades to the regex extractor for that text,
+// never to silence: an agent that opted into LLM extraction keeps getting a
+// graph even when the model is down.
+func NewLLMExtractor(apiKey, model string) EntityExtractor {
+	if model == "" {
+		model = "claude-haiku-4-5-20251001"
+	}
+	return &llmFallback{llm: &llmExtractor{apiKey: apiKey, model: model}, fallback: &regexExtractor{}}
+}
+
+// ExtractorFromEnv honours GRAYMATTER_KG_LLM_EXTRACT=1 as the opt-in switch
+// for LLM extraction, so daemon and direct-store wiring agree without each
+// knowing flag plumbing.
+func ExtractorFromEnv() EntityExtractor {
+	useLLM := os.Getenv("GRAYMATTER_KG_LLM_EXTRACT") == "1"
+	return NewExtractor(ExtractorConfig{UseLLM: useLLM})
 }
 
 // --- regex extractor (default, zero deps) ---
@@ -54,7 +75,11 @@ var (
 	// Capitalized multi-word names: "Maria Rodriguez", "Acme Corp", "Sebastián Yañez".
 	// Unicode classes so accented names survive intact instead of fragmenting
 	// at the first non-ASCII letter.
-	reCapNames = regexp.MustCompile(`\b(\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)+)\b`)
+	// Hyphenated surname components count as name parts: "El-Sayed",
+	// "Al-Rashid", "García-Marquez" are single people, and splitting at the
+	// hyphen manufactured phantom entities ("Ahmed El") while stranding the
+	// real fragment below the occurrence gate.
+	reCapNames = regexp.MustCompile(`\b(\p{Lu}\p{Ll}+(?:[\s-]+\p{Lu}\p{Ll}+)+)\b`)
 	// Single capitalized words (occurrence-gated; see singleCapMinCount)
 	reCaps = regexp.MustCompile(`\b(\p{Lu}\p{Ll}{2,})\b`)
 	// Sentence-function words are never entities, however often they appear:
@@ -97,7 +122,16 @@ var (
 		"institutions": true, "school": true, "review": true, "journal": true,
 		"institute": true, "press": true,
 	}
-	lowercaseRoles = []string{"director", "manager", "advisor", "registrar"}
+	// Spanish/LatAm corporate HEAD words — membership of the FIRST word marks
+	// an organization, because ES company names lead with the entity kind
+	// ("Grupo Ávila", "Talleres Ibáñez", "Clínica Nogal") instead of trailing
+	// a suffix the way English ones do.
+	orgHeads = map[string]bool{
+		"grupo": true, "talleres": true, "clínica": true, "clinica": true,
+		"editorial": true, "cafetal": true, "logística": true, "logistica": true,
+		"laboratorios": true, "banca": true, "bodega": true, "constructora": true,
+	}
+	lowercaseRoles = []string{"director", "manager", "advisor", "registrar", "directora", "gerente"}
 	// @mentions
 	reMention = regexp.MustCompile(`@([A-Za-z0-9_]+)`)
 	// Quoted strings (double-quote only, 3–60 chars)
@@ -133,9 +167,11 @@ func (e *regexExtractor) Extract(text string) ([]Node, []Edge, error) {
 	}
 
 	// Lowercase contextual roles right after a determiner: "the director",
-	// "our manager". Without this, roles written in prose are invisible.
+	// "our manager" — and their Spanish counterparts ("el director", "la
+	// gerente"), which reach the graph the same way. Without this, roles
+	// written in prose are invisible.
 	for _, role := range lowercaseRoles {
-		for _, article := range []string{"the ", "The ", "our ", "Our "} {
+		for _, article := range []string{"the ", "The ", "our ", "Our ", "el ", "El ", "la ", "La ", "al ", "del "} {
 			idx := 0
 			needle := article + role
 			for {
@@ -241,6 +277,8 @@ func classifyCapName(name string) string {
 	switch {
 	case len(tokens) > 0 && orgSuffixes[strings.ToLower(tokens[len(tokens)-1])]:
 		return "organization"
+	case len(tokens) > 1 && orgHeads[strings.ToLower(tokens[0])]:
+		return "organization"
 	case reRoleWord.MatchString(lc):
 		return "role"
 	default:
@@ -275,6 +313,32 @@ func canonicalID(label, entityType string) string {
 }
 
 // --- LLM extractor (opt-in via ExtractorConfig.UseLLM=true) ---
+
+// llmFallback tries the LLM first and degrades to the regex extractor on any
+// failure. Degradation is per-text and deterministic: the same input always
+// produces the same output whether the model is up or down.
+type llmFallback struct {
+	llm      *llmExtractor
+	fallback EntityExtractor
+}
+
+func (f *llmFallback) Extract(text string) ([]Node, []Edge, error) {
+	nodes, edges, err := f.llm.Extract(text)
+	if err == nil && len(nodes) > 0 {
+		return nodes, edges, nil
+	}
+	if err != nil {
+		// Surfaced through consolidation's error hook by the caller; here we
+		// simply refuse to let a dead endpoint mean an empty graph.
+		fn, fe, ferr := f.fallback.Extract(text)
+		if ferr != nil {
+			return nil, nil, err // report the original LLM failure
+		}
+		return fn, fe, nil
+	}
+	// Model answered but found nothing: trust that over regex noise.
+	return nodes, edges, err
+}
 
 type llmExtractor struct {
 	apiKey string
@@ -348,8 +412,16 @@ func parseLLMExtractionJSON(raw string) ([]Node, []Edge, error) {
 
 	nodes := make([]Node, 0, len(r.Nodes))
 	for _, rn := range r.Nodes {
-		if rn.ID == "" && rn.Label != "" {
+		// The model's id field is never trusted: identity derives from
+		// label+type under the typed scheme, so extraction stays canonical
+		// no matter what the model invents.
+		if rn.Label != "" {
 			rn.ID = canonicalID(rn.Label, rn.EntityType)
+		}
+		// Schema gate: unknown types are dropped, not coerced - a hallucinated
+		// type would otherwise masquerade as data in exports and analytics.
+		if !validEntityTypes[rn.EntityType] {
+			continue
 		}
 		nodes = append(nodes, Node{
 			ID:         rn.ID,
@@ -359,6 +431,9 @@ func parseLLMExtractionJSON(raw string) ([]Node, []Edge, error) {
 	}
 	edges := make([]Edge, 0, len(r.Edges))
 	for _, re := range r.Edges {
+		if !validRelations[re.Relation] {
+			continue
+		}
 		edges = append(edges, Edge{
 			From:     re.From,
 			To:       re.To,
@@ -366,4 +441,15 @@ func parseLLMExtractionJSON(raw string) ([]Node, []Edge, error) {
 		})
 	}
 	return nodes, edges, nil
+}
+
+// validEntityTypes / validRelations are the closed vocabularies the LLM is
+// allowed to emit. Anything outside them is model noise.
+var validEntityTypes = map[string]bool{
+	"person": true, "organization": true, "project": true,
+	"decision": true, "preference": true, "concept": true, "role": true,
+}
+
+var validRelations = map[string]bool{
+	"related_to": true, "mentioned_with": true, "contradicts": true, "co_mentioned": true,
 }
