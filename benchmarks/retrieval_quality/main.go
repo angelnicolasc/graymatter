@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -75,6 +76,7 @@ type result struct {
 	System      string
 	Mode        string // "fixed-K" or "adaptive"
 	HitRate     float64
+	HitLo, HitHi float64 // Wilson 95% interval on HitRate, percentage scale
 	DeadRate    float64
 	AvgTokens   float64
 	AvgReturned float64
@@ -179,20 +181,27 @@ func runAll(fixtureDir string) (suite, error) {
 		return suite{}, fmt.Errorf("graymatter adaptive: %w", err)
 	}
 
-	mhQueries, err := loadQueries(filepath.Join(fixtureDir, "queries-multihop-v1.jsonl"))
-	if err != nil {
-		return suite{}, fmt.Errorf("load multihop queries: %w", err)
-	}
-	mhBase, mhEnriched, covF, err := runEnriched(corpus, mhQueries)
-	if err != nil {
-		return suite{}, fmt.Errorf("multihop: %w", err)
-	}
-	out.MultiHop = MultiHopSuite{
-		Queries:       mhQueries,
-		Baseline:      mhBase,
-		Enriched:      mhEnriched,
-		CoverageFacts: covF,
-		CoverageTotal: len(corpus),
+	// Multi-hop measurement is corpus-specific: it needs a queries file whose
+	// gold facts bridge through extractable entities. Fixture sets without one
+	// (e.g. the multilingual and long-horizon corpora) simply skip the suite
+	// instead of failing to load.
+	mhPath := filepath.Join(fixtureDir, "queries-multihop-v1.jsonl")
+	if _, err := os.Stat(mhPath); err == nil {
+		mhQueries, err := loadQueries(mhPath)
+		if err != nil {
+			return suite{}, fmt.Errorf("load multihop queries: %w", err)
+		}
+		mhBase, mhEnriched, covF, err := runEnriched(corpus, mhQueries)
+		if err != nil {
+			return suite{}, fmt.Errorf("multihop: %w", err)
+		}
+		out.MultiHop = MultiHopSuite{
+			Queries:       mhQueries,
+			Baseline:      mhBase,
+			Enriched:      mhEnriched,
+			CoverageFacts: covF,
+			CoverageTotal: len(corpus),
+		}
 	}
 	return out, nil
 }
@@ -468,16 +477,28 @@ func applySupersede(store *memory.Store, corpus []fact, textToID map[string]stri
 	for _, sf := range stored {
 		byText[sf.Text] = sf
 	}
-	replacementID := ""
-	if replacementText != "" {
-		if sf, ok := byText[replacementText]; ok {
-			replacementID = sf.ID
-		}
-	}
 
 	for _, f := range corpus {
-		if f.Kind != "stale" {
+		if f.Kind != "stale" && f.Kind != "variant" {
 			continue
+		}
+		replacementID := ""
+		if f.Kind == "stale" {
+			if sf, ok := byText[replacementText]; ok {
+				replacementID = sf.ID
+			}
+		} else {
+			// kind=variant (long-horizon corpus): tombstone points at the
+			// oldest decision in the same domain - the original the variant
+			// paraphrases after the fact.
+			for _, of := range corpus {
+				if of.Domain == f.Domain && of.Kind == "decision" &&
+					(replacementID == "" || of.Session < sessionOf(corpus, replacementID)) {
+					if sf, ok := byText[of.Text]; ok {
+						replacementID = sf.ID
+					}
+				}
+			}
 		}
 		sf, ok := byText[f.Text]
 		if !ok {
@@ -493,6 +514,17 @@ func applySupersede(store *memory.Store, corpus []fact, textToID map[string]stri
 		}
 	}
 	return nil
+}
+
+// sessionOf returns the Session field of the corpus fact with the given id,
+// or a sentinel far in the future when absent.
+func sessionOf(corpus []fact, id string) int {
+	for _, f := range corpus {
+		if f.ID == id {
+			return f.Session
+		}
+	}
+	return 1 << 30
 }
 
 // ---- measurement -----------------------------------------------------------
@@ -544,10 +576,13 @@ func measure(name, mode string, queries []query, run func(query) ([]string, time
 
 	n := float64(len(queries))
 	p50, p95 := percentiles(latencies)
+	hitLo, hitHi := wilsonInterval(hits, len(queries), 1.96)
 	return result{
 		System:      name,
 		Mode:        mode,
 		HitRate:     float64(hits) / n * 100,
+		HitLo:       hitLo,
+		HitHi:       hitHi,
 		DeadRate:    float64(dead) / n * 100,
 		AvgTokens:   float64(totalTokens) / n,
 		AvgReturned: float64(totalReturned) / n,
@@ -663,15 +698,33 @@ func report(s suite) {
 }
 
 func header() {
-	fmt.Printf("%-26s  %-9s  %8s  %6s  %9s  %8s  %9s  %9s\n",
-		"System", "Mode", "HitRate", "Dead", "Tokens/q", "Facts/q", "p50", "p95")
-	fmt.Println(strings.Repeat("???", 104))
+	fmt.Printf("%-26s  %-9s  %16s  %6s  %9s  %8s  %9s  %9s\n",
+		"System", "Mode", "HitRate [95% CI]", "Dead", "Tokens/q", "Facts/q", "p50", "p95")
+	fmt.Println(strings.Repeat("???", 116))
 }
 
 func row(r result) {
-	fmt.Printf("%-26s  %-9s  %7.0f%%  %5.0f%%  %9.0f  %8.1f  %9s  %9s\n",
-		r.System, r.Mode, r.HitRate, r.DeadRate, r.AvgTokens, r.AvgReturned,
+	fmt.Printf("%-26s  %-9s  %6.0f%% [%2.0f,%3.0f]  %5.0f%%  %9.0f  %8.1f  %9s  %9s\n",
+		r.System, r.Mode, r.HitRate, r.HitLo, r.HitHi, r.DeadRate, r.AvgTokens, r.AvgReturned,
 		r.P50.Round(time.Microsecond), r.P95.Round(time.Microsecond))
+}
+
+// wilsonInterval returns the Wilson score interval for k successes in n
+// trials at confidence z (use 1.96 for 95%). Point estimates from six or
+// eight queries carry wide honest bands - 83% of 6 spans roughly [36%, 100%]
+// - and publishing the band is what stops a single corpus run from being
+// read as a law of nature.
+func wilsonInterval(k, n int, z float64) (lo, hi float64) {
+	if n == 0 {
+		return 0, 0
+	}
+	p := float64(k) / float64(n)
+	den := 1 + z*z/float64(n)
+	center := (p + z*z/(2*float64(n))) / den
+	half := z * math.Sqrt(p*(1-p)/float64(n)+z*z/(4*float64(n)*float64(n))) / den
+	lo = math.Max(0, center-half)
+	hi = math.Min(1, center+half)
+	return lo * 100, hi * 100
 }
 
 func countDomains(queries []query) int {
