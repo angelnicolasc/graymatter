@@ -32,9 +32,10 @@ type checkResult struct {
 
 func doctorCmd() *cobra.Command {
 	var (
-		audit     bool
-		graphMode bool
-		health    bool
+		audit      bool
+		graphMode  bool
+		health     bool
+		embeddings bool
 	)
 	cmd := &cobra.Command{
 		Use:   "doctor [path]",
@@ -57,7 +58,13 @@ With --health, audits the store itself instead of the setup: supersede
 loops, dumping bursts, critical facts near prune (pin suggestions), and
 duplicate density. Deterministic — the same store always produces the same
 report, because rules read only store contents and never the wall clock.
-Exit code is 1 only when a finding is a failure; warnings exit 0.`,
+Exit code is 1 only when a finding is a failure; warnings exit 0.
+
+With --embeddings, audits the vector channel as the store observed it:
+how many live facts carry a vector, how many writes degraded to
+keyword-only because the embedder failed, the last failure's message,
+and the vector retry backlog. Deterministic like --health, and it works
+even when the daemon is down (read-only probe of gray.db).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if graphMode {
@@ -65,6 +72,9 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 			}
 			if health {
 				return runDoctorHealth(cmd)
+			}
+			if embeddings {
+				return runDoctorEmbeddings(cmd)
 			}
 			if audit {
 				root := "."
@@ -147,6 +157,7 @@ Exit code is 1 only when a finding is a failure; warnings exit 0.`,
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
 	cmd.Flags().BoolVar(&graphMode, "graph", false, "report knowledge-graph analytics (hubs, orphans, articulation points)")
 	cmd.Flags().BoolVar(&health, "health", false, "audit store health: supersede loops, dumping bursts, near-prune criticals, duplicates")
+	cmd.Flags().BoolVar(&embeddings, "embeddings", false, "audit the vector channel as the store observed it: coverage, degraded writes, retry backlog")
 	return cmd
 }
 

@@ -342,7 +342,10 @@ func (s *Store) IsReadOnly() bool { return s.readOnly }
 // Put stores a new observation for agentID.
 //
 // Durability model:
-//  1. Compute embedding (best-effort; on failure the fact is keyword-only).
+//  1. Compute embedding (best-effort; on failure the fact is keyword-only
+//     and the failure is recorded in the store's embedding health, so a
+//     broken backend is visible via EmbeddingHealth / doctor --embeddings
+//     instead of being indistinguishable from an empty store).
 //  2. Single bbolt transaction commits the fact AND, if an embedding exists,
 //     a marker in bucketPendingVector. The marker is the durable "this still
 //     needs to land in the vector store" intent.
@@ -389,10 +392,10 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 	start := time.Now()
 
 	var emb []float32
+	var embedErr error
 	if s.embedder != nil {
-		var err error
-		emb, err = s.embedder.Embed(ctx, text)
-		if err != nil {
+		emb, embedErr = s.embedder.Embed(ctx, text)
+		if embedErr != nil {
 			emb = nil
 		}
 	}
@@ -438,6 +441,11 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 		} else {
 			s.clearPendingVector(agentID, f.ID)
 		}
+	} else if embedErr != nil {
+		// The fact is durably keyword-only. Record the degradation so the
+		// failure surfaces in EmbeddingHealth instead of vanishing; a
+		// diagnostic counter must never fail the write it describes.
+		recordEmbedDegraded(s.db, embedErr)
 	}
 
 	if s.cfg.OnPut != nil {
