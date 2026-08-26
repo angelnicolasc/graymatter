@@ -10,6 +10,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **The embeddings chain's third slot works.** It dialled
+  `api.anthropic.com/v1/embeddings` — an endpoint that does not exist; Anthropic has never
+  offered an embeddings API — so every call failed, and because `Put` swallows embedder
+  errors, anyone relying on that slot silently ran keyword-only memory while believing they
+  had vectors. The slot now targets Voyage AI (`api.voyageai.com/v1/embeddings`, model
+  `voyage-3`, 1024 dims unchanged so existing stores stay valid) keyed off `VOYAGE_API_KEY`.
+  `EmbeddingAnthropic`/`ModeAnthropic` remain accepted as deprecated aliases: with
+  `VOYAGE_API_KEY` set they resolve to the Voyage provider; without one they resolve to
+  keyword directly instead of constructing a provider guaranteed to fail on every call.
+  ADR-005 amended.
+
 - **The Obsidian entity export no longer loses entities to filename collisions.** Two
   distinct labels that sanitize identically ("Acme Corp" / "Acme_Corp") wrote the same note
   file — the second silently overwrote the first, taking its Related links and MOC entry
