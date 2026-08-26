@@ -1,5 +1,9 @@
 # RESULTS — corpora v3 (multilingual-es, long-horizon)
 
+Quoted Spanish terms below (e.g. *reenviados*, *teléfono*) are corpus data
+under analysis, kept verbatim; glosses appear inline where the distinction
+matters.
+
 Protocol and predictions committed beforehand: see PREDICTIONS-corpora.md.
 Keyword embedder everywhere (no LLM, no network). Wilson 95% intervals now
 rendered by the runner itself.

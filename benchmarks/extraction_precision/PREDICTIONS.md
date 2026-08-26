@@ -1,38 +1,38 @@
-# Predicciones pre-registradas — precisión de extracción (regex extractor)
+# Pre-registered predictions — extraction precision (regex extractor)
 
 | | |
 |---|---|
-| Fecha de predicción | 2026-08-23 |
-| Commit del corpus | `benchmarks/fixtures/extraction-gold-v1.jsonl` (105 facts etiquetados a mano) |
-| Sujeto medido | `kg.NewExtractor(ExtractorConfig{UseLLM:false})` — regex puro, cero red |
-| Regla de matching primaria | ID canónico (lowercase) exacto entre extraído y gold; el tipo se mide aparte |
-| Gate ADR-003 | precision(ID) ≥ 0.70 para wirear |
+| Prediction date | 2026-08-23 |
+| Corpus commit | `benchmarks/fixtures/extraction-gold-v1.jsonl` (105 hand-labeled facts) |
+| Subject under test | `kg.NewExtractor(ExtractorConfig{UseLLM:false})` — pure regex, zero network |
+| Primary matching rule | Exact canonical ID (lowercased) between extracted and gold; type scored separately |
+| ADR-003 gate | precision(ID) ≥ 0.70 to wire auto-population |
 
-## Predicciones (escritas ANTES del primer run)
+## Predictions (written BEFORE the first run)
 
-| Métrica | Banda pre-registrada | Racional |
+| Metric | Pre-registered band | Rationale |
 |---|---|---|
-| **Precision (ID-level)** | **[0.88, 0.97]** — gate PASS | El extractor es conservador: casi todo lo que emite corresponde a un nombre propio real del texto |
-| **Recall (ID-level)** | **[0.82, 0.93]** | Los roles en minúscula (director, manager, advisor) y frases compuestas en minúscula son invisibles para los regex |
-| **Precision estricta (ID+tipo)** | [0.50, 0.80] | Organizaciones de 2 palabras se clasifican como *person* (el clasificador solo reconoce sufijos corp/inc/ltd/llc/company); proyectos quedan como *fact* o *person* |
+| **Precision (ID-level)** | **[0.88, 0.97]** — gate PASS | The extractor is conservative: nearly everything it emits corresponds to a real proper noun in the text |
+| **Recall (ID-level)** | **[0.82, 0.93]** | Lowercase roles (director, manager, advisor) and lowercase compound phrases are invisible to the regexes |
+| **Strict precision (ID+type)** | [0.50, 0.80] | Two-word organizations classify as *person* (the classifier only recognizes corp/inc/ltd/llc/company suffixes); projects land as *fact* or *person* |
 
-## Clases de fallo previstas (falsables)
+## Anticipated failure classes (falsifiable)
 
-1. **Nombres con acentos se fragmentan**: `[A-Z][a-z]+` corta en el primer acento
-   ("Sebastián Yañez" → fragmentos tipo "Sebasti/Yañez" parciales). Predicción: 4–6 FPs de este tipo
-   y sus FNs correspondientes (x088, x090, x098, x103).
-2. **Roles invisibles**: CTO (todo-caps no matchea ningún patrón), director/manager/advisor en
-   minúscula → 5 FNs de la clase *role*. Recall por tipo role ≈ 0.
-3. **Confusión org→person**: organizaciones de dos palabras sin sufijo reconocido
-   (Juniper Labs, Vertex Analytics, Meridian Capital…) se clasifican *person*.
-   Predicción: ≥ 60% de las organizaciones terminan con tipo incorrecto (afecta
-   métrica estricta y calidad del grafo, NO el gate de ID).
-4. **Proyectos ambiguos**: "Atlas Migration" (2 palabras propias) se clasifica *person*, no
-   *project*.
+1. **Accented names fragment**: `[A-Z][a-z]+` cuts at the first accent
+   ("Sebastián Yañez" → partial fragments like "Sebasti/Yañez"). Prediction: 4–6 FPs of
+   this kind plus their corresponding FNs (x088, x090, x098, x103).
+2. **Invisible roles**: CTO (all-caps matches no pattern), director/manager/advisor in
+   lowercase → 5 FNs of the *role* class. Per-type role recall ≈ 0.
+3. **org→person confusion**: two-word organizations without a recognized suffix
+   (Juniper Labs, Vertex Analytics, Meridian Capital…) classify as *person*.
+   Prediction: ≥ 60% of organizations end with the wrong type (affects the strict
+   metric and graph quality, NOT the ID gate).
+4. **Ambiguous projects**: "Atlas Migration" (two proper words) classifies as *person*,
+   not *project*.
 
-## Regla del experimento
+## Experiment rule
 
-Si precision(ID) < 0.70 ⇒ NO se wirea el auto-poblado; primero extractor
-(según gate ADR-003). Si alguna banda falla, se publica igual y el resultado
-dirige la ingeniería del extractor (stopwords de inicio-de-oración, lista de
-sufijos organizativos, soporte Unicode en las clases de caracteres).
+If precision(ID) < 0.70 ⇒ auto-population is not wired; extractor work comes first
+(per the ADR-003 gate). If any band fails, results are published anyway and the
+outcome directs extractor engineering (sentence-initial stopwords, organizational
+suffix list, Unicode support in character classes).

@@ -1,33 +1,33 @@
-# Resultados — precisión de extracción (regex extractor)
+# Results — extraction precision (regex extractor)
 
 | | |
 |---|---|
-| Fecha de medición | 2026-08-23 |
-| Comando | `go run ./cmd/graymatter/extractionbench` |
-| Corpus | `benchmarks/fixtures/extraction-gold-v1.jsonl` (105 facts etiquetados a mano) |
-| Sujeto | `kg.NewExtractor(ExtractorConfig{UseLLM:false})` — regex puro, cero red |
-| Predicciones | `PREDICTIONS.md` en este directorio, commiteadas ANTES de la implementación del runner (`bc72eb2` precede a este archivo en la historia) |
+| Measurement date | 2026-08-23 |
+| Command | `go run ./cmd/graymatter/extractionbench` |
+| Corpus | `benchmarks/fixtures/extraction-gold-v1.jsonl` (105 hand-labeled facts) |
+| Subject | `kg.NewExtractor(ExtractorConfig{UseLLM:false})` — pure regex, zero network |
+| Predictions | `PREDICTIONS.md` in this directory, committed BEFORE the runner was implemented (`bc72eb2` precedes this file in history) |
 
-## Números medidos
+## Measured numbers
 
 ```
 ID-level:   TP 77   FP  6   FN 16
 Precision   0.928
 Recall      0.828
 F1          0.875
-Strict (ID + tipo correcto): 0.714
+Strict (ID + correct type): 0.714
 GATE: PASS — precision 0.928 >= 0.70
 ```
 
-| Métrica | Predicción | Medido | Veredicto |
+| Metric | Prediction | Measured | Verdict |
 |---|---|---|---|
-| Precision (ID) | [0.88, 0.97] | **0.928** | ✅ dentro de banda · gate PASS |
-| Recall (ID) | [0.82, 0.93] | **0.828** | ✅ dentro de banda |
-| Strict (ID+tipo) | [0.50, 0.80] | **0.714** | ✅ dentro de banda |
+| Precision (ID) | [0.88, 0.97] | **0.928** | ✅ within band · gate PASS |
+| Recall (ID) | [0.82, 0.93] | **0.828** | ✅ within band |
+| Strict (ID+type) | [0.50, 0.80] | **0.714** | ✅ within band |
 
-## Desglose por tipo
+## Per-type breakdown
 
-| Tipo | Gold | Typed-ok | Tipo incorrecto | Missed |
+| Type | Gold | Typed-ok | Wrong type | Missed |
 |---|---|---|---|---|
 | person | 38 | 37 | 1 | 4 |
 | organization | 22 | **1** | **21** | 0 |
@@ -38,56 +38,56 @@ GATE: PASS — precision 0.928 >= 0.70
 | project | 0 | 0 | 0 | **1** |
 | role | 0 | 0 | 0 | **5** |
 
-## Lectura (lo que estos números dicen)
+## Reading (what these numbers say)
 
-1. **El gate de identificación pasa con margen**: cuando el extractor emite una
-   entidad, casi siempre existe (precision 0.93). El grafo no se llenará de ruido inventado.
-2. **La fidelidad de TIPO es el problema real**: 21 de 22 organizaciones quedan tipadas como
-   `person` o `fact` — exactamente la clase de falla que D2 describió a nivel de upsert y que aquí
-   se confirma a nivel clasificación. El grafo funcionaría, pero sus etiquetas mentirían.
-3. **Roles son invisibles para el regex** (0/5): CTO todo-mayúsculas no matchea ningún patrón;
-   director/manager/advisor en minúscula tampoco.
-4. **Nombres con acentos se fragmentan**: 4 personas perdidas por el corte de `[A-Z][a-z]+`
-   en el primer carácter no-ASCII.
-5. **Dos defectos nuevos descubiertos por el run** (no estaban en las predicciones):
-   - *Determinador pegado*: "The Atlas Migration" se captura como una sola entidad
-     `"the atlas migration"` → FP + FN simultáneos.
-   - *URL con puntuación final*: el regex de URLs traga el punto anterior al fin de oración
-     (`"...changelog."`) creando referencias sucias.
+1. **The identification gate passes with margin**: when the extractor emits an entity,
+   it almost always exists (precision 0.93). The graph will not fill with invented noise.
+2. **TYPE fidelity is the real problem**: 21 of 22 organizations end up typed as `person`
+   or `fact` — exactly the failure class D2 described at the upsert level, here confirmed
+   at the classification level. The graph would work, but its labels would lie.
+3. **Roles are invisible to the regex** (0/5): all-caps CTO matches no pattern; lowercase
+   director/manager/advisor do not either.
+4. **Accented names fragment**: 4 people lost to `[A-Z][a-z]+` cutting at the first
+   non-ASCII character.
+5. **Two new defects discovered by the run** (not among the predictions):
+   - *Glued determiner*: "The Atlas Migration" is captured as a single entity,
+     `"the atlas migration"` → FP + FN at once.
+   - *URL with trailing punctuation*: the URL regex swallows the period before
+     end-of-sentence (`"...changelog."`), creating dirty references.
 
-## Consecuencia para el wiring (ADR-003)
+## Wiring consequence (ADR-003)
 
-Condición 1 del Go/No-Go **satisfecha** (precision 0.928 ≥ 0.70). Quedan pendientes las
-condiciones 2–4 (EnrichedHitRate multi-hop > baseline, Δp95 ≤ +2ms, Dead = 0%) que se miden
-en PR-C sobre las queries q7–q9. La lista de mejoras al extractor que este run justifica —
-sufijos organizativos extendidos, stopwords de determinador, Unicode en las clases de
-carácter, recorte de puntuación final en URLs — se ejecuta SOLO si PR-C muestra que el
-enriquecimiento aporta; si no aporta, el extractor queda donde está y el wiring no ocurre.
+Go/No-Go condition 1 **satisfied** (precision 0.928 ≥ 0.70). Conditions 2–4 remain open
+(multi-hop EnrichedHitRate > baseline, Δp95 ≤ +2ms, Dead = 0%), measured in PR-C over
+queries q7–q9. The extractor improvements this run justifies — extended organizational
+suffixes, determiner stopwords, Unicode character classes, URL trailing-punctuation
+trim — execute ONLY if PR-C shows enrichment contributes; if it does not, the extractor
+stays as-is and no wiring happens.
 
 ---
 
-## Extractor v2 — re-medición tras las mejoras deterministas (2026-08-23)
+## Extractor v2 — re-measurement after the deterministic fixes (2026-08-23)
 
-Los defectos listados arriba motivaron cuatro fixes al regex extractor
+The defects listed above motivated four fixes to the regex extractor
 (Unicode-safe classes, determiner stripping, organizational suffix expansion,
-all-caps role titles, URL trailing-punctuation trim). Misma corrida, mismos
-comandos, corpus idéntico:
+all-caps role titles, URL trailing-punctuation trim). Same harness, same
+commands, identical corpus:
 
-| Métrica | v1 (antes) | **v2 (después)** |
+| Metric | v1 (before) | **v2 (after)** |
 |---|---|---|
 | Precision (ID) | 0.928 | **0.946** |
 | Recall (ID) | 0.828 | **0.946** (+0.118) |
-| Strict (ID+tipo) | 0.714 | **0.977** |
+| Strict (ID+type) | 0.714 | **0.977** |
 | Organizations typed-ok | 1/22 | **22/22** |
 | Person missed | 4 | **0** |
 | Role recovered | 0/5 | **4/5** |
 
-GATE: PASS (0.946 ≥ 0.70), con margen ampliado en todas las dimensiones.
+GATE: PASS (0.946 ≥ 0.70), with widened margin on every dimension.
 
-Falsos positivos restantes (5): `obsidian` y los fragmentos `rafael`/`ortiz`
-de una segunda mención por apellido (clase conocida), más dos `registrar`
-capturados por la regla nueva de roles contextuales donde el gold no los
-anotaba — casos límite de anotación, documentados sin ajustar el gold.
+Remaining false positives (5): `obsidian` and the `rafael`/`ortiz` fragments
+from a second mention by surname (known class), plus two `registrar` captures
+from the new contextual-roles rule where the gold did not annotate them —
+annotation edge cases, documented without adjusting the gold.
 
-Pendiente: re-corrida del multi-hop bench con este extractor para re-evaluar
-la condición 2 del gate ADR-003 (EnrichedHitRate > baseline).
+Pending: re-run of the multi-hop bench against this extractor to re-evaluate
+condition 2 of the ADR-003 gate (EnrichedHitRate > baseline).
