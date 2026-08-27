@@ -19,10 +19,11 @@ import (
 // mapping. TestToolAnnotations pins the annotation half of the same payload.
 
 type toolDef struct {
-	Name        string          `json:"name"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
+	Name         string          `json:"name"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	InputSchema  json.RawMessage `json:"inputSchema"`
+	OutputSchema json.RawMessage `json:"outputSchema"`
 }
 
 func listToolDefs(t *testing.T) map[string]toolDef {
@@ -167,7 +168,7 @@ func TestToolSchemaContract(t *testing.T) {
 		"memory_add":        {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
 		"checkpoint_save":   {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
 		"checkpoint_resume": {props: []string{"agent_id"}, required: []string{"agent_id"}},
-		"memory_reflect":    {props: []string{"action", "agent", "text", "target"}, required: []string{"action", "agent"}},
+		"memory_reflect":    {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action", "agent"}},
 	}
 
 	for name, spec := range want {

@@ -289,6 +289,7 @@ func (s *Server) registerTools() {
 				mcp.Description("Optional cap on returned facts. Omitted or non-positive uses the store default."),
 				mcp.DefaultNumber(8),
 			),
+			mcp.WithOutputSchema[searchResult](),
 		),
 		s.handleMemorySearch,
 	)
@@ -307,6 +308,7 @@ func (s *Server) registerTools() {
 				mcp.Required(),
 				mcp.Description("The fact to remember: one atomic, self-contained sentence."),
 			),
+			mcp.WithOutputSchema[addResult](),
 		),
 		s.handleMemoryAdd,
 	)
@@ -324,6 +326,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("state",
 				mcp.Description("Optional JSON object persisted with the checkpoint, e.g. {\"branch\": \"main\"}. Values that do not parse as an object are rejected."),
 			),
+			mcp.WithOutputSchema[checkpointSaveResult](),
 		),
 		s.handleCheckpointSave,
 	)
@@ -338,6 +341,7 @@ func (s *Server) registerTools() {
 				mcp.Required(),
 				mcp.Description("The agent whose latest checkpoint to load."),
 			),
+			mcp.WithOutputSchema[checkpointResumeResult](),
 		),
 		s.handleCheckpointResume,
 	)
@@ -355,7 +359,10 @@ func (s *Server) registerTools() {
 			),
 			mcp.WithString("agent",
 				mcp.Required(),
-				mcp.Description("The agent whose memory to modify. agent_id is accepted as an alias."),
+				mcp.Description("The agent whose memory to modify."),
+			),
+			mcp.WithString("agent_id",
+				mcp.Description("Alias of agent, accepted so this parameter spells like every other GrayMatter tool. agent takes precedence when both are set."),
 			),
 			mcp.WithString("text",
 				mcp.Description("The fact text for add/update, the fact to forget or pin (alternative to target), or the source node ID for link."),
@@ -363,6 +370,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("target",
 				mcp.Description("For update: the fact text to supersede. For forget/pin/unpin: the fact (or pass it via text). For link: the target node ID."),
 			),
+			mcp.WithOutputSchema[reflectResult](),
 		),
 		s.handleMemoryReflect,
 	)
@@ -371,6 +379,14 @@ func (s *Server) registerTools() {
 // toolError wraps an error as an MCP tool result with isError=true.
 func toolError(msg string) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultError(msg), nil
+}
+
+// toolStructured returns a result whose structuredContent is payload and whose
+// text content is the unchanged human-readable prose. Every success path in
+// this package goes through it, so the text contract survives independently of
+// the structured one.
+func toolStructured(payload any, text string) (*mcp.CallToolResult, error) {
+	return mcp.NewToolResultStructured(payload, text), nil
 }
 
 // toolText wraps a string as a successful MCP tool result.

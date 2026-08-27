@@ -36,7 +36,8 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	if len(facts) == 0 {
-		return toolText(fmt.Sprintf("No memories found for agent %q matching %q.", agentID, query))
+		notice := fmt.Sprintf("No memories found for agent %q matching %q.", agentID, query)
+		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}}, notice)
 	}
 
 	var sb strings.Builder
@@ -44,7 +45,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	for i, f := range facts {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, f))
 	}
-	return toolText(sb.String())
+	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts}, sb.String())
 }
 
 func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -62,7 +63,7 @@ func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (
 		return toolError(fmt.Sprintf("remember error: %v", err))
 	}
 
-	return toolText(fmt.Sprintf("Memory stored for agent %q.", agentID))
+	return toolStructured(addResult{AgentID: agentID, Stored: true}, fmt.Sprintf("Memory stored for agent %q.", agentID))
 }
 
 func (s *Server) handleCheckpointSave(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -90,7 +91,8 @@ func (s *Server) handleCheckpointSave(ctx context.Context, req mcp.CallToolReque
 		return toolError(fmt.Sprintf("checkpoint save error: %v", err))
 	}
 
-	return toolText(fmt.Sprintf("Checkpoint %q saved for agent %q.", saved.ID, agentID))
+	return toolStructured(checkpointSaveResult{AgentID: agentID, CheckpointID: saved.ID, CreatedAt: saved.CreatedAt.Format(time.RFC3339)},
+		fmt.Sprintf("Checkpoint %q saved for agent %q.", saved.ID, agentID))
 }
 
 func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -102,7 +104,12 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
-		return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
+		// Typed not-found: structuredContent carries the machine-readable
+		// error code, content keeps the historical prose, isError marks it.
+		notice := fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err)
+		res := mcp.NewToolResultStructured(checkpointResumeNotFound{Error: "not_found", AgentID: agentID}, notice)
+		res.IsError = true
+		return res, nil
 	}
 
 	stateJSON, _ := json.MarshalIndent(cp.State, "", "  ")
@@ -115,7 +122,12 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 	if len(cp.Messages) > 0 {
 		sb.WriteString(fmt.Sprintf("Messages: %d turns\n", len(cp.Messages)))
 	}
-	return toolText(sb.String())
+	return toolStructured(checkpointResumeResult{
+		ID:           cp.ID,
+		CreatedAt:    cp.CreatedAt.Format(time.RFC3339),
+		State:        cp.State,
+		MessageCount: len(cp.Messages),
+	}, sb.String())
 }
 
 func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -276,7 +288,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		Source:    "agent_self",
 	})
 
-	return toolText(resultMsg)
+	return toolStructured(reflectResult{Action: action, Agent: agentID, OK: true}, resultMsg)
 }
 
 // findByText returns the first fact whose text matches exactly.
