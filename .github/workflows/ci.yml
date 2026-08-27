@@ -220,7 +220,13 @@ jobs:
         working-directory: cmd/graymatter
         env:
           GOWORK: "off"
-        run: go build -o /dev/null ./...
+        # The version bump commit cannot regenerate go.sum yet (the tagged
+        # version does not exist until the tag lands right after), so the
+        # download runs here — after the tag exists, before the no-workspace
+        # build needs it.
+        run: |
+          go mod download github.com/angelnicolasc/graymatter
+          go build -o /dev/null ./...
 
       - name: Build with an injected version
         working-directory: cmd/graymatter
