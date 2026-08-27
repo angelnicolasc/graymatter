@@ -131,6 +131,18 @@ jobs:
             git push origin "cmd/graymatter/${TAG}"
           fi
 
+      # GoReleaser builds with the workspace disabled, so the CLI module
+      # resolves the root library from the module proxy — which has not
+      # indexed the tag being released yet (0s-old tags 404 on the checksum
+      # database; verified twice on the v0.16.0 and v0.16.1 tags). The
+      # canonical pre-gomod.proxy workaround: a replace directive that exists
+      # only inside this job's checkout, resolving the library to the very
+      # checkout the tag points at. Reverted right after the build; the
+      # published go.mod stays replace-free (issue #75).
+      - name: Temporary checkout replace for the sandboxed build
+        run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+        working-directory: cmd/graymatter
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
@@ -144,6 +156,10 @@ jobs:
           # Only the tap publishers read this; the release itself stays on the
           # repository-scoped token.
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      - name: Revert the temporary replace
+        if: always()
+        run: git checkout -- cmd/graymatter/go.mod cmd/graymatter/go.sum
 
   # The README's first install path is `go install ...@vX.Y.Z`, and it failed
   # silently for four releases: a replace directive in cmd/graymatter/go.mod

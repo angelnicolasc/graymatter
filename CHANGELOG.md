@@ -6,9 +6,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [0.16.1] - 2026-08-27
+## [0.16.2] - 2026-08-27
 
-> Identical contents to the 0.16.0 tag, which never produced a release: GoReleaser builds with the workspace disabled and the freshly pushed tag was not yet indexed by the module checksum database, so the build could not resolve the root module. Fixed by building through goreleaser's `gomod.proxy` sandbox; 0.16.1 is the first version published with binaries.
+> Identical contents to 0.16.1, which never produced a release either: the `gomod.proxy` build option does not exist in goreleaser v2 (removed with v1), so the workflow now applies a temporary `replace` to the build checkout and reverts it after the release — the published `go.mod` stays replace-free and `go install ...@v0.16.2` resolves the tagged versions. 0.16.2 is the first version published with binaries.
 
 - **`Recall` deduplicates identical stored text** — the documented contract ("deduplicated by text") is now enforced: storing the same sentence across sessions yields it exactly once per result set. Found by the agent-lifecycle simulation, where repeated session templates stored identical facts.
 - **Tombstones survive concurrent consolidation writebacks** ([#78](https://github.com/angelnicolasc/graymatter/issues/78)). A consolidation cycle's decay pass wrote back its batch snapshot, silently overwriting a tombstone that landed mid-cycle — superseded facts resurrected with `SupersededBy=""`. `UpdateFact` and `touchFacts` now enforce update-never-resurrect: when the stored fact is tombstoned and the incoming snapshot is not, the tombstone wins. Found by the new agent-lifecycle simulation; fixed the same day, with the deterministic reproduction (`update_never_resurrect_test.go`) and the full 100-session re-run reporting 0 superseded facts returned.
