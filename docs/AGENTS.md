@@ -20,10 +20,10 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 
 | Tool | Required params | Optional params | Returns |
 |------|----------------|-----------------|---------|
-| `memory_search` | `agent_id` (string), `query` (string) | `top_k` (int, default `8`) | Newline-separated fact texts (deduped) |
+| `memory_search` | `agent_id` (string), `query` (string) | `top_k` (int, default `8`) | Numbered fact list with a count header (deduped), or a "No memories found" notice |
 | `memory_add` | `agent_id` (string), `text` (string) | — | Confirmation string |
-| `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Checkpoint ID + RFC3339 timestamp |
-| `checkpoint_resume` | `agent_id` (string) | — | JSON: `{id, created_at, state}` (latest checkpoint) or empty if none |
+| `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Confirmation containing the checkpoint ID |
+| `checkpoint_resume` | `agent_id` (string) | — | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; error result when none exists |
 | `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), **`agent`** (string), `text` (string) | `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
 
 > ℹ️ **`memory_reflect` names the agent parameter `agent`.** The other four tools use `agent_id`. `memory_reflect` also accepts `agent_id` as an alias, so either spelling works; when building calls programmatically, prefer the canonical name per tool.
@@ -31,18 +31,20 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 ### Return-shape examples
 
 ```jsonc
-// memory_search
-"User prefers TypeScript with strict mode\nProject uses pnpm, not npm\nAuth tokens live in HttpOnly cookies"
+// memory_search (hits)
+"Found 3 relevant memories for agent \"frontend-agent\":\n\n1. User prefers TypeScript with strict mode\n2. Project uses pnpm, not npm\n3. Auth tokens live in HttpOnly cookies"
 
-// checkpoint_resume (no checkpoint yet)
-""
+// memory_search (no hits)
+"No memories found for agent \"frontend-agent\" matching \"rust lint rules\"."
 
-// checkpoint_resume (latest)
-{
-  "id": "ckpt_01HW...",
-  "created_at": "2026-04-28T13:42:11Z",
-  "state": "{\"task\":\"db migration\",\"step\":3}"
-}
+// checkpoint_save
+"Checkpoint \"01JZK7...\" saved for agent \"migration-agent\"."
+
+// checkpoint_resume (no checkpoint yet) — an error result, not empty text
+"isError: no checkpoint found for agent \"migration-agent\": ..."
+
+// checkpoint_resume (latest) — plain text, not a JSON object
+"Checkpoint \"01JZK7...\" restored for agent \"migration-agent\".\nCreated: 2026-04-28T13:42:11Z\nState:\n{\n  \"task\": \"db migration\",\n  \"step\": 3\n}\n"
 ```
 
 ---
@@ -253,7 +255,7 @@ audited later. Ordinary decay and pruning collect it in due course.
 Use for long-running tasks that might span multiple sessions or be interrupted.
 
 **What checkpoints capture:**
-- An arbitrary JSON-encoded state string (your choice of structure)
+- A JSON object (string-encoded at the MCP layer) — validated on save, rejected otherwise
 - An ID + RFC3339 timestamp
 
 **What they DON'T capture:**
