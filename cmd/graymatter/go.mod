@@ -16,20 +16,27 @@ go 1.25.5
 // workspace, where go.work's directives govern toolchain selection.
 toolchain go1.26.7
 
-// The library is developed one directory up in the same checkout; building
-// against the last published release instead silently compiles the binary
-// against a stale pkg/memory until CI's GOWORK=off step catches it — which it
-// only can when new API happens to be used. Pinning to the parent checkout
-// makes every build, workspace or not, test what this repo actually ships.
+// The library is developed one directory up in the same checkout. The
+// go.work workspace at the repo root maps that dependency to the checkout for
+// every in-repo build, so workspace builds always compile against the working
+// tree.
 //
-// replace directives are ignored by external consumers and by
-// `go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest`,
-// so released installs still resolve the real published version.
-replace github.com/angelnicolasc/graymatter => ../../
+// A replace directive CANNOT stand in for the workspace here: go refuses
+// `go install module@version` when the providing module carries replace
+// directives (issue #75 — verified on v0.14.0 through v0.15.0). This module
+// is what users install, so it must stay replace-free; the cost is that a
+// non-workspace build (GOWORK=off) resolves the library at the published
+// version required below — which is exactly the contract `go install
+// @version` exercises, and CI runs that build as a gate.
+//
+// Bump the require below with every release, together with the version bump
+// in CHANGELOG.md: an install from a fresh tag resolves the library at this
+// version, and a stale pin silently ships an old core (the release workflow's
+// install-smoke step fails on that).
 
 require (
 	github.com/BurntSushi/toml v1.4.0
-	github.com/angelnicolasc/graymatter v0.12.1
+	github.com/angelnicolasc/graymatter v0.15.0
 	github.com/anthropics/anthropic-sdk-go v1.33.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4

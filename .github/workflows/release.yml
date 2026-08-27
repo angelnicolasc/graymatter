@@ -144,3 +144,37 @@ jobs:
           # Only the tap publishers read this; the release itself stays on the
           # repository-scoped token.
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+  # The README's first install path is `go install ...@vX.Y.Z`, and it failed
+  # silently for four releases: a replace directive in cmd/graymatter/go.mod
+  # made every tagged version uninstallable that way while binary downloads
+  # kept working (issue #75). The fix landed in the same commit as this gate:
+  # from now on, a release is not done until the exact tag being published
+  # installs through the module machinery a fresh user would use.
+  #
+  # GOPROXY=direct fetches the tag straight from GitHub, bypassing the
+  # public proxy's caching delay for freshly pushed tags — the proxy catch-up
+  # is a property of the CDN, not of this release, and a retry loop against
+  # it would trade determinism for waiting.
+  install-smoke:
+    name: go install at the released tag
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26.6"
+
+      - name: Install and run the released binary
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          MOD="github.com/angelnicolasc/graymatter/cmd/graymatter@${TAG}"
+          GOFLAGS= GOPROXY=direct GOWORK=off go install "${MOD}"
+          INSTALLED="$(go env GOPATH)/bin/graymatter"
+          # --help is the only guaranteed side-effect-free invocation: it
+          # exercises cobra's command graph end to end without touching disk.
+          "${INSTALLED}" --help > /dev/null
+          echo "${TAG} installs and runs via go install"
