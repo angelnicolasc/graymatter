@@ -363,6 +363,7 @@ condition under which it should be reversed.
 | [009](docs/decisions/009-kg-sentinel-activation.md) | `init --kg` persists activation via sentinel file |
 | [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation |
 | [011](docs/decisions/011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally |
+| [012](docs/decisions/012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests |
 
 ---
 

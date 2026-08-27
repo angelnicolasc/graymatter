@@ -9,6 +9,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 - **Registry metadata.** `server.json` (official MCP registry) and `smithery.yaml` (Smithery) let GrayMatter be published and listed across MCP registries.
+- **MCP tool definitions engineered for agent-facing quality (TDQS), pinned by contract tests.** Every tool now carries a meaningful title, an opening-verb description with explicit when-to-use guidance and named sibling alternatives, verified return/error disclosure, and fully documented parameters (`top_k` declares its default; the `action` enum is pinned). `tdqs_contract_test.go` locks the client-visible `tools/list` shape so description drift becomes a CI failure. `docs/AGENTS.md` return-shape claims corrected against the real handlers (`memory_search` returns a numbered list, not newline-separated text; `checkpoint_resume` errors when no checkpoint exists). See [ADR-012](docs/decisions/012-tool-definition-quality.md).
 
 ---
 
