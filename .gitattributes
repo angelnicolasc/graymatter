@@ -1,3 +1,29 @@
-# The docs site is documentation, not app code — exclude it from GitHub
-# language statistics so the repo keeps its Go profile.
-www/** linguist-documentation
+# The Languages bar on the repository page is Go's, in full. Everything else
+# in this repository is documentation, configuration, assets or tooling —
+# none of it is a language the project is written in, so none of it belongs
+# in the metric. linguist-documentation and linguist-vendored both exclude a
+# file from the language statistics.
+#
+# Verify with: https://github.com/angelnicolasc/graymatter (Languages section)
+# after any push that adds a new file type.
+
+# Documentation.
+*.md            linguist-documentation
+*.mdx           linguist-documentation
+
+# Configuration, manifests, machine-readable docs.
+*.json          linguist-vendored
+*.jsonl         linguist-vendored
+*.jsonc         linguist-vendored
+*.yml           linguist-vendored
+*.yaml          linguist-vendored
+*.toml          linguist-vendored
+*.mod           linguist-vendored
+*.sum           linguist-vendored
+
+# Tooling and site assets.
+*.sh            linguist-vendored
+*.css           linguist-vendored
+*.mjs           linguist-vendored
+Dockerfile      linguist-vendored
+Dockerfile.*    linguist-vendored

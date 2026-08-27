@@ -216,17 +216,25 @@ jobs:
       # v0.5.0 — a version predating pkg/memory/rpc and internal/tokens, both
       # of which the CLI imports. The module did not build on its own, and
       # nothing noticed because nothing ever built it on its own.
+      #
+      # Standalone therefore means: no workspace AND no proxy guesswork. The
+      # library is source-replaced to this checkout, so the build exercises
+      # exactly the tree that ships together at tag time. Building against the
+      # proxy-pinned version instead failed on every push that moved the
+      # library surface ahead of the last tag — the 0.16.x cycle needed three
+      # re-tags to get this job green, and every feature drop since needed
+      # version bumps before CI. The pinned-proxy property is enforced where
+      # it is real: the release workflow's install-smoke runs
+      # `go install cmd/graymatter@<tag>` against the actual published tag
+      # after it lands.
       - name: The CLI module must build without the workspace
         working-directory: cmd/graymatter
         env:
           GOWORK: "off"
-        # The version bump commit cannot regenerate go.sum yet (the tagged
-        # version does not exist until the tag lands right after), so the
-        # download runs here — after the tag exists, before the no-workspace
-        # build needs it.
         run: |
-          go mod download github.com/angelnicolasc/graymatter
+          go mod edit -replace github.com/angelnicolasc/graymatter=../..
           go build -o /dev/null ./...
+          git checkout -- go.mod
 
       - name: Build with an injected version
         working-directory: cmd/graymatter
