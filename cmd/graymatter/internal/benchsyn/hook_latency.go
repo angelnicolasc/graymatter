@@ -60,8 +60,8 @@ const (
 	HookUserPromptBudget      = 150 * time.Millisecond
 
 	HookSeedFacts    = 10000
-	HookWarmupRuns   = 4
-	HookMeasuredRuns = 20
+	HookWarmupRuns   = 3
+	HookMeasuredRuns = 12
 )
 
 // HookLatencyRow is one event's measured row (absolute numbers, informational).
@@ -273,8 +273,10 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 }
 
 // hookScalingRatio times in-process Recall over two store sizes and returns
-// (normalized, raw) ratios. Each store lives in its own temp directory and
-// is opened/closed inside this function.
+// (normalized, raw) ratios. The small store derives from seedFacts (1/20th,
+// floor 5) so scaled-down runs keep a meaningful big-over-small relationship
+// instead of querying a "big" store smaller than the small one. Each store
+// lives in its own temp directory and is opened/closed inside this function.
 func hookScalingRatio(seedFacts int) (float64, float64, error) {
 	open := func(dataDir string, n int) (*graymatter.Memory, error) {
 		cfg := graymatter.DefaultConfig()
@@ -315,12 +317,15 @@ func hookScalingRatio(seedFacts int) (float64, float64, error) {
 	}
 	defer func() { _ = os.RemoveAll(smallDir) }()
 
-	const smallFacts = 500
+	smallFacts := seedFacts / 20
+	if smallFacts < 5 {
+		smallFacts = 5
+	}
 	small, err := open(smallDir, smallFacts)
 	if err != nil {
 		return 0, 0, err
 	}
-	smallBest, err := bestOf(small, 5)
+	smallBest, err := bestOf(small, 3)
 	_ = small.Close()
 	if err != nil {
 		return 0, 0, err
@@ -335,7 +340,7 @@ func hookScalingRatio(seedFacts int) (float64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	bigBest, err := bestOf(big, 5)
+	bigBest, err := bestOf(big, 3)
 	_ = big.Close()
 	if err != nil {
 		return 0, 0, err

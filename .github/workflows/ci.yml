@@ -77,9 +77,14 @@ jobs:
       # recall+consolidation cycles under -race; on loaded windows runners
       # they intermittently exceed 180s (observed 3/6 runs in one evening),
       # which reads as a quality regression when it is only runner slowness.
+      #
+      # 1200s, not 600: the three benchmark packages share one go test
+      # invocation, and on the slowest runners retrieval_quality alone costs
+      # ~360 s and hook_latency ~220 s — the 600 s default timed them out
+      # with nothing wrong (windows-latest / go1.25, run 33120309321).
       - name: Test benchmark packages
         shell: bash
-        run: go test -race -count=1 -timeout=600s ./benchmarks/...
+        run: go test -race -count=1 -timeout=1200s ./benchmarks/...
 
       - name: Coverage gate — core library (≥70%)
         shell: bash

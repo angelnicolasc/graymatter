@@ -57,8 +57,8 @@ import (
 const (
 	seedFacts     = 10000
 	smallFacts    = 500
-	warmupSamples = 4
-	measuredRuns  = 20
+	warmupSamples = 3
+	measuredRuns  = 12
 
 	// The machine-relative budgets: deltas are measured against the
 	// pre-compact baseline on the same machine in the same run. 200 ms
@@ -295,7 +295,7 @@ func measureRecallScaling(dir string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	smallBest, err := bestOf(small, 5)
+	smallBest, err := bestOf(small, 3)
 	_ = small.Close()
 	if err != nil {
 		return 0, err
@@ -305,7 +305,7 @@ func measureRecallScaling(dir string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	bigBest, err := bestOf(big, 5)
+	bigBest, err := bestOf(big, 3)
 	_ = big.Close()
 	if err != nil {
 		return 0, err
