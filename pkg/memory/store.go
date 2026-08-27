@@ -594,6 +594,16 @@ func (s *Store) touchFacts(facts []Fact) {
 			if b.Get([]byte(facts[i].ID)) == nil {
 				continue
 			}
+			// Update, never resurrect: the same race with the tombstone half
+			// — a consolidation cycle can supersede the fact between Recall's
+			// filter and this writeback, and the stale snapshot must not
+			// clear the tombstone. See UpdateFact for the full story.
+			if raw := b.Get([]byte(facts[i].ID)); raw != nil {
+				current, uerr := unmarshalFact(raw)
+				if uerr == nil && current.IsSuperseded() && !facts[i].IsSuperseded() {
+					continue
+				}
+			}
 			if err := b.Put([]byte(facts[i].ID), data); err != nil {
 				return err
 			}
@@ -625,8 +635,25 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 		// of which recall or list before they delete. Nothing creates a fact
 		// through here — Put is the creation path — so refusing to write a key
 		// that is gone costs nothing and closes the window.
+		//
 		if b.Get([]byte(f.ID)) == nil {
 			return nil
+		}
+		// Update, never resurrect (the tombstone half of the same race,
+		// found by the agent-lifecycle simulation): decay and access-tracking
+		// write back snapshots taken BEFORE the write, so a tombstone that
+		// lands while a consolidation cycle is in flight used to be silently
+		// overwritten by the cycle's decay pass — the superseded fact came
+		// back from the dead with SupersededBy="". When the stored fact is
+		// tombstoned and the incoming snapshot is not, the tombstone wins and
+		// the stale write is dropped: every legitimate caller here either
+		// carries the tombstone forward or operates on a live fact, and no
+		// path is allowed to un-retire anything.
+		if raw := b.Get([]byte(f.ID)); raw != nil {
+			current, uerr := unmarshalFact(raw)
+			if uerr == nil && current.IsSuperseded() && !f.IsSuperseded() {
+				return nil
+			}
 		}
 		data, err := f.marshal()
 		if err != nil {
