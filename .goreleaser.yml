@@ -10,14 +10,6 @@ builds:
   - id: graymatter
     main: ./cmd/graymatter
     binary: graymatter
-    # The CLI module requires the root module by version (no replace: #75).
-    # GoReleaser runs builds with the workspace disabled, so without this
-    # sandbox the build resolves the root module from the module proxy —
-    # which has not indexed the tag being released yet. The proxy mode
-    # rewrites the dependency to the checkout inside a temporary module,
-    # leaving the published go.mod replace-free.
-    gomod:
-      proxy: true
     env:
       - CGO_ENABLED=0
     goos:
