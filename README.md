@@ -275,9 +275,13 @@ tool:
 Failure contract: every error exits 0 with empty stdout and a receipt in
 `<dataDir>/hooks.log` — a broken memory degrades silently, it never breaks
 the session. `graymatter hooks doctor` verifies registration, the recorded
-binary path, and store latency; the budgets (user-prompt < 150 ms p99 on a
-10k-fact store, session-end < 500 ms) are machine-checked in
-[`benchmarks/hook_latency`](benchmarks/hook_latency).
+binary path, and store latency; the hot path is machine-checked in
+[`benchmarks/hook_latency`](benchmarks/hook_latency) with hardware-relative
+gates — the recall's marginal cost against the same machine's checkpoint
+baseline (≤ 200 ms) and in-process scaling (≤ 2.5× of linear at 10k facts) —
+because absolute wall-clock numbers on shared CI runners measure the runner
+queue, not the code. Reference-hardware figure: p99 121 ms user-prompt on a
+10k-fact store, no LLM, localhost only by construction.
 
 ### Context block (opt-in)
 

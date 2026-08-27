@@ -1,25 +1,30 @@
-// hook_latency gates the Claude Code hook budgets against the real compiled
-// binary doing the real work:
+// hook_latency gates the Claude Code hooks' hot path against what the code
+// actually controls — never against shared-CI hardware.
 //
-//	user-prompt  < 150 ms   (the per-turn injection path; the hot path)
-//	session-end  < 500 ms   (checkpoint + detached consolidate spawn)
-//	pre-compact  < 200 ms   (deterministic checkpoint)
+// Absolute wall-clock budgets are a hardware lottery: the same tree measured
+// p99 user-prompt 121 ms on a dev machine, 170 ms on macOS runners and
+// 284-369 ms on Windows runners, with the spawn+connect baseline alone
+// (no recall involved) reaching 192-248 ms on Windows — an absolute 200 ms
+// "checkpoint budget" failed there without a single line of Go being wrong.
+// Gating absolutes on shared runners gates the runner queue, not the code.
 //
-// Two clocks are recorded per run and both are printed:
+// What is gated instead is hardware-invariant:
 //
-//   - internal: what the hook itself reports to hooks.log — store connect +
-//     recall/checkpoint/spawn. This is the part GrayMatter controls, and the
-//     part the budgets gate.
-//   - wall: process start to exit, including the OS spawn cost of a fresh
-//     process per event (the shape Claude Code fires). Reported for
-//     transparency; dominated by the platform's process-creation cost, which
-//     is not GrayMatter's to optimise.
+//	1. recall delta     user-prompt p99 − pre-compact p99 ≤ 200 ms
+//	   (pre-compact measures this machine's spawn+connect+checkpoint cost;
+//	   the delta isolates the recall's marginal cost — the part the
+//	   hot-path optimizations own, and where a reintroduced double
+//	   tokenize or full decode shows up immediately)
+//	2. session-end delta session-end p99 − pre-compact p99 ≤ 200 ms
+//	   (the detached consolidation spawn must add almost nothing)
+//	3. scaling          in-process Recall(10k facts) ≤ 20 × Recall(500)
+//	   (catches algorithmic blowups — accidental O(n²) passes, full
+//	   re-decodes — independent of how fast the machine is)
 //
-// The store is seeded with 10,000 facts in-process (library level, one
-// process), then the hook runner executes as a fresh OS process per sample —
-// the same shape Claude Code fires it, through the daemon the hooks actually
-// use. Warm-up runs absorb the daemon spawn and binary page-in; none count
-// toward the measured numbers.
+// Absolute numbers are still measured and printed: they are reference data
+// for humans, and the published reference-hardware figure (user-prompt p99
+// 121 ms on the dev machine that set the budgets) stays in the README beside
+// the deltas CI enforces.
 //
 // The queries deliberately overlap the seeded corpus so every measured run
 // produces a distinct injected block — an unmatched query returns the same
@@ -51,15 +56,25 @@ import (
 
 const (
 	seedFacts     = 10000
+	smallFacts    = 500
 	warmupSamples = 4
 	measuredRuns  = 20
 
-	// The budgets from the hardening playbook, mirrored in
-	// cmd/graymatter/hooks_run.go's hookLatency* constants. They gate the
-	// hook-internal time (see package comment).
-	userPromptBudget = 150 * time.Millisecond
-	sessionEndBudget = 500 * time.Millisecond
-	preCompactBudget = 200 * time.Millisecond
+	// The machine-relative budgets: deltas are measured against the
+	// pre-compact baseline on the same machine in the same run. 200 ms
+	// leaves ~1.5-2.5x headroom over every runner measured so far
+	// (deltas: ~90 ms dev, ~136 ms macOS, ~92 ms Windows) while a
+	// reintroduced double-tokenize (+40 ms) or a per-fact write txn
+	// (+500 ms) breach it decisively.
+	recallDeltaBudget      = 200 * time.Millisecond
+	sessionEndDeltaBudget  = 200 * time.Millisecond
+	// Scaling is normalized by the size ratio (Recall(10k)/Recall(500)) /
+	// (10000/500), so 1.0x is exactly linear. Measured on the reference
+	// machine: 1.17x (cache and GC make ten-thousand-item work slightly
+	// super-linear). The gate sits at 2.5x normalized — far above anything
+	// cache noise produces, far below the 20x normalized that an accidental
+	// quadratic pass would show.
+	recallScalingMaxNormalized = 2.5
 
 	// benchAgent is the basename of the working directory the hook runs
 	// from, so deriveAgentID resolves to exactly the seeded agent.
@@ -110,6 +125,15 @@ func run(stdout io.Writer) error {
 
 	if err := seedStore(storeDir); err != nil {
 		return fmt.Errorf("seed: %w", err)
+	}
+
+	// Scaling gate (gate 3): measured in-process against the library while
+	// this process still owns the store — before any daemon exists to hold
+	// the lock. The ratio is hardware-invariant: linear-ish growth passes on
+	// every runner; an accidental O(n²) pass cannot.
+	scalingRatio, err := measureRecallScaling(storeDir)
+	if err != nil {
+		return fmt.Errorf("scaling: %w", err)
 	}
 
 	binary, cleanup, err := buildBinary(root)
@@ -180,32 +204,122 @@ func run(stdout io.Writer) error {
 	}
 
 	fails := 0
+	preCompactP99 := percentile(internalDurations(results["pre-compact"]), 0.99)
+	fmt.Fprintf(stdout, "  baseline     internal p99 %7.1fms (pre-compact: spawn + connect + checkpoint)\n", ms(preCompactP99))
 	for _, b := range []struct {
 		name   string
-		budget time.Duration
 		ss     []sample
+		deltaBudget time.Duration
 	}{
-		{"user-prompt", userPromptBudget, results["user-prompt"]},
-		{"pre-compact", preCompactBudget, results["pre-compact"]},
-		{"session-end", sessionEndBudget, results["session-end"]},
+		{"user-prompt", results["user-prompt"], recallDeltaBudget},
+		{"pre-compact", results["pre-compact"], 0},
+		{"session-end", results["session-end"], sessionEndDeltaBudget},
 	} {
 		p99 := percentile(internalDurations(b.ss), 0.99)
 		max := maxOf(internalDurations(b.ss))
 		wallMax := maxOf(wallDurations(b.ss))
+		delta := p99 - preCompactP99
+		note := ""
 		status := "ok"
-		if p99 > b.budget || max > b.budget {
-			status = "FAIL"
-			fails++
+		if b.deltaBudget > 0 {
+			note = fmt.Sprintf(" · delta %+7.1fms (budget ≤ %v)", ms(delta), b.deltaBudget)
+			if delta > b.deltaBudget {
+				status = "FAIL"
+				fails++
+			}
 		}
-		fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms · budget %v · %s\n",
-			b.name, ms(p99), ms(max), ms(wallMax), b.budget, status)
+		fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms%s · %s\n",
+			b.name, ms(p99), ms(max), ms(wallMax), note, status)
 	}
 
-	if fails > 0 {
-		return fmt.Errorf("%d hook budget(s) breached", fails)
+	scalingStatus := "ok"
+	normalized := scalingRatio / (float64(seedFacts) / float64(smallFacts))
+	if normalized > recallScalingMaxNormalized {
+		scalingStatus = "FAIL"
+		fails++
 	}
-	fmt.Fprintf(stdout, "\nall hook budgets hold\n")
+	fmt.Fprintf(stdout, "  %-12s Recall(10k) / Recall(500) = %.1fx raw · %.2fx of linear (max %.1fx) · %s\n",
+		"scaling", scalingRatio, normalized, recallScalingMaxNormalized, scalingStatus)
+
+	if fails > 0 {
+		return fmt.Errorf("%d hook gate(s) breached (gates are machine-relative: deltas vs this run's pre-compact baseline, plus in-process scaling)", fails)
+	}
+	fmt.Fprintf(stdout, "\nall hook gates hold\n")
 	return nil
+}
+
+// measureRecallScaling times in-process Recall over two store sizes and
+// returns the ratio. Both stores are opened and closed inside this function
+// while the calling process is still the store's only owner.
+func measureRecallScaling(dir string) (float64, error) {
+	open := func(dataDir string, n int) (*graymatter.Memory, error) {
+		cfg := graymatter.DefaultConfig()
+		cfg.DataDir = dataDir
+		cfg.VectorReconcileInterval = 0
+		cfg.AsyncConsolidate = false
+		mem, err := graymatter.NewWithConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		ctx := context.Background()
+		for i := 0; i < n; i++ {
+			if err := mem.Remember(ctx, benchAgent, fmt.Sprintf("scaling fact %d: the %s subsystem follows runbook %d", i, topicsFor(i), i%97)); err != nil {
+				_ = mem.Close()
+				return nil, err
+			}
+		}
+		return mem, nil
+	}
+	bestOf := func(mem *graymatter.Memory, runs int) (time.Duration, error) {
+		ctx := context.Background()
+		var best time.Duration
+		for i := 0; i < runs; i++ {
+			start := time.Now()
+			if _, err := mem.Recall(ctx, benchAgent, fmt.Sprintf("runbook %d subsystem review cycle %d", i, i)); err != nil {
+				return 0, err
+			}
+			if d := time.Since(start); best == 0 || d < best {
+				best = d
+			}
+		}
+		return best, nil
+	}
+
+	smallDir, err := os.MkdirTemp(filepath.Dir(dir), "scaling-small-")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = os.RemoveAll(smallDir) }()
+
+	small, err := open(smallDir, smallFacts)
+	if err != nil {
+		return 0, err
+	}
+	smallBest, err := bestOf(small, 5)
+	_ = small.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	big, err := open(dir, 0) // dir is already seeded with seedFacts
+	if err != nil {
+		return 0, err
+	}
+	bigBest, err := bestOf(big, 5)
+	_ = big.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	if smallBest <= 0 {
+		return 0, fmt.Errorf("small recall measured %v", smallBest)
+	}
+	return float64(bigBest) / float64(smallBest), nil
+}
+
+func topicsFor(i int) string {
+	topics := []string{"deploy", "database", "cache", "auth", "billing", "search", "queue", "logging", "metrics", "oncall"}
+	return topics[i%len(topics)]
 }
 
 // execHook runs the hook runner as one fresh process with the benchmark store

@@ -35,32 +35,56 @@ import (
 // overlap the seeded corpus so every measured run injects a distinct block —
 // an unmatched query returns the same recency top-3 and the runner's
 // identical-block throttle would (correctly) suppress it, measuring nothing.
+// Machine-relative gates (methodology identical to the benchmarks/
+// hook_latency CI gate): absolute wall budgets are a hardware lottery on
+// shared runners — the same tree measured 121 ms p99 user-prompt on the
+// reference dev machine and 284-369 ms on Windows CI runners, with the
+// spawn+connect baseline alone reaching 192-248 ms. What is gated is the
+// code's marginal cost, normalized per machine and per run:
+//
+//   recall delta     user-prompt p99 − pre-compact p99 (the recall's
+//                    marginal cost on this machine this run)
+//   session-end delta
+//   scaling          in-process Recall(10k) / Recall(500), normalized by
+//                    the size ratio so 1.0x is exactly linear
+//
+// HookUserPromptBudget is the published reference figure for the hot path
+// (121 ms p99 on the reference dev machine, no LLM, localhost only). It is
+// NOT a gate — absolute budgets are a hardware lottery on shared runners;
+// the doctor uses it as a local advisory threshold and the deltas above are
+// what the gate enforces.
 const (
-	HookUserPromptBudget = 150 * time.Millisecond
-	HookPreCompactBudget = 200 * time.Millisecond
-	HookSessionEndBudget = 500 * time.Millisecond
+	HookRecallDeltaBudget     = 200 * time.Millisecond
+	HookSessionEndDeltaBudget = 200 * time.Millisecond
+	HookScalingMaxNormalized  = 2.5
+	HookUserPromptBudget      = 150 * time.Millisecond
 
 	HookSeedFacts    = 10000
 	HookWarmupRuns   = 4
 	HookMeasuredRuns = 20
 )
 
-// HookLatencyRow is one event's measured row.
+// HookLatencyRow is one event's measured row (absolute numbers, informational).
 type HookLatencyRow struct {
 	Event     string  `json:"event"`
 	P99Ms     float64 `json:"p99_ms"`
 	MaxMs     float64 `json:"max_ms"`
 	WallMaxMs float64 `json:"wall_max_ms"`
-	BudgetMs  float64 `json:"budget_ms"`
-	Pass      bool    `json:"pass"`
+	DeltaMs   float64 `json:"delta_ms"`
 }
 
-// HookLatencyReport is the full --hooks result.
+// HookLatencyReport is the full --hooks result. Pass reflects the
+// machine-relative gates: recall delta, session-end delta, and scaling.
 type HookLatencyReport struct {
-	SeedFacts int              `json:"seed_facts"`
-	Runs      int              `json:"measured_runs"`
-	Rows      []HookLatencyRow `json:"rows"`
-	Pass      bool             `json:"pass"`
+	SeedFacts            int              `json:"seed_facts"`
+	Runs                 int              `json:"measured_runs"`
+	Rows                 []HookLatencyRow `json:"rows"`
+	RecallDeltaMs        float64          `json:"recall_delta_ms"`
+	SessionEndDeltaMs    float64          `json:"session_end_delta_ms"`
+	DeltaBudgetMs        float64          `json:"delta_budget_ms"`
+	ScalingNormalized    float64          `json:"scaling_normalized"`
+	ScalingMaxNormalized float64          `json:"scaling_max_normalized"`
+	Pass                 bool             `json:"pass"`
 }
 
 // HookLatencyParams scales the run. Zero fields take the published defaults;
@@ -184,52 +208,148 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 		return report, fmt.Errorf("no user-prompt run injected a memory block; the corpus and queries disagree")
 	}
 
-	for _, b := range []struct {
-		event  string
-		budget time.Duration
-	}{
-		{"user-prompt", HookUserPromptBudget},
-		{"pre-compact", HookPreCompactBudget},
-		{"session-end", HookSessionEndBudget},
-	} {
-		ss := samples[b.event]
+	// Scaling gate, measured in-process while this run still owns the store
+	// (the samples have exited; the daemon may linger but only holds the
+	// write lock, so the scaling store lives in its own directory).
+	scalingNormalized, _, err := hookScalingRatio(p.SeedFacts)
+	if err != nil {
+		return report, fmt.Errorf("scaling: %w", err)
+	}
+	report.ScalingNormalized = scalingNormalized
+	report.ScalingMaxNormalized = HookScalingMaxNormalized
+
+	// Machine-relative deltas against this run's pre-compact baseline: the
+	// spawn+connect+checkpoint cost of THIS machine, measured in the same
+	// run the recall samples came from.
+	preCompactP99 := percentileDuration(samples["pre-compact"], 0.99)
+	breaches := 0
+	for _, e := range []string{"user-prompt", "pre-compact", "session-end"} {
+		ss := samples[e]
 		row := HookLatencyRow{
-			Event:     b.event,
+			Event:     e,
 			P99Ms:     msDuration(percentileDuration(ss, 0.99)),
 			MaxMs:     msDuration(maxDuration(ss)),
-			WallMaxMs: msDuration(maxDuration(walls[b.event])),
-			BudgetMs:  msDuration(b.budget),
+			WallMaxMs: msDuration(maxDuration(walls[e])),
+			DeltaMs:   msDuration(percentileDuration(ss, 0.99) - preCompactP99),
 		}
-		row.Pass = row.P99Ms <= row.BudgetMs && row.MaxMs <= row.BudgetMs
 		report.Rows = append(report.Rows, row)
 	}
-	report.Pass = breaches(report.Rows) == 0 && len(report.Rows) > 0
+	if len(report.Rows) != 3 {
+		return report, fmt.Errorf("expected 3 event rows, got %d", len(report.Rows))
+	}
+	report.RecallDeltaMs = report.Rows[0].DeltaMs
+	report.SessionEndDeltaMs = report.Rows[2].DeltaMs
+	report.DeltaBudgetMs = msDuration(HookRecallDeltaBudget)
+	if report.RecallDeltaMs > report.DeltaBudgetMs {
+		breaches++
+	}
+	if report.SessionEndDeltaMs > msDuration(HookSessionEndDeltaBudget) {
+		breaches++
+	}
+	if scalingNormalized > HookScalingMaxNormalized {
+		breaches++
+	}
+	report.Pass = breaches == 0
 
 	fmt.Fprintf(stdout, "hook latency: %d facts · %d warm-up + %d measured process runs per event\n\n", p.SeedFacts, p.Warmup, p.Runs)
+	fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms (machine baseline: spawn + connect + checkpoint)\n", "baseline", report.Rows[1].P99Ms)
 	for _, row := range report.Rows {
-		status := "ok"
-		if !row.Pass {
-			status = "FAIL"
+		if row.Event == "pre-compact" {
+			fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms\n",
+				row.Event, row.P99Ms, row.MaxMs, row.WallMaxMs)
+			continue
 		}
-		fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms · budget %v · %s\n",
-			row.Event, row.P99Ms, row.MaxMs, row.WallMaxMs, time.Duration(row.BudgetMs*float64(time.Millisecond)), status)
+		fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms · delta %+7.1fms (budget ≤ %v)\n",
+			row.Event, row.P99Ms, row.MaxMs, row.WallMaxMs, row.DeltaMs, HookRecallDeltaBudget)
 	}
+	fmt.Fprintf(stdout, "  %-12s Recall(10k)/Recall(500) = %.2fx of linear (max %.1fx)\n",
+		"scaling", scalingNormalized, HookScalingMaxNormalized)
 	if !report.Pass {
-		fmt.Fprintf(stdout, "\n%d budget(s) breached\n", breaches(report.Rows))
+		fmt.Fprintf(stdout, "\n%d hook gate(s) breached (gates are machine-relative deltas + scaling)\n", breaches)
 	} else {
-		fmt.Fprintf(stdout, "\nall hook budgets hold\n")
+		fmt.Fprintf(stdout, "\nall hook gates hold\n")
 	}
 	return report, nil
 }
 
-func breaches(rows []HookLatencyRow) int {
-	n := 0
-	for _, r := range rows {
-		if !r.Pass {
-			n++
+// hookScalingRatio times in-process Recall over two store sizes and returns
+// (normalized, raw) ratios. Each store lives in its own temp directory and
+// is opened/closed inside this function.
+func hookScalingRatio(seedFacts int) (float64, float64, error) {
+	open := func(dataDir string, n int) (*graymatter.Memory, error) {
+		cfg := graymatter.DefaultConfig()
+		cfg.DataDir = dataDir
+		cfg.VectorReconcileInterval = 0
+		cfg.AsyncConsolidate = false
+		mem, err := graymatter.NewWithConfig(cfg)
+		if err != nil {
+			return nil, err
 		}
+		ctx := context.Background()
+		for i := 0; i < n; i++ {
+			if err := mem.Remember(ctx, benchHookAgent, fmt.Sprintf("scaling fact %d: the %s subsystem follows runbook %d", i, scalingTopic(i), i%97)); err != nil {
+				_ = mem.Close()
+				return nil, err
+			}
+		}
+		return mem, nil
 	}
-	return n
+	bestOf := func(mem *graymatter.Memory, runs int) (time.Duration, error) {
+		ctx := context.Background()
+		var best time.Duration
+		for i := 0; i < runs; i++ {
+			start := time.Now()
+			if _, err := mem.Recall(ctx, benchHookAgent, fmt.Sprintf("runbook %d subsystem review cycle %d", i, i)); err != nil {
+				return 0, err
+			}
+			if d := time.Since(start); best == 0 || d < best {
+				best = d
+			}
+		}
+		return best, nil
+	}
+
+	smallDir, err := os.MkdirTemp("", "graymatter-scaling-small-")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = os.RemoveAll(smallDir) }()
+
+	const smallFacts = 500
+	small, err := open(smallDir, smallFacts)
+	if err != nil {
+		return 0, 0, err
+	}
+	smallBest, err := bestOf(small, 5)
+	_ = small.Close()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	bigDir, err := os.MkdirTemp("", "graymatter-scaling-big-")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = os.RemoveAll(bigDir) }()
+	big, err := open(bigDir, seedFacts)
+	if err != nil {
+		return 0, 0, err
+	}
+	bigBest, err := bestOf(big, 5)
+	_ = big.Close()
+	if err != nil {
+		return 0, 0, err
+	}
+	if smallBest <= 0 {
+		return 0, 0, fmt.Errorf("small recall measured %v", smallBest)
+	}
+	raw := float64(bigBest) / float64(smallBest)
+	return raw / (float64(seedFacts) / float64(smallFacts)), raw, nil
+}
+
+func scalingTopic(i int) string {
+	topics := []string{"deploy", "database", "cache", "auth", "billing", "search", "queue", "logging", "metrics", "oncall"}
+	return topics[i%len(topics)]
 }
 
 const benchHookAgent = "hookbench"
