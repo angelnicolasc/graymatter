@@ -168,7 +168,7 @@ func TestToolSchemaContract(t *testing.T) {
 		"memory_add":        {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
 		"checkpoint_save":   {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
 		"checkpoint_resume": {props: []string{"agent_id"}, required: []string{"agent_id"}},
-		"memory_reflect":    {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action", "agent"}},
+		"memory_reflect":    {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action"}},
 	}
 
 	for name, spec := range want {

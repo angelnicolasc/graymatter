@@ -14,6 +14,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -289,7 +290,7 @@ func (s *Server) registerTools() {
 				mcp.Description("Optional cap on returned facts. Omitted or non-positive uses the store default."),
 				mcp.DefaultNumber(8),
 			),
-			mcp.WithOutputSchema[searchResult](),
+			outputSchemaOf[searchResult](),
 		),
 		s.handleMemorySearch,
 	)
@@ -308,7 +309,7 @@ func (s *Server) registerTools() {
 				mcp.Required(),
 				mcp.Description("The fact to remember: one atomic, self-contained sentence."),
 			),
-			mcp.WithOutputSchema[addResult](),
+			outputSchemaOf[addResult](),
 		),
 		s.handleMemoryAdd,
 	)
@@ -326,7 +327,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("state",
 				mcp.Description("Optional JSON object persisted with the checkpoint, e.g. {\"branch\": \"main\"}. Values that do not parse as an object are rejected."),
 			),
-			mcp.WithOutputSchema[checkpointSaveResult](),
+			outputSchemaOf[checkpointSaveResult](),
 		),
 		s.handleCheckpointSave,
 	)
@@ -341,44 +342,83 @@ func (s *Server) registerTools() {
 				mcp.Required(),
 				mcp.Description("The agent whose latest checkpoint to load."),
 			),
-			mcp.WithOutputSchema[checkpointResumeResult](),
+			outputSchemaOf[checkpointResumeResult](),
 		),
 		s.handleCheckpointResume,
 	)
 
 	// memory_reflect
-	s.mcpSrv.AddTool(
-		mcp.NewTool("memory_reflect",
-			mcp.WithToolTitle("Curate your own memory"),
-			mcp.WithDescription("Curate an agent's memory: add a fact, update (supersede) an existing one, forget, pin or unpin against decay, or link two knowledge-graph nodes. Use it mid-task when you notice a contradiction, finish a task, or learn a durable preference; for a brand-new fact memory_add is simpler. update requires the exact old fact text in target; forget, pin and unpin accept the fact via target or text, with target winning when both are set. Retired facts keep a tombstone receipt in the audit log — nothing is ever hard-deleted. Returns a per-action confirmation."),
-			writeTool(),
-			mcp.WithString("action",
-				mcp.Required(),
-				mcp.Description("One of: add, update, forget, link, pin, unpin."),
-				mcp.Enum("add", "update", "forget", "link", "pin", "unpin"),
-			),
-			mcp.WithString("agent",
-				mcp.Required(),
-				mcp.Description("The agent whose memory to modify."),
-			),
-			mcp.WithString("agent_id",
-				mcp.Description("Alias of agent, accepted so this parameter spells like every other GrayMatter tool. agent takes precedence when both are set."),
-			),
-			mcp.WithString("text",
-				mcp.Description("The fact text for add/update, the fact to forget or pin (alternative to target), or the source node ID for link."),
-			),
-			mcp.WithString("target",
-				mcp.Description("For update: the fact text to supersede. For forget/pin/unpin: the fact (or pass it via text). For link: the target node ID."),
-			),
-			mcp.WithOutputSchema[reflectResult](),
-		),
-		s.handleMemoryReflect,
+	//
+	// The input schema is hand-authored raw JSON because the contract cannot
+	// be expressed with typed helpers: exactly one of agent_id (canonical) or
+	// agent (deprecated alias) is required, which is an anyOf over two
+	// required-lists — mcp-go's typed builders only produce flat required
+	// lists, and requiring `agent` here would re-break the caller class the
+	// alias exists for (issue #77, step 3 of the canonical flip).
+	//
+	// NewTool always seeds InputSchema.Type, and MarshalJSON rejects a tool
+	// carrying both schema forms, so the structured schema is dropped and the
+	// raw one takes its place before registration.
+	reflectTool := mcp.NewTool("memory_reflect",
+		mcp.WithToolTitle("Curate your own memory"),
+		mcp.WithDescription("Curate an agent's memory: add a fact, update (supersede) an existing one, forget, pin or unpin against decay, or link two knowledge-graph nodes. Use it mid-task when you notice a contradiction, finish a task, or learn a durable preference; for a brand-new fact memory_add is simpler. update requires the exact old fact text in target; forget, pin and unpin accept the fact via target or text, with target winning when both are set. Retired facts keep a tombstone receipt in the audit log — nothing is ever hard-deleted. Returns a per-action confirmation."),
+		writeTool(),
+		outputSchemaOf[reflectResult](),
 	)
+	reflectTool.InputSchema = mcp.ToolInputSchema{}
+	reflectTool.RawInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["add", "update", "forget", "link", "pin", "unpin"],
+      "description": "The self-curation action: add a new fact, update (supersede) an existing one, forget (retire with a tombstone), pin or unpin against decay, or link two knowledge-graph nodes."
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "The agent whose memory to modify."
+    },
+    "agent": {
+      "type": "string",
+      "description": "Deprecated alias of agent_id, accepted for compatibility with callers that predate the canonical flip. agent_id wins when both are set."
+    },
+    "text": {
+      "type": "string",
+      "description": "The fact text for add/update, the fact to forget or pin (alternative to target), or the source node ID for link."
+    },
+    "target": {
+      "type": "string",
+      "description": "For update: the fact text to supersede. For forget/pin/unpin: the fact (or pass it via text). For link: the target node ID."
+    }
+  },
+  "required": ["action"],
+  "anyOf": [
+    {"required": ["agent_id"]},
+    {"required": ["agent"]}
+  ],
+  "additionalProperties": false
+}`)
+	s.mcpSrv.AddTool(reflectTool, s.handleMemoryReflect)
 }
 
 // toolError wraps an error as an MCP tool result with isError=true.
 func toolError(msg string) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultError(msg), nil
+}
+
+// outputSchemaOf declares a tool's output schema from a Go type, failing fast
+// when generation is impossible. mcp-go's WithOutputSchema swallows generation
+// errors to the server's stderr, which would publish the tool without its
+// declared contract and without any client-visible signal (TD-002); these
+// types are compile-time constants, so a failure is a programming error and
+// panicking at registration is the honest behaviour.
+func outputSchemaOf[T any]() mcp.ToolOption {
+	raw, err := mcp.SchemaForRaw[T]()
+	if err != nil {
+		var zero T
+		panic(fmt.Sprintf("graymatter/mcp: cannot generate output schema for %T: %v", zero, err))
+	}
+	return mcp.WithRawOutputSchema(raw)
 }
 
 // toolStructured returns a result whose structuredContent is payload and whose

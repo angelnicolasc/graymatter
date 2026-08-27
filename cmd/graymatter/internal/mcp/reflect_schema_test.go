@@ -7,11 +7,12 @@ import (
 	"testing"
 )
 
-// TestMemoryReflect_AgentIDInSchema pins issue #77 step 1: the alias is part
-// of the declared schema, not just a runtime accommodation. A client reading
-// tools/list must be able to discover that agent_id is accepted; the runtime
-// alias alone (TestMemoryReflect_AgentIDAlias) can never express that.
-func TestMemoryReflect_AgentIDInSchema(t *testing.T) {
+// TestMemoryReflect_AgentIDCanonical pins issue #77 step 3 (the canonical
+// flip): agent_id is the canonical spelling, agent is a documented deprecated
+// alias, and the XOR (exactly one required) is expressed as anyOf over two
+// required-lists because a flat required list would break one caller class or
+// the other.
+func TestMemoryReflect_AgentIDCanonical(t *testing.T) {
 	byName := listToolDefs(t)
 	tool, ok := byName["memory_reflect"]
 	if !ok {
@@ -22,48 +23,73 @@ func TestMemoryReflect_AgentIDInSchema(t *testing.T) {
 		Properties map[string]struct {
 			Description string `json:"description"`
 		} `json:"properties"`
-		Required []string `json:"required"`
+		Required []string          `json:"required"`
+		AnyOf    []json.RawMessage `json:"anyOf"`
 	}
 	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 		t.Fatalf("decode inputSchema: %v", err)
 	}
 
-	aliasProp, ok := schema.Properties["agent_id"]
+	aliasProp, ok := schema.Properties["agent"]
 	if !ok {
-		t.Fatal("agent_id missing from memory_reflect input schema")
+		t.Fatal("deprecated alias agent missing from memory_reflect input schema")
 	}
-	if !strings.Contains(strings.ToLower(aliasProp.Description), "alias") {
-		t.Errorf("agent_id description %q must state it is an alias", aliasProp.Description)
+	if !strings.Contains(strings.ToLower(aliasProp.Description), "deprecated") {
+		t.Errorf("agent description %q must mark it deprecated", aliasProp.Description)
 	}
 
-	// Precedence is contractual: agent wins when both are set. The schema
-	// must not promise otherwise, and `agent` stays required until the
-	// canonical flip (ADR-013 defers that to a dedicated release).
-	canonicalRequired := false
+	canonProp := schema.Properties["agent_id"]
+	if !strings.Contains(strings.ToLower(canonProp.Description), "agent whose memory") {
+		t.Errorf("agent_id description %q must state the canonical role", canonProp.Description)
+	}
+
+	// Canonical flip: required carries only action; the agent requirement is
+	// the anyOf XOR, so callers spelling either name validate.
+	required := map[string]bool{}
 	for _, r := range schema.Required {
-		if r == "agent" {
-			canonicalRequired = true
+		required[r] = true
+	}
+	if !required["action"] {
+		t.Error("action must be required")
+	}
+	if required["agent"] || required["agent_id"] {
+		t.Error("neither agent spelling belongs in required; the XOR lives in anyOf")
+	}
+	if len(schema.AnyOf) != 2 {
+		t.Fatalf("anyOf has %d branches, want 2 (agent_id / agent)", len(schema.AnyOf))
+	}
+	sawAgentID, sawAgent := false, false
+	for _, branch := range schema.AnyOf {
+		var b struct {
+			Required []string `json:"required"`
 		}
-		if r == "agent_id" {
-			t.Error("agent_id must not be required; it is the alias, not the canonical")
+		if err := json.Unmarshal(branch, &b); err != nil {
+			t.Fatalf("decode anyOf branch: %v", err)
+		}
+		if len(b.Required) == 1 {
+			switch b.Required[0] {
+			case "agent_id":
+				sawAgentID = true
+			case "agent":
+				sawAgent = true
+			}
 		}
 	}
-	if !canonicalRequired {
-		t.Error("agent missing from required; canonical flip is a dedicated release (ADR-013)")
+	if !sawAgentID || !sawAgent {
+		t.Errorf("anyOf must offer exactly the agent_id and agent alternatives (got agent_id=%v agent=%v)", sawAgentID, sawAgent)
 	}
 }
 
 // TestMemoryReflect_AliasPrecedencePinned verifies the runtime rule the schema
-// documents: when both spellings arrive, agent wins. agent_id alone must also
-// keep working for every mutating action, not just add (the alias test only
-// covered add and forget).
+// documents: since the flip, agent_id wins when both spellings arrive, while
+// the deprecated spelling alone keeps driving every action.
 func TestMemoryReflect_AliasPrecedencePinned(t *testing.T) {
 	s, _ := newTestServer(t)
 	ctx := context.Background()
 
-	// agent wins: the fact lands under a1's namespace, not a2's. The a2 probe
-	// must see the empty-state notice — asserting on the fact text alone would
-	// false-positive, because the empty-state message quotes the query.
+	// agent_id wins: the fact lands under a2's namespace, not a1's. The a1
+	// probe must see the empty-state notice — asserting on the fact text alone
+	// would false-positive, because the empty-state message quotes the query.
 	res, err := s.handleMemoryReflect(ctx, reflectReq(map[string]any{
 		"action": "add", "agent": "a1", "agent_id": "a2", "text": "isolation probe xyzzy",
 	}))
@@ -73,7 +99,7 @@ func TestMemoryReflect_AliasPrecedencePinned(t *testing.T) {
 	for _, probe := range []struct {
 		agent     string
 		wantFound bool
-	}{{"a1", true}, {"a2", false}} {
+	}{{"a2", true}, {"a1", false}} {
 		res, err := s.handleMemorySearch(ctx, reflectReq(map[string]any{
 			"agent_id": probe.agent, "query": "isolation probe xyzzy",
 		}))
@@ -86,22 +112,23 @@ func TestMemoryReflect_AliasPrecedencePinned(t *testing.T) {
 			t.Errorf("fact not found under %q: %s", probe.agent, text)
 		}
 		if !probe.wantFound && !emptyState {
-			t.Errorf("agent %q must not recall a1's fact; got: %s", probe.agent, text)
+			t.Errorf("agent %q must not recall a2's fact; got: %s", probe.agent, text)
 		}
 	}
 
-	// agent_id alone drives update too: supersede a fact stored via the alias.
+	// The deprecated spelling alone still drives update: supersede a fact
+	// stored under a3 via `agent`.
 	res, err = s.handleMemoryReflect(ctx, reflectReq(map[string]any{
 		"action": "add", "agent_id": "a3", "text": "old convention",
 	}))
 	if err != nil || res.IsError {
-		t.Fatalf("seed via alias failed: %v / %s", err, resultText(t, res))
+		t.Fatalf("seed failed: %v / %s", err, resultText(t, res))
 	}
 	res, err = s.handleMemoryReflect(ctx, reflectReq(map[string]any{
-		"action": "update", "agent_id": "a3", "text": "new convention", "target": "old convention",
+		"action": "update", "agent": "a3", "text": "new convention", "target": "old convention",
 	}))
 	if err != nil || res.IsError {
-		t.Fatalf("update via alias failed: %v / %s", err, resultText(t, res))
+		t.Fatalf("update via deprecated alias failed: %v / %s", err, resultText(t, res))
 	}
 	res, err = s.handleMemorySearch(ctx, reflectReq(map[string]any{"agent_id": "a3", "query": "convention"}))
 	if err != nil || res.IsError {
@@ -109,6 +136,6 @@ func TestMemoryReflect_AliasPrecedencePinned(t *testing.T) {
 	}
 	text := resultText(t, res)
 	if strings.Contains(text, "old convention") || !strings.Contains(text, "new convention") {
-		t.Errorf("alias-driven update did not supersede: %s", text)
+		t.Errorf("deprecated-alias update did not supersede: %s", text)
 	}
 }

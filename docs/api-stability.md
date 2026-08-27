@@ -139,6 +139,11 @@ all — compiles against the payloads below. Within the v0.x series:
   be reworded; clients should read the structured payload.
 - Changes that would break a conforming client follow the same deprecation
   rule as the Go identifiers above: notice in the prior minor release.
+- Tool calls on one connection **may execute concurrently** (the stdio server
+  runs a worker pool): a response guarantees only its own effects, and
+  clients must not rely on cross-request ordering within a stream. A client
+  that needs write-then-read visibility must wait for the write's response
+  first.
 - Enforcement is mechanical, not aspirational: `tdqs_contract_test.go` (tool
   set, titles, descriptions, input schemas), `structured_contract_test.go`
   (payload ↔ `outputSchema` agreement), and `annotations_test.go` (safety
@@ -155,10 +160,12 @@ verified against a live `tools/list` exchange at the time of writing.
 | `memory_add` | `agent_id`, `text` | — |
 | `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
 | `checkpoint_resume` | `agent_id` | — |
-| `memory_reflect` | `action`, `agent` | `agent_id` (documented alias of `agent`; `agent` wins when both are set), `text`, `target` |
+| `memory_reflect` | `action`, plus exactly one of `agent_id` (canonical) or `agent` (deprecated alias) | `text`, `target` |
 
 `memory_reflect.action` is an enum: `add`, `update`, `forget`, `link`, `pin`,
-`unpin`.
+`unpin`. The agent parameter on `memory_reflect` is expressed as a schema
+`anyOf` (exactly one of the two spellings is required); `agent` is deprecated,
+and when both spellings arrive `agent_id` wins.
 
 ### `structuredContent` payloads
 

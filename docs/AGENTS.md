@@ -1,4 +1,4 @@
-# AGENTS.md — GrayMatter Memory Guide for AI Agents
+﻿# AGENTS.md â€” GrayMatter Memory Guide for AI Agents
 
 > Operational guide for AI agents (Claude Code, Cursor, OpenCode, Codex, Antigravity, custom MCP clients, Go callers) using GrayMatter as long-term memory.
 >
@@ -16,47 +16,47 @@ GrayMatter is your long-term memory. Unlike conversation context, which disappea
 
 ## MCP Tool Reference
 
-Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/internal/mcp/server.go`](../cmd/graymatter/internal/mcp/server.go)). **Parameter names are not uniform** — check the table before calling.
+Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/internal/mcp/server.go`](../cmd/graymatter/internal/mcp/server.go)). **Parameter names are not uniform** â€” check the table before calling.
 
 | Tool | Required params | Optional params | Returns |
 |------|----------------|-----------------|---------|
 | `memory_search` | `agent_id` (string), `query` (string) | `top_k` (int, default `8`) | Numbered fact list with a count header (deduped), or a "No memories found" notice |
-| `memory_add` | `agent_id` (string), `text` (string) | — | Confirmation string |
+| `memory_add` | `agent_id` (string), `text` (string) | â€” | Confirmation string |
 | `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Confirmation containing the checkpoint ID |
-| `checkpoint_resume` | `agent_id` (string) | — | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; error result when none exists |
-| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), **`agent`** (string), `text` (string) | `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
+| `checkpoint_resume` | `agent_id` (string) | â€” | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; error result when none exists |
+| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus exactly one of **`agent_id`** (canonical) or `agent` (deprecated alias) | `text` (string), `target` (string â€” old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
 
-> ℹ️ **`memory_reflect` names the agent parameter `agent`.** The other four tools use `agent_id`. `memory_reflect` also accepts `agent_id` as an alias, so either spelling works; when building calls programmatically, prefer the canonical name per tool.
+> â„¹ï¸ **`memory_reflect` accepts both `agent_id` (canonical) and `agent` (deprecated alias).** Since the canonical flip ([ADR-014](decisions/014-agent-id-canonical.md)) exactly one of the two is required â€” the schema enforces it as an `anyOf` â€” and `agent_id` wins when both are set. New integrations spell it `agent_id`, matching every other tool.
 
 ### Return-shape examples
 
-Every success result carries **both** a `structuredContent` object (declared in the tool's `outputSchema`) and the same human-readable text in `content` — machine-readable and text-parsing clients are both first-class ([ADR-013](decisions/013-structured-tool-results.md)).
+Every success result carries **both** a `structuredContent` object (declared in the tool's `outputSchema`) and the same human-readable text in `content` â€” machine-readable and text-parsing clients are both first-class ([ADR-013](decisions/013-structured-tool-results.md)).
 
 ```jsonc
-// memory_search — content (text)
+// memory_search â€” content (text)
 "Found 3 relevant memories for agent \"frontend-agent\":\n\n1. User prefers TypeScript with strict mode\n2. Project uses pnpm, not npm\n3. Auth tokens live in HttpOnly cookies"
 
-// memory_search — structuredContent
+// memory_search â€” structuredContent
 { "agent_id": "frontend-agent", "query": "css tooling", "count": 3, "facts": ["User prefers TypeScript with strict mode", "Project uses pnpm, not npm", "Auth tokens live in HttpOnly cookies"] }
-// empty state: count 0, facts [] — plus the "No memories found ..." notice as text
+// empty state: count 0, facts [] â€” plus the "No memories found ..." notice as text
 
-// memory_add — structuredContent
+// memory_add â€” structuredContent
 { "agent_id": "frontend-agent", "stored": true }
 
-// checkpoint_save — structuredContent
+// checkpoint_save â€” structuredContent
 { "agent_id": "migration-agent", "checkpoint_id": "01JZK7...", "created_at": "2026-04-28T13:42:11Z" }
 
-// checkpoint_resume — content (text)
+// checkpoint_resume â€” content (text)
 "Checkpoint \"01JZK7...\" restored for agent \"migration-agent\".\nCreated: 2026-04-28T13:42:11Z\nState:\n{\n  \"task\": \"db migration\",\n  \"step\": 3\n}\n"
 
-// checkpoint_resume — structuredContent (state/message_count omitted when empty)
+// checkpoint_resume â€” structuredContent (state/message_count omitted when empty)
 { "id": "01JZK7...", "created_at": "2026-04-28T13:42:11Z", "state": { "task": "db migration", "step": 3 } }
 
-// checkpoint_resume with no checkpoint — isError=true, structuredContent:
+// checkpoint_resume with no checkpoint â€” isError=true, structuredContent:
 { "error": "not_found", "agent_id": "migration-agent" }
 // (content keeps the historical "no checkpoint found for agent ..." prose)
 
-// memory_reflect — structuredContent
+// memory_reflect â€” structuredContent
 { "action": "update", "agent": "backend-agent", "ok": true }
 ```
 
@@ -66,41 +66,41 @@ Every success result carries **both** a `structuredContent` object (declared in 
 
 ### ALWAYS store
 
-- **User preferences** — coding style, communication preferences, tool choices
-- **Project conventions** — "this repo uses tabs not spaces", "never use X library"
-- **Architecture decisions** — "chose PostgreSQL over MySQL because…"
-- **Bug fixes & workarounds** — "fixed by upgrading to v2.3, don't downgrade"
-- **Recurring patterns** — "user always asks for TypeScript examples first"
-- **Environment quirks** — "needs `NODE_OPTIONS=--max-old-space-size=4096`"
-- **Stakeholder info** — "CTO prefers detailed explanations, CEO wants summaries"
+- **User preferences** â€” coding style, communication preferences, tool choices
+- **Project conventions** â€” "this repo uses tabs not spaces", "never use X library"
+- **Architecture decisions** â€” "chose PostgreSQL over MySQL becauseâ€¦"
+- **Bug fixes & workarounds** â€” "fixed by upgrading to v2.3, don't downgrade"
+- **Recurring patterns** â€” "user always asks for TypeScript examples first"
+- **Environment quirks** â€” "needs `NODE_OPTIONS=--max-old-space-size=4096`"
+- **Stakeholder info** â€” "CTO prefers detailed explanations, CEO wants summaries"
 
 ### NEVER store
 
-- **Conversation logs** — raw back-and-forth without conclusions
-- **Duplicate information** — already in README, AGENTS.md, or code comments
-- **Speculative thoughts** — "maybe we should try X" (store after the decision)
-- **Secrets or credentials** — use proper secret management
-- **Large outputs** — store the insight, not the 500-line stack trace
+- **Conversation logs** â€” raw back-and-forth without conclusions
+- **Duplicate information** â€” already in README, AGENTS.md, or code comments
+- **Speculative thoughts** â€” "maybe we should try X" (store after the decision)
+- **Secrets or credentials** â€” use proper secret management
+- **Large outputs** â€” store the insight, not the 500-line stack trace
 
-(Transient session state goes in a checkpoint, not a memory — see Anti-Pattern §5.)
+(Transient session state goes in a checkpoint, not a memory â€” see Anti-Pattern Â§5.)
 
 ### Decision Framework
 
 ```
 About to store something?
-├── Is it a conclusion / fact / preference?     → YES, store it
-├── Is it raw conversation without insight?     → NO, extract insight first
-├── Is it already documented in code/README?    → NO, reference docs instead
-├── Will this still matter in 10 sessions?      → YES, store it
-├── Is it temporary debugging state?            → NO, use checkpoint
-└── Is it a secret / credential?                → NO, never store in memory
+â”œâ”€â”€ Is it a conclusion / fact / preference?     â†’ YES, store it
+â”œâ”€â”€ Is it raw conversation without insight?     â†’ NO, extract insight first
+â”œâ”€â”€ Is it already documented in code/README?    â†’ NO, reference docs instead
+â”œâ”€â”€ Will this still matter in 10 sessions?      â†’ YES, store it
+â”œâ”€â”€ Is it temporary debugging state?            â†’ NO, use checkpoint
+â””â”€â”€ Is it a secret / credential?                â†’ NO, never store in memory
 ```
 
 ---
 
 ## Memory Operations
 
-### `memory_add` — store a clean fact
+### `memory_add` â€” store a clean fact
 
 Use when you have a single, atomic, well-formed fact.
 
@@ -113,7 +113,7 @@ Use when you have a single, atomic, well-formed fact.
 
 { "tool": "memory_add", "args": {
     "agent_id": "backend-agent",
-    "text":     "API rate limit: 100 req/min — exceeded returns 429 with Retry-After header"
+    "text":     "API rate limit: 100 req/min â€” exceeded returns 429 with Retry-After header"
 }}
 ```
 
@@ -129,7 +129,7 @@ Use when you have a single, atomic, well-formed fact.
 { "agent_id": "agent", "text": "Project uses React" }
 ```
 
-### `memory_search` — retrieve relevant context
+### `memory_search` â€” retrieve relevant context
 
 Always search before acting on ambiguous requests. Phrase the query as the *task you're trying to do*, not as keywords.
 
@@ -148,15 +148,15 @@ Always search before acting on ambiguous requests. Phrase the query as the *task
 
 GrayMatter ranks facts via **Reciprocal Rank Fusion (RRF)** over three independent signals (see [`pkg/memory/recall.go:14`](../pkg/memory/recall.go)):
 
-1. **Vector similarity** (cosine, pluggable `VectorStore`) — when embeddings are available
+1. **Vector similarity** (cosine, pluggable `VectorStore`) â€” when embeddings are available
 2. **Keyword relevance** (TF-IDF approximation over bbolt facts)
 3. **Recency** (exponential decay from `CreatedAt`)
 
 Each signal produces an independent ranking; RRF fuses the ranks (not the scores) into a single ordered list. Returns top-K, deduplicated by text. Access metadata is updated asynchronously (`AccessCount++`, `AccessedAt = now`).
 
-Facts marked superseded are dropped before any of this — a fact an agent has corrected or forgotten never competes for a slot. Graph neighbours of the top hit would also be appended, but nothing wires the graph into the store in shipped builds, so in practice that step never runs ([ADR-003](decisions/003-knowledge-graph-autopopulation.md)).
+Facts marked superseded are dropped before any of this â€” a fact an agent has corrected or forgotten never competes for a slot. Graph neighbours of the top hit would also be appended, but nothing wires the graph into the store in shipped builds, so in practice that step never runs ([ADR-003](decisions/003-knowledge-graph-autopopulation.md)).
 
-> RRF means **rank position matters, not raw scores** — a fact's contribution
+> RRF means **rank position matters, not raw scores** â€” a fact's contribution
 > depends on where it placed in each ranking, not on how close the numbers
 > were. As an agent you have no per-call control over this: there is no
 > weighting parameter on `memory_search`.
@@ -180,11 +180,11 @@ Facts marked superseded are dropped before any of this — a fact an agent has c
 // Issue 2-3 related queries, dedupe results yourself.
 ```
 
-### `memory_reflect` — self-curation
+### `memory_reflect` â€” self-curation
 
 The most powerful tool. Use it to maintain memory quality over time.
 
-> ⚠️ Parameter is **`agent`** (not `agent_id`). The asymmetry is intentional historical scar tissue and will not be flipped without a major version bump.
+> âš ï¸ Parameter is **`agent`** (not `agent_id`). The asymmetry is intentional historical scar tissue and will not be flipped without a major version bump.
 
 | Action | Param meaning of `text` | Param meaning of `target` |
 |--------|-------------------------|---------------------------|
@@ -196,7 +196,7 @@ The most powerful tool. Use it to maintain memory quality over time.
 | `unpin` | The fact to unpin (alternative to `target`) | The fact to unpin (wins when both are set) |
 
 **Pin/unpin:** a pinned fact is exempt from decay, pruning and summarisation
-(ADR-010) — use it when the user declares something permanent: a standing
+(ADR-010) â€” use it when the user declares something permanent: a standing
 obligation, an architecture decision, a security policy. Pins are visible
 (star in the TUI, counted by `status`, flagged in exports). Unpinning
 restores normal decay; a fact pinned for a long time inherits the accumulated
@@ -212,41 +212,41 @@ staleness when unpinned, which is honest rather than silently reset.
 // 2. Supersede it
 { "tool": "memory_reflect", "args": {
     "action": "update",
-    "agent":  "backend-agent",
+    "agent_id":  "backend-agent",
     "text":   "API base URL is https://api.v2.example.com",
     "target": "API base URL is https://api.v1.example.com"
 }}
 ```
 
 The old fact is tombstoned and stops being recalled from the very next search
-— not on the next consolidation pass, and not eventually. It is not deleted:
+â€” not on the next consolidation pass, and not eventually. It is not deleted:
 it stays visible to `graymatter export`, the TUI and any `List` call, with its
 `superseded_by` pointing at the fact that replaced it, so the correction can be
 audited later. Ordinary decay and pruning collect it in due course.
 
 > Before v0.10.0 this action set the old fact's weight to 0 and reported
-> success, and recall does not read weight — so the superseded fact kept
+> success, and recall does not read weight â€” so the superseded fact kept
 > coming back alongside its own correction. If you are running an older
 > binary, `update` does not do what this page says.
 
 **Forget workflow:**
 ```jsonc
-// Pass the fact in text — or in target; both are accepted.
+// Pass the fact in text â€” or in target; both are accepted.
 // If both are set, target wins.
 { "tool": "memory_reflect", "args": {
     "action": "forget",
-    "agent":  "backend-agent",
+    "agent_id":  "backend-agent",
     "text":   "Workaround for Node 14 bug (project now on Node 18)"
 }}
 ```
 
 **Link workflow (knowledge graph):**
 
-> ⚠️ `link` writes to the knowledge graph, and it does work in shipped builds:
+> âš ï¸ `link` writes to the knowledge graph, and it does work in shipped builds:
 > both the daemon and the `--no-daemon` direct store open a real graph and
 > serve the write. It can still fail if the graph cannot be opened, in which
 > case the tool returns `knowledge graph not available`. Call `link`
-> opportunistically and degrade gracefully — never make it a hard
+> opportunistically and degrade gracefully â€” never make it a hard
 > prerequisite for a workflow.
 >
 > What does *not* happen is automatic population: nothing extracts entities
@@ -257,22 +257,22 @@ audited later. Ordinary decay and pruning collect it in due course.
 ```jsonc
 { "tool": "memory_reflect", "args": {
     "action": "link",
-    "agent":  "backend-agent",
+    "agent_id":  "backend-agent",
     "text":   "depends_on",
     "target":  "user-database"
 }}
 ```
 
-### `checkpoint_save` / `checkpoint_resume` — session continuity
+### `checkpoint_save` / `checkpoint_resume` â€” session continuity
 
 Use for long-running tasks that might span multiple sessions or be interrupted.
 
 **What checkpoints capture:**
-- A JSON object (string-encoded at the MCP layer) — validated on save, rejected otherwise
+- A JSON object (string-encoded at the MCP layer) â€” validated on save, rejected otherwise
 - An ID + RFC3339 timestamp
 
 **What they DON'T capture:**
-- Memory facts (separate system — use `memory_add`)
+- Memory facts (separate system â€” use `memory_add`)
 - Filesystem state
 - External-service state
 
@@ -292,10 +292,10 @@ Use for long-running tasks that might span multiple sessions or be interrupted.
 
 // On session start
 { "tool": "checkpoint_resume", "args": { "agent_id": "migration-agent" } }
-// → parse the returned `state` JSON, continue from step
+// â†’ parse the returned `state` JSON, continue from step
 ```
 
-`state` is a **string** at the MCP layer — encode/decode JSON yourself. The CLI (`graymatter checkpoint resume`) does the same.
+`state` is a **string** at the MCP layer â€” encode/decode JSON yourself. The CLI (`graymatter checkpoint resume`) does the same.
 
 ---
 
@@ -305,11 +305,11 @@ Use for long-running tasks that might span multiple sessions or be interrupted.
 
 Before storing, verify the fact:
 
-- [ ] **Atomic** — one idea per fact, not a paragraph
-- [ ] **Timeless** — still true in 3 months
-- [ ] **Actionable** — helps future-you make better decisions
-- [ ] **Specific** — "prefers tabs", not "has preferences"
-- [ ] **Self-contained** — readable without conversation context
+- [ ] **Atomic** â€” one idea per fact, not a paragraph
+- [ ] **Timeless** â€” still true in 3 months
+- [ ] **Actionable** â€” helps future-you make better decisions
+- [ ] **Specific** â€” "prefers tabs", not "has preferences"
+- [ ] **Self-contained** â€” readable without conversation context
 
 ### Decay & consolidation
 
@@ -321,23 +321,23 @@ Facts decay. A fact you never recall will eventually be pruned.
 - Half-life = `30 days` (`DecayHalfLife = 720h`)
 - Pruned when weight `< 0.01`
 - Recall resets the decay clock for that fact
-- Consolidation triggers when an agent has ≥ `ConsolidateThreshold` (default `20`) facts; runs async unless `AsyncConsolidate = false`; up to `MaxAsyncConsolidations` (default `2`) goroutines concurrently
+- Consolidation triggers when an agent has â‰¥ `ConsolidateThreshold` (default `20`) facts; runs async unless `AsyncConsolidate = false`; up to `MaxAsyncConsolidations` (default `2`) goroutines concurrently
 
 **Implications:**
 ```jsonc
-// Anti-pattern: store once, never reference → pruned after ~199 days
+// Anti-pattern: store once, never reference â†’ pruned after ~199 days
 // (6.64 half-lives to fall below the 0.01 floor, at the default 30-day half-life)
-{ "tool": "memory_add", "args": { "agent_id": "agent", "text": "Critical security policy: …" }}
+{ "tool": "memory_add", "args": { "agent_id": "agent", "text": "Critical security policy: â€¦" }}
 // Then never search for it.
 
 	// Better: keep important facts warm by including them in routine context-gathering.
 
 	// Best: the user declared it permanent (standing obligation, architecture
-	// decision)? Pin it — memory_reflect action=pin exempts it from decay,
+	// decision)? Pin it â€” memory_reflect action=pin exempts it from decay,
 	// pruning and summarisation entirely (ADR-010).
 	// ```
-	// { "tool": "memory_reflect", "args": { "action": "pin", "agent": "agent",
-	//     "text": "Critical security policy: …" }}
+	// { "tool": "memory_reflect", "args": { "action": "pin", "agent_id": "agent",
+	//     "text": "Critical security policy: â€¦" }}
 	// ```
 	// A pinned fact never decays and is never pruned or summarised away;
 	// unpin when it stops being true.
@@ -345,7 +345,7 @@ Facts decay. A fact you never recall will eventually be pruned.
 
 ### Cleanup schedule
 
-Every 10–20 sessions, sweep:
+Every 10â€“20 sessions, sweep:
 
 ```bash
 # 1. List everything for an agent
@@ -359,7 +359,7 @@ graymatter recall <agent_id> "*" --all
 
 ## Shared Memory (`__shared__`)
 
-GrayMatter reserves the agent ID `__shared__` (the constant `SharedAgentID` in [`pkg/memory/store.go:40`](../pkg/memory/store.go)) for facts every agent in this workspace should see — project conventions, team rules, security policies.
+GrayMatter reserves the agent ID `__shared__` (the constant `SharedAgentID` in [`pkg/memory/store.go:40`](../pkg/memory/store.go)) for facts every agent in this workspace should see â€” project conventions, team rules, security policies.
 
 There is **no magic routing** at the MCP layer. To write or read shared memory, just pass `__shared__` as the `agent_id` parameter exactly like any other agent ID:
 
@@ -378,12 +378,12 @@ There is **no magic routing** at the MCP layer. To write or read shared memory, 
 }}
 ```
 
-**Per-agent + shared in one shot**: issue two calls (one with the agent's own ID, one with `__shared__`) and merge the results. The Go library exposes a `RecallAll(agentID, query)` helper that does this for you ([`graymatter.go`](../graymatter.go)) — there is no MCP equivalent.
+**Per-agent + shared in one shot**: issue two calls (one with the agent's own ID, one with `__shared__`) and merge the results. The Go library exposes a `RecallAll(agentID, query)` helper that does this for you ([`graymatter.go`](../graymatter.go)) â€” there is no MCP equivalent.
 
 **Shared-memory best practices:**
 - Store **project-wide** conventions, not agent-specific preferences
-- Prefix shared facts with intent: `"Project convention: …"`, `"Team rule: …"`, `"Security policy: …"`
-- Keep it small and high-signal (≲ 50 facts)
+- Prefix shared facts with intent: `"Project convention: â€¦"`, `"Team rule: â€¦"`, `"Security policy: â€¦"`
+- Keep it small and high-signal (â‰² 50 facts)
 - The CLI `--shared` flag on `graymatter remember` / `graymatter recall` writes/reads this namespace directly
 
 ---
@@ -438,16 +438,16 @@ After significant interactions, extract atomic conclusions and `memory_add` them
 
 ## CLI Parity
 
-Every memory operation is also available from the terminal — useful for scripts, CI hooks, and debugging.
+Every memory operation is also available from the terminal â€” useful for scripts, CI hooks, and debugging.
 
 | MCP tool | CLI equivalent |
 |----------|----------------|
 | `memory_add` | `graymatter remember <agent_id> "<text>"` (or `--shared` for `__shared__`) |
 | `memory_search` | `graymatter recall <agent_id> "<query>"` (`--all` to dump every fact, `--shared` to query `__shared__`) |
-| `checkpoint_save` | (library/MCP only — no CLI) |
+| `checkpoint_save` | (library/MCP only â€” no CLI) |
 | `checkpoint_resume` | `graymatter checkpoint resume <agent_id>` (lists most recent) |
-| — | `graymatter checkpoint list <agent_id>` (history) |
-| `memory_reflect` | (MCP only — no CLI) |
+| â€” | `graymatter checkpoint list <agent_id>` (history) |
+| `memory_reflect` | (MCP only â€” no CLI) |
 
 Other useful subcommands:
 
@@ -467,8 +467,8 @@ Other useful subcommands:
 
 If you're embedding GrayMatter directly in a Go program (not via MCP), see [`examples/agent/main.go`](../examples/agent/main.go) for the canonical pattern:
 
-1. `graymatter.Open(graymatter.DefaultConfig())` — open the store
-2. `mem.Recall(ctx, agentID, query, topK)` — pull context before the LLM call
+1. `graymatter.Open(graymatter.DefaultConfig())` â€” open the store
+2. `mem.Recall(ctx, agentID, query, topK)` â€” pull context before the LLM call
 3. Inject the recalled facts into the system prompt
 4. After the LLM responds, `mem.Remember(ctx, agentID, conclusion)` (or `RememberExtracted` to let GrayMatter pull atomic facts via Anthropic Haiku)
 5. `defer mem.Close()` to flush + release the bbolt lock
@@ -490,7 +490,7 @@ What happens in v0.5.x:
   - Quit one agent's MCP integration before working from the other
   - Use the `tui` in `--read-only` mode explicitly when you only want to inspect
 
-If you're an agent and `memory_add` returns a lock error, **degrade gracefully**: keep the fact in your in-context working memory, surface the error to the user, suggest closing competing processes — don't retry in a loop.
+If you're an agent and `memory_add` returns a lock error, **degrade gracefully**: keep the fact in your in-context working memory, surface the error to the user, suggest closing competing processes â€” don't retry in a loop.
 
 ---
 
@@ -503,7 +503,7 @@ If you're an agent and `memory_add` returns a lock error, **degrade gracefully**
 { "agent_id": "agent", "text": "User said hello" }
 { "agent_id": "agent", "text": "User asked about weather" }
 { "agent_id": "agent", "text": "I responded with the forecast" }
-// → 1000 low-signal facts, important ones buried
+// â†’ 1000 low-signal facts, important ones buried
 
 // GOOD
 { "agent_id": "agent",
@@ -520,7 +520,7 @@ If you're an agent and `memory_add` returns a lock error, **degrade gracefully**
 // GOOD: update on change
 { "tool": "memory_reflect", "args": {
     "action": "update",
-    "agent":  "agent",
+    "agent_id": "agent",
     "text":   "User now prefers Y (changed from X)",
     "target": "User likes X" }}
 ```
@@ -597,17 +597,17 @@ GrayMatter pays off after roughly 10 sessions. For one-shot agents, the overhead
 
 | Operation | Typical | Notes |
 |-----------|--------:|-------|
-| `memory_add` | 5–20 ms | bbolt write + optional vector upsert |
-| `memory_search` | 10–50 ms | Keyword + vector + RRF fusion |
-| `checkpoint_save` | 5–15 ms | Single bbolt transaction |
-| `checkpoint_resume` | 5–10 ms | Direct key lookup |
+| `memory_add` | 5â€“20 ms | bbolt write + optional vector upsert |
+| `memory_search` | 10â€“50 ms | Keyword + vector + RRF fusion |
+| `checkpoint_save` | 5â€“15 ms | Single bbolt transaction |
+| `checkpoint_resume` | 5â€“10 ms | Direct key lookup |
 
 Safe to call multiple times per turn. No need to batch.
 
 ### Storage growth
 
 ```
-Per fact: text_bytes + (embedding_dim × 4 bytes)
+Per fact: text_bytes + (embedding_dim Ã— 4 bytes)
 With nomic-embed-text (768-dim): ~3 KB / fact
 1000 facts: ~3 MB on disk
 ```
@@ -621,7 +621,7 @@ Even very large memory stores stay tiny. Don't pre-optimise for storage.
 ### Environment variables
 
 ```bash
-# Embedding providers (auto-detected in this order: Ollama → OpenAI → Anthropic → keyword)
+# Embedding providers (auto-detected in this order: Ollama â†’ OpenAI â†’ Anthropic â†’ keyword)
 export OPENAI_API_KEY=sk-...           # OpenAI embeddings
 export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic embeddings + consolidation LLM
 
@@ -634,7 +634,7 @@ export GRAYMATTER_OPENAI_MODEL=text-embedding-3-small   # optional override
 ```
 
 Consolidation (`ConsolidateLLM`) accepts `"anthropic"` (needs
-`ANTHROPIC_API_KEY`) or `"ollama"` — fully local, no key. With Ollama, each
+`ANTHROPIC_API_KEY`) or `"ollama"` â€” fully local, no key. With Ollama, each
 applied cycle replaces the weakest half of an agent's facts with one summary;
 the consumed facts stay auditable as tombstones pointing at the summary, and
 `status` reports the running totals (`consolidations`, `facts_consumed`).
@@ -644,10 +644,10 @@ the consumed facts stay auditable as tombstones pointing at the summary, and
 | Field | Default | When to tune |
 |-------|---------|--------------|
 | `DataDir` | `.graymatter` | Move out of the workspace if you don't want it tracked |
-| `TopK` | `8` | ↑ to 12 for very dense memory; ↓ to 5 if facts are highly specific |
+| `TopK` | `8` | â†‘ to 12 for very dense memory; â†“ to 5 if facts are highly specific |
 | `EmbeddingMode` | `EmbeddingAuto` | Force `EmbeddingKeyword` to skip vector search entirely |
-| `DecayHalfLife` | `720h` (30 d) | ↓ to 7 d for fast-changing domains; ↑ to 90 d for stable conventions |
-| `ConsolidateThreshold` | `20` | ↓ to 10 for aggressive consolidation; ↑ to 50 for retention |
+| `DecayHalfLife` | `720h` (30 d) | â†“ to 7 d for fast-changing domains; â†‘ to 90 d for stable conventions |
+| `ConsolidateThreshold` | `20` | â†“ to 10 for aggressive consolidation; â†‘ to 50 for retention |
 | `AsyncConsolidate` | `true` | Set `false` only in tests / deterministic CI |
 | `MaxAsyncConsolidations` | `2` | Concurrency cap on background consolidation |
 | `ReadOnly` | `false` | Set `true` to open the store without taking the write lock |
@@ -660,37 +660,37 @@ the consumed facts stay auditable as tombstones pointing at the summary, and
 
 ```
 Is it a conclusion / decision / preference?
-├── YES → Is it already in code/README?
-│   ├── YES → Don't store (reference docs instead)
-│   └── NO  → Store it
-└── NO  → Is it temporary state?
-    ├── YES → Use checkpoint
-    └── NO  → Don't store
+â”œâ”€â”€ YES â†’ Is it already in code/README?
+â”‚   â”œâ”€â”€ YES â†’ Don't store (reference docs instead)
+â”‚   â””â”€â”€ NO  â†’ Store it
+â””â”€â”€ NO  â†’ Is it temporary state?
+    â”œâ”€â”€ YES â†’ Use checkpoint
+    â””â”€â”€ NO  â†’ Don't store
 ```
 
 ### Which tool?
 
 ```
 Need to store a fact?
-├── Atomic fact ready              → memory_add
-├── Long LLM response, multiple    → graymatter.RememberExtracted (Go) or extract yourself
-│   insights inside                  before calling memory_add
-├── Fix / replace existing fact    → memory_reflect action=update
-├── Remove a bad fact              → memory_reflect action=forget
-└── Connect two entities (KG)      → memory_reflect action=link  (host must wire SetKGLinker)
+â”œâ”€â”€ Atomic fact ready              â†’ memory_add
+â”œâ”€â”€ Long LLM response, multiple    â†’ graymatter.RememberExtracted (Go) or extract yourself
+â”‚   insights inside                  before calling memory_add
+â”œâ”€â”€ Fix / replace existing fact    â†’ memory_reflect action=update
+â”œâ”€â”€ Remove a bad fact              â†’ memory_reflect action=forget
+â””â”€â”€ Connect two entities (KG)      â†’ memory_reflect action=link  (host must wire SetKGLinker)
 
 Need to retrieve context?
-├── Agent-specific only            → memory_search (agent_id=<your-id>)
-├── Shared only                    → memory_search (agent_id="__shared__")
-├── Both merged                    → two calls, merge yourself  (or use RecallAll in Go)
-└── Resume after interruption      → checkpoint_resume
+â”œâ”€â”€ Agent-specific only            â†’ memory_search (agent_id=<your-id>)
+â”œâ”€â”€ Shared only                    â†’ memory_search (agent_id="__shared__")
+â”œâ”€â”€ Both merged                    â†’ two calls, merge yourself  (or use RecallAll in Go)
+â””â”€â”€ Resume after interruption      â†’ checkpoint_resume
 ```
 
 ### Session-start checklist
 
-- [ ] `checkpoint_resume` — was I interrupted?
-- [ ] `memory_search` agent-specific (top_k=8) — relevant memories
-- [ ] `memory_search` `__shared__` (top_k=5) — shared context
+- [ ] `checkpoint_resume` â€” was I interrupted?
+- [ ] `memory_search` agent-specific (top_k=8) â€” relevant memories
+- [ ] `memory_search` `__shared__` (top_k=5) â€” shared context
 - [ ] Concatenate into system prompt
 - [ ] Proceed with task
 
