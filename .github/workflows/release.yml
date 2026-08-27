@@ -150,7 +150,10 @@ jobs:
           # Pinned, not "latest": the released binaries are built by whatever
           # this resolves to, so it should not change without a commit.
           version: v2.17.1
-          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
+          # --skip=validate: the temporary replace above dirties the tree by
+          # design; HEAD is still the release tag, so the version stamping is
+          # untouched and only the validator is relaxed.
+          args: release --clean --skip=validate --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only the tap publishers read this; the release itself stays on the
