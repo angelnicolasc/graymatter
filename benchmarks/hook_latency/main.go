@@ -204,32 +204,37 @@ func run(stdout io.Writer) error {
 	}
 
 	fails := 0
-	preCompactP99 := percentile(internalDurations(results["pre-compact"]), 0.99)
-	fmt.Fprintf(stdout, "  baseline     internal p99 %7.1fms (pre-compact: spawn + connect + checkpoint)\n", ms(preCompactP99))
+	// Deltas gate on the MEDIAN, not the p99: with twelve samples the p99 is
+	// the single worst run — a scheduler hiccup, a runner neighbour — and
+	// gating on it measures the runner's noise floor. The median is the
+	// robust central estimate; the p99 and max stay printed as reference.
+	preCompactMedian := percentile(internalDurations(results["pre-compact"]), 0.5)
+	fmt.Fprintf(stdout, "  baseline     internal median %7.1fms (pre-compact: spawn + connect + checkpoint)\n", ms(preCompactMedian))
 	for _, b := range []struct {
-		name   string
-		ss     []sample
+		name        string
+		ss          []sample
 		deltaBudget time.Duration
 	}{
 		{"user-prompt", results["user-prompt"], recallDeltaBudget},
 		{"pre-compact", results["pre-compact"], 0},
 		{"session-end", results["session-end"], sessionEndDeltaBudget},
 	} {
+		median := percentile(internalDurations(b.ss), 0.5)
 		p99 := percentile(internalDurations(b.ss), 0.99)
 		max := maxOf(internalDurations(b.ss))
 		wallMax := maxOf(wallDurations(b.ss))
-		delta := p99 - preCompactP99
+		delta := median - preCompactMedian
 		note := ""
 		status := "ok"
 		if b.deltaBudget > 0 {
-			note = fmt.Sprintf(" · delta %+7.1fms (budget ≤ %v)", ms(delta), b.deltaBudget)
+			note = fmt.Sprintf(" · delta(med) %+7.1fms (budget ≤ %v)", ms(delta), b.deltaBudget)
 			if delta > b.deltaBudget {
 				status = "FAIL"
 				fails++
 			}
 		}
-		fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms · max %7.1fms · wall max %7.1fms%s · %s\n",
-			b.name, ms(p99), ms(max), ms(wallMax), note, status)
+		fmt.Fprintf(stdout, "  %-12s internal med %7.1fms · p99 %7.1fms · max %7.1fms · wall max %7.1fms%s · %s\n",
+			b.name, ms(median), ms(p99), ms(max), ms(wallMax), note, status)
 	}
 
 	scalingStatus := "ok"

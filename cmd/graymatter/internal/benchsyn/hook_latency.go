@@ -220,8 +220,10 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 
 	// Machine-relative deltas against this run's pre-compact baseline: the
 	// spawn+connect+checkpoint cost of THIS machine, measured in the same
-	// run the recall samples came from.
-	preCompactP99 := percentileDuration(samples["pre-compact"], 0.99)
+	// run the recall samples came from. Deltas gate on the MEDIAN — with a
+	// dozen samples the p99 is the single worst run, and gating on it
+	// measures the runner's noise floor. p99 and max stay reported.
+	preCompactMedian := percentileDuration(samples["pre-compact"], 0.5)
 	breaches := 0
 	for _, e := range []string{"user-prompt", "pre-compact", "session-end"} {
 		ss := samples[e]
@@ -230,7 +232,7 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 			P99Ms:     msDuration(percentileDuration(ss, 0.99)),
 			MaxMs:     msDuration(maxDuration(ss)),
 			WallMaxMs: msDuration(maxDuration(walls[e])),
-			DeltaMs:   msDuration(percentileDuration(ss, 0.99) - preCompactP99),
+			DeltaMs:   msDuration(percentileDuration(ss, 0.5) - preCompactMedian),
 		}
 		report.Rows = append(report.Rows, row)
 	}
