@@ -198,16 +198,24 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		allScored = allScored[:cut]
 	}
 
-	// Collect top-k, updating access metadata along the way.
-	if topK > len(allScored) {
-		topK = len(allScored)
-	}
+	// Collect top-k, deduplicated by text (the documented contract), updating
+	// access metadata along the way. The dedup pass walks the full ranking
+	// rather than slicing first: with N identical texts inside the top-k, the
+	// slice would spend budget on duplicates and return fewer distinct facts
+	// than the caller asked for. Duplicates arise whenever a caller re-stores
+	// the same sentence across sessions — the store is append-only by design.
 	result := make([]string, 0, topK)
 	seen := make(map[string]bool, topK)
 	touched := make([]Fact, 0, topK)
-	for _, sc := range allScored[:topK] {
+	for _, sc := range allScored {
+		if len(result) >= topK {
+			break
+		}
 		f, ok := factByID[sc.id]
 		if !ok {
+			continue
+		}
+		if seen[f.Text] {
 			continue
 		}
 		result = append(result, f.Text)
