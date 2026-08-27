@@ -30,21 +30,34 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 
 ### Return-shape examples
 
+Every success result carries **both** a `structuredContent` object (declared in the tool's `outputSchema`) and the same human-readable text in `content` — machine-readable and text-parsing clients are both first-class ([ADR-013](decisions/013-structured-tool-results.md)).
+
 ```jsonc
-// memory_search (hits)
+// memory_search — content (text)
 "Found 3 relevant memories for agent \"frontend-agent\":\n\n1. User prefers TypeScript with strict mode\n2. Project uses pnpm, not npm\n3. Auth tokens live in HttpOnly cookies"
 
-// memory_search (no hits)
-"No memories found for agent \"frontend-agent\" matching \"rust lint rules\"."
+// memory_search — structuredContent
+{ "agent_id": "frontend-agent", "query": "css tooling", "count": 3, "facts": ["User prefers TypeScript with strict mode", "Project uses pnpm, not npm", "Auth tokens live in HttpOnly cookies"] }
+// empty state: count 0, facts [] — plus the "No memories found ..." notice as text
 
-// checkpoint_save
-"Checkpoint \"01JZK7...\" saved for agent \"migration-agent\"."
+// memory_add — structuredContent
+{ "agent_id": "frontend-agent", "stored": true }
 
-// checkpoint_resume (no checkpoint yet) — an error result, not empty text
-"isError: no checkpoint found for agent \"migration-agent\": ..."
+// checkpoint_save — structuredContent
+{ "agent_id": "migration-agent", "checkpoint_id": "01JZK7...", "created_at": "2026-04-28T13:42:11Z" }
 
-// checkpoint_resume (latest) — plain text, not a JSON object
+// checkpoint_resume — content (text)
 "Checkpoint \"01JZK7...\" restored for agent \"migration-agent\".\nCreated: 2026-04-28T13:42:11Z\nState:\n{\n  \"task\": \"db migration\",\n  \"step\": 3\n}\n"
+
+// checkpoint_resume — structuredContent (state/message_count omitted when empty)
+{ "id": "01JZK7...", "created_at": "2026-04-28T13:42:11Z", "state": { "task": "db migration", "step": 3 } }
+
+// checkpoint_resume with no checkpoint — isError=true, structuredContent:
+{ "error": "not_found", "agent_id": "migration-agent" }
+// (content keeps the historical "no checkpoint found for agent ..." prose)
+
+// memory_reflect — structuredContent
+{ "action": "update", "agent": "backend-agent", "ok": true }
 ```
 
 ---

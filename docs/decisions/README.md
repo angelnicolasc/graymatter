@@ -22,6 +22,7 @@ consequences, reversal condition.
 | [010](010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation | Accepted |
 | [011](011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally | Accepted |
 | [012](012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests | Accepted |
+| [013](013-structured-tool-results.md) | Tool results carry structuredContent twins with declared output schemas | Accepted |
 
 ## Writing a new one
 
