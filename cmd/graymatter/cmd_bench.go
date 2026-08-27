@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -182,17 +183,24 @@ func benchCmd() *cobra.Command {
 		onStore     bool
 		onlyAgent   string
 		probeRecall bool
+		hookLatency bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bench",
 		Short: "Run the published measurement suites",
 		Long: `Run GrayMatter's published benchmarks and print what they measure today.
 
-Two modes:
+Three modes:
 
 Default — the synthetic suite: deterministic, keyword embedder, fixed corpus,
 no LLM, no network. The same numbers come out on every machine; these are the
 suites that gate README.md and docs/benchmarks.md in CI.
+
+--hooks — the Claude Code hook budgets: seeds a 10k-fact store, fires the hook
+runners as fresh processes (the shape Claude Code uses — this binary itself is
+the hook binary), and gates the published budgets (user-prompt < 150 ms,
+pre-compact < 200 ms, session-end < 500 ms) against the hook-internal time.
+Methodology identical to benchmarks/hook_latency, the CI gate.
 
 --store — your memory: reads the actual store (through the daemon when one is
 running) and reports what a recall would cost today against your own facts,
@@ -203,12 +211,18 @@ What the token-count suite does NOT measure: relevance. A system returning
 eight facts at random would score the same reduction. See docs/benchmarks.md
 for the retrieval-quality suite and its results.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if onStore {
+			switch {
+			case hookLatency:
+				return runBenchHooks(cmd)
+			case onStore:
 				return runBenchStore(cmd, onlyAgent, probeRecall)
+			default:
+				return runBench(cmd)
 			}
-			return runBench(cmd)
 		},
 	}
+	cmd.Flags().BoolVar(&hookLatency, "hooks", false,
+		"audit the published hook latency budgets (seeds a 10k-fact store; ~40 process spawns)")
 	cmd.Flags().BoolVar(&onStore, "store", false,
 		"measure the caller's own store instead of the synthetic suite")
 	cmd.Flags().StringVar(&onlyAgent, "agent", "",
@@ -216,6 +230,23 @@ for the retrieval-quality suite and its results.`,
 	cmd.Flags().BoolVar(&probeRecall, "probe-recall", false,
 		"with --store: issue sample recalls (bumps access counters for recency bookkeeping)")
 	return cmd
+}
+
+// runBenchHooks is the --hooks mode: the published hook budgets, audited by
+// this binary against itself. Every published number is machine-checked; this
+// is the hook budgets' turn.
+func runBenchHooks(cmd *cobra.Command) error {
+	report, err := benchsyn.RunHookLatency(benchsyn.HookLatencyParams{}, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+	}
+	if !report.Pass {
+		os.Exit(1)
+	}
+	return nil
 }
 
 func runBench(cmd *cobra.Command) error {

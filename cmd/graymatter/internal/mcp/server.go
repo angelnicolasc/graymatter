@@ -45,6 +45,9 @@ type Backend interface {
 	Remember(ctx context.Context, agentID, text string) error
 	// Recall with topK<=0 uses the store's configured default.
 	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	// RecallExplain is Recall's ranking with per-fact receipts (v0.17.0).
+	// topK<=0 uses the store's configured default, like Recall.
+	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
 	List(agentID string) ([]memory.Fact, error)
 	UpdateFact(agentID string, f memory.Fact) error
 	CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error)
@@ -119,6 +122,25 @@ func (b *DirectBackend) Recall(ctx context.Context, agentID, query string, topK 
 		return nil, errors.New("memory store not initialised")
 	}
 	return store.Recall(ctx, agentID, query, topK)
+}
+
+// RecallExplain reaches the concrete store: AdvancedStore deliberately does
+// not grow a method for every retrieval variant, and the concrete store
+// implements this one (same pattern DirectBackend's peers use for RecallAll).
+func (b *DirectBackend) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	if re, ok := store.(interface {
+		RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
+	}); ok {
+		return re.RecallExplain(ctx, agentID, query, topK)
+	}
+	return nil, errors.New("memory store does not expose RecallExplain")
 }
 
 func (b *DirectBackend) List(agentID string) ([]memory.Fact, error) {
@@ -290,6 +312,9 @@ func (s *Server) registerTools() {
 				mcp.Description("Optional cap on returned facts. Omitted or non-positive uses the store default."),
 				mcp.DefaultNumber(8),
 			),
+			mcp.WithBoolean("explain",
+				mcp.Description("Set true to receive per-fact receipts instead of bare text: each fact under `explained` carries the per-signal ranks (vector/keyword/recency, 0 = signal absent) that produced its fused RRF score, the stored weight, its age in days, and provenance (fact_id, written_at, tombstone state). The ranking is identical either way — explain only reads it out. Use it when the caller wants to know WHY a fact was returned."),
+			),
 			outputSchemaOf[searchResult](),
 		),
 		s.handleMemorySearch,
@@ -457,6 +482,17 @@ func getInt(args map[string]any, key string, def int) int {
 		return n
 	}
 	return def
+}
+
+// getBool extracts an optional boolean argument, returning false if absent.
+// Clients that send the JSON literals true/false arrive here as bool.
+func getBool(args map[string]any, key string) bool {
+	v, ok := args[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return b && ok
 }
 
 // Ensure context is used.

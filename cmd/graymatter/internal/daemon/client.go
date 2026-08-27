@@ -13,6 +13,7 @@ import (
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
@@ -302,4 +303,11 @@ func (c *Client) Remember(ctx context.Context, agentID, text string) error {
 // RecallDefault recalls with the daemon's configured TopK.
 func (c *Client) RecallDefault(ctx context.Context, agentID, query string) ([]string, error) {
 	return c.Recall(ctx, agentID, query, 0)
+}
+
+// RecallExplain runs the explain path server-side: the same ranking Recall
+// performs, with one receipt per fact. TopK<=0 uses the daemon's configured
+// default.
+func (c *Client) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	return c.Client.RecallExplain(ctx, agentID, query, topK)
 }

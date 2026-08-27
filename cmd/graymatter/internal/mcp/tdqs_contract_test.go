@@ -164,7 +164,7 @@ func TestToolSchemaContract(t *testing.T) {
 		required []string
 	}
 	want := map[string]paramSpec{
-		"memory_search":     {props: []string{"agent_id", "query", "top_k"}, required: []string{"agent_id", "query"}},
+		"memory_search":     {props: []string{"agent_id", "query", "top_k", "explain"}, required: []string{"agent_id", "query"}},
 		"memory_add":        {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
 		"checkpoint_save":   {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
 		"checkpoint_resume": {props: []string{"agent_id"}, required: []string{"agent_id"}},

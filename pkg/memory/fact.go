@@ -108,6 +108,42 @@ func unmarshalFact(data []byte) (Fact, error) {
 	return f, nil
 }
 
+// factLite is the subset of Fact the recall ranking actually reads. Listing
+// 10k facts pays encoding/json for every field, and the three time fields and
+// the embedding slice are the expensive ones the pipeline never touches; the
+// lite decode skips them (~35% of the per-fact cost, measured on the hook
+// latency gate's 10k-fact corpus). Access state is deliberately absent: the
+// write-back goes through touchFacts' read-modify-write, which reads the
+// stored fact fresh rather than trusting a snapshot.
+type factLite struct {
+	ID           string    `json:"id"`
+	AgentID      string    `json:"agent_id"`
+	Text         string    `json:"text"`
+	CreatedAt    time.Time `json:"created_at"`
+	Weight       float64   `json:"weight"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
+	Confidence   string    `json:"confidence,omitempty"`
+	Pinned       bool      `json:"pinned,omitempty"`
+}
+
+// unmarshalFactLite decodes the ranking-relevant subset of a stored fact.
+func unmarshalFactLite(data []byte) (Fact, error) {
+	var l factLite
+	if err := json.Unmarshal(data, &l); err != nil {
+		return Fact{}, err
+	}
+	return Fact{
+		ID:           l.ID,
+		AgentID:      l.AgentID,
+		Text:         l.Text,
+		CreatedAt:    l.CreatedAt,
+		Weight:       l.Weight,
+		SupersededBy: l.SupersededBy,
+		Confidence:   l.Confidence,
+		Pinned:       l.Pinned,
+	}, nil
+}
+
 // MemoryStats holds aggregate statistics for a single agent.
 type MemoryStats struct {
 	AgentID   string    `json:"agent_id"`

@@ -29,6 +29,9 @@ type cliStore interface {
 	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
 	RecallShared(ctx context.Context, query string, topK int) ([]string, error)
 	RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	// RecallExplain is the Recall ranking with per-fact receipts (v0.17.0).
+	// TopK<=0 uses the store's configured default, like Recall.
+	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
 	List(agentID string) ([]memory.Fact, error)
 	ListAgents() ([]string, error)
 	Stats(agentID string) (memory.MemoryStats, error)
@@ -207,6 +210,21 @@ func (d *directStore) RecallAll(ctx context.Context, agentID, query string, topK
 		return ra.RecallAll(ctx, agentID, query, topK)
 	}
 	return d.mem.RecallAll(ctx, agentID, query)
+}
+
+// RecallExplain reaches the concrete store the same way RecallAll does:
+// AdvancedStore deliberately does not grow a method for every retrieval
+// variant, and the concrete store implements this one.
+func (d *directStore) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	if topK <= 0 {
+		topK = d.mem.Config().TopK
+	}
+	if re, ok := d.store.(interface {
+		RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
+	}); ok {
+		return re.RecallExplain(ctx, agentID, query, topK)
+	}
+	return nil, fmt.Errorf("memory store does not expose RecallExplain")
 }
 
 func (d *directStore) List(agentID string) ([]memory.Fact, error) { return d.store.List(agentID) }

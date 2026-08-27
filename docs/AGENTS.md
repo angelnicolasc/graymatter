@@ -1,4 +1,4 @@
-﻿# AGENTS.md â€” GrayMatter Memory Guide for AI Agents
+# AGENTS.md â€” GrayMatter Memory Guide for AI Agents
 
 > Operational guide for AI agents (Claude Code, Cursor, OpenCode, Codex, Antigravity, custom MCP clients, Go callers) using GrayMatter as long-term memory.
 >
@@ -184,7 +184,7 @@ Facts marked superseded are dropped before any of this â€” a fact an agent 
 
 The most powerful tool. Use it to maintain memory quality over time.
 
-> âš ï¸ Parameter is **`agent`** (not `agent_id`). The asymmetry is intentional historical scar tissue and will not be flipped without a major version bump.
+> Parameter is **`agent_id`** (canonical, since ADR-014). `agent` remains accepted as a deprecated alias - the schema expresses this as an `anyOf` requiring exactly one of the two - and `agent_id` wins when both are set. New integrations spell it `agent_id`.
 
 | Action | Param meaning of `text` | Param meaning of `target` |
 |--------|-------------------------|---------------------------|
@@ -453,7 +453,12 @@ Other useful subcommands:
 
 | Command | Purpose |
 |---------|---------|
-| `graymatter init` | Wire MCP into Claude Code, Cursor, Codex, OpenCode, Antigravity (see [README.md](../README.md)) |
+| `graymatter init` | Wire MCP into Claude Code, Cursor, Codex, OpenCode, Antigravity (see [README.md](../README.md)); `--kg` persists graph auto-population, `--hooks` installs Claude Code memory hooks |
+| `graymatter demo` | Seed a scratch multi-agent store, run consolidation, open the TUI — one command, no keys |
+| `graymatter hooks install` / `uninstall` / `doctor` | Manage Claude Code automatic memory hooks (per-turn injection, `remember:` instant-save, /compact survival); every hook failure degrades silently |
+| `graymatter recall <agent> "<query>" --explain` | Receipts per fact: per-signal RRF ranks, fused score, weight, age, provenance (`fact_id`, `written_at`) — same JSON shape as the MCP `explain` payload |
+| `graymatter consolidate <agent_id>` | Run one consolidation cycle through the daemon's policy |
+| `graymatter kg render --out graph.html` | Self-contained force-graph page (offline, tooltips carry fact-ID receipts); `--out graph.dot` for Graphviz |
 | `graymatter mcp serve` | Start the MCP server (stdio default, `--http 127.0.0.1:8080` for HTTP; the HTTP transport requires a bearer token) |
 | `graymatter tui` | 4-view terminal dashboard (live observability) |
 | `graymatter export --format obsidian --out vault/` | Dump all memories to a Markdown vault |

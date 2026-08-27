@@ -1,0 +1,26 @@
+# Dockerfile.kg-timelapse — reproducible Linux environment for
+# scripts/kg-timelapse.sh: Go toolchain to build the graymatter binary,
+# graphviz to rasterise the frames, ImageMagick to assemble the GIF.
+#
+# The repo and the output directory are MOUNTED at run time (not baked into
+# the image), so the script always runs against the current working tree:
+#
+#   docker build -f scripts/Dockerfile.kg-timelapse -t graymatter-kg-timelapse .
+#   docker run --rm -v "<repo-absolute-path>:/src" \
+#                  -v "<abs-output-dir>:/out" \
+#                  -w /src graymatter-kg-timelapse
+#
+# On Windows mount absolute paths without spaces (Docker Desktop):
+#   -v C:\Users\you\AppData\Local\Temp\kg-timelapse-out:/out
+#
+# Artifacts land in /out: frames/*.dot, frames/*.png and kg-timelapse.gif.
+FROM golang:1.26-bookworm
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends graphviz imagemagick ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV GRAYMATTER_BINARY=/usr/local/bin/graymatter
+WORKDIR /src
+# Build the current tree from the mount, then hand the script the binary.
+CMD ["bash", "-c", "go build -o /usr/local/bin/graymatter ./cmd/graymatter && bash scripts/kg-timelapse.sh /out"]

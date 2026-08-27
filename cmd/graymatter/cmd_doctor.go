@@ -156,6 +156,7 @@ even when the daemon is down (read-only probe of gray.db).`,
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
 	cmd.Flags().BoolVar(&graphMode, "graph", false, "report knowledge-graph analytics (hubs, orphans, articulation points)")
+	cmd.Flags().String("html", "kg-graph.html", "with --graph: also write the self-contained HTML graph render to this file")
 	cmd.Flags().BoolVar(&health, "health", false, "audit store health: supersede loops, dumping bursts, near-prune criticals, duplicates")
 	cmd.Flags().BoolVar(&embeddings, "embeddings", false, "audit the vector channel as the store observed it: coverage, degraded writes, retry backlog")
 	return cmd

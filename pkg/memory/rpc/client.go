@@ -213,6 +213,17 @@ func (c *Client) RecallAll(ctx context.Context, agentID, query string, topK int)
 	return resp.Facts, nil
 }
 
+// RecallExplain runs the Recall ranking server-side and returns one receipt
+// per fact instead of the bare texts. TopK<=0 uses the daemon's configured
+// default, exactly like Recall.
+func (c *Client) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	var resp RecallExplainResponse
+	if err := c.call("RecallExplain", &RecallExplainRequest{AgentID: agentID, Query: query, TopK: topK}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Receipts, nil
+}
+
 // List returns every fact for agentID, newest first.
 func (c *Client) List(agentID string) ([]memory.Fact, error) {
 	var resp ListResponse

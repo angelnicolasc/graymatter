@@ -10,6 +10,24 @@ import (
 
 // Recall also fires the OnRecall observability hook if configured.
 
+// recallPipeline is the intermediate ranking state one recall pass produces.
+// Both Recall (bare texts) and RecallExplain (receipts) consume it, so the two
+// can never disagree about what ranked where: there is exactly one pipeline,
+// and explain is a read-out of it, not a second implementation.
+type recallPipeline struct {
+	facts      []Fact // live facts, tombstones filtered out
+	factByID   map[string]*Fact
+	ranked     []scored // full fused ranking, best first, post MinRelevance cut
+	vectorRank map[string]int
+	kwRank     map[string]int
+	recRank    map[string]int
+	k          float64 // RRF constant in force
+	nowT       time.Time
+	// supersededTexts holds the tombstoned texts the filter dropped, so the
+	// KG enrichment step can keep a superseded fact's text out of the result.
+	supersededTexts map[string]bool
+}
+
 // Recall performs hybrid retrieval for agentID given a query string.
 // It fuses three signals via Reciprocal Rank Fusion (RRF):
 //  1. Vector similarity (cosine, pluggable VectorStore) — when embeddings available
@@ -19,7 +37,140 @@ import (
 // Returns the top-k fact texts, ready to inject into a system prompt.
 func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]string, error) {
 	start := time.Now()
-	stored, err := s.List(agentID)
+	p, err := s.runRecallPipeline(ctx, agentID, query, topK)
+	if err != nil || p == nil {
+		return nil, err
+	}
+
+	// Collect top-k, deduplicated by text (the documented contract), updating
+	// access metadata along the way. The dedup pass walks the full ranking
+	// rather than slicing first: with N identical texts inside the top-k, the
+	// slice would spend budget on duplicates and return fewer distinct facts
+	// than the caller asked for. Duplicates arise whenever a caller re-stores
+	// the same sentence across sessions — the store is append-only by design.
+	result := make([]string, 0, topK)
+	seen := make(map[string]bool, topK)
+	touched := make([]Fact, 0, topK)
+	for _, sc := range p.ranked {
+		if len(result) >= topK {
+			break
+		}
+		f, ok := p.factByID[sc.id]
+		if !ok {
+			continue
+		}
+		if seen[f.Text] {
+			continue
+		}
+		result = append(result, f.Text)
+		seen[f.Text] = true
+		// Access metadata rides on one batched transaction after the loop.
+		// The previous shape spawned one goroutine holding one bbolt write
+		// transaction PER RETURNED FACT - up to eight write txns and eight
+		// goroutines per recall, contending with writers under load for
+		// bookkeeping. One txn for the batch carries the same information.
+		f.AccessCount++
+		f.AccessedAt = p.nowT.UTC()
+		touched = append(touched, *f)
+	}
+	s.touchFacts(touched)
+
+	// Enrich with knowledge graph neighbors (optional; graph may be nil).
+	s.mu.RLock()
+	graph := s.graph
+	extractor := s.extractor
+	s.mu.RUnlock()
+	if graph != nil && extractor != nil && len(result) > 0 {
+		// Extract entity IDs from the top-ranked fact and surface neighbors.
+		//
+		// Budget (ADR-003 condition 2): at most kgMaxNeighbors entries are
+		// appended in total. Enrichment is a hint, not a second result set —
+		// an uncapped append would grow the prompt without bound on hub
+		// entities and defeat the token discipline the rest of the system
+		// enforces.
+		ids, _ := extractor.ExtractIDs(result[0])
+		appended := 0
+		for _, id := range ids {
+			if appended >= kgMaxNeighbors {
+				break
+			}
+			neighborTexts, gErr := graph.NeighborTexts(id, 1)
+			if gErr != nil {
+				break
+			}
+			for _, nt := range neighborTexts {
+				if appended >= kgMaxNeighbors {
+					break
+				}
+				// The graph stores node labels, not fact IDs, so a superseded
+				// fact's text can still be reachable as a neighbour. Skip it:
+				// the tombstone has to hold on every path into the result.
+				if !seen[nt] && !p.supersededTexts[nt] {
+					seen[nt] = true
+					result = append(result, nt)
+					appended++
+				}
+			}
+		}
+	}
+
+	if s.cfg.OnRecall != nil {
+		s.cfg.OnRecall(agentID, query, len(result), time.Since(start))
+	}
+	return result, nil
+}
+
+// RecallExplain performs the same hybrid retrieval as Recall and returns one
+// RecallReceipt per returned fact instead of the bare texts (see explain.go).
+func (s *Store) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]RecallReceipt, error) {
+	start := time.Now()
+	p, err := s.runRecallPipeline(ctx, agentID, query, topK)
+	if err != nil || p == nil {
+		return nil, err
+	}
+
+	// Identical walk to Recall's collection loop — same dedup contract, same
+	// access-metadata side effects — accumulating receipts instead of texts,
+	// read straight out of the pipeline's ranking state. No second pass.
+	receipts := make([]RecallReceipt, 0, topK)
+	seen := make(map[string]bool, topK)
+	touched := make([]Fact, 0, topK)
+	for _, sc := range p.ranked {
+		if len(receipts) >= topK {
+			break
+		}
+		f, ok := p.factByID[sc.id]
+		if !ok {
+			continue
+		}
+		if seen[f.Text] {
+			continue
+		}
+		seen[f.Text] = true
+		receipts = append(receipts, s.newReceipt(f, p, sc.score))
+		f.AccessCount++
+		f.AccessedAt = p.nowT.UTC()
+		touched = append(touched, *f)
+	}
+	s.touchFacts(touched)
+
+	if s.cfg.OnRecall != nil {
+		s.cfg.OnRecall(agentID, query, len(receipts), time.Since(start))
+	}
+	return receipts, nil
+}
+
+// runRecallPipeline performs every scoring pass of one recall: list, tombstone
+// filter, the three signal rankings, RRF fusion, the debugRanking seam and the
+// optional MinRelevance cut. Both Recall and RecallExplain consume the result.
+//
+// Returns (nil, nil) when the agent has nothing to rank — either no stored
+// facts at all or no live facts after the tombstone filter. An empty result is
+// not an error; the OnRecall hook still fires on the live-but-all-tombstoned
+// path so observability sees the recall happened and returned nothing.
+func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, topK int) (*recallPipeline, error) {
+	start := time.Now()
+	stored, err := s.listLite(agentID)
 	if err != nil || len(stored) == 0 {
 		return nil, err
 	}
@@ -84,6 +235,19 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	// --- Signal 1: vector similarity ---
 	vectorRank := make(map[string]int, topK*2) // factID → rank (1-based)
 	vecResults, _ := s.vectorSearch(ctx, agentID, query, topK*2)
+	// Impose the same total order rankBefore uses everywhere else — score
+	// descending, then ID ascending — before turning results into ranks. The
+	// backend's own ordering is unspecified for equal similarities (chromem
+	// iterates an internal map, so tied vectors came back in a different
+	// order on every call), and an arbitrary order here fed arbitrary ranks
+	// into the fusion: the same query returned different facts from one call
+	// to the next whenever two embeddings tied.
+	sort.SliceStable(vecResults, func(i, j int) bool {
+		if vecResults[i].Similarity != vecResults[j].Similarity {
+			return vecResults[i].Similarity > vecResults[j].Similarity
+		}
+		return vecResults[i].ID < vecResults[j].ID
+	})
 	for i, r := range vecResults {
 		vectorRank[r.ID] = i + 1
 	}
@@ -107,32 +271,22 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	}
 
 	// --- Signal 3: recency score ---
-	halfLife := s.cfg.DecayHalfLife
-	if halfLife == 0 {
-		halfLife = 720 * time.Hour // 30 days default
+	//
+	// The recency score is exp(-λ·age) with λ = ln2 / DecayHalfLife (30-day
+	// default) — strictly monotonic in CreatedAt, so a fact's recency rank is
+	// its position in the newest-first list, and listLite already returns
+	// exactly that order (CreatedAt desc, with bbolt's ID-asc key order
+	// surviving the stable sort for equal stamps). That is precisely
+	// rankBefore's recency order, so this signal needs no sort of its own —
+	// and equal-CreatedAt facts (same clock tick; Windows ticks at ~15.6 ms)
+	// resolve by ID deterministically instead of by sort.Slice's unspecified
+	// tie order. One less O(n log n) pass per recall, on top of the
+	// determinism.
+	recRank := make(map[string]int, len(facts))
+	for i := range facts {
+		recRank[facts[i].ID] = i + 1
 	}
-	lambda := math.Log(2) / halfLife.Hours()
-	recencyScores := make(map[string]float64, len(facts))
 	nowT := s.now()
-	for _, f := range facts {
-		ageDays := nowT.Sub(f.CreatedAt).Hours()
-		recencyScores[f.ID] = math.Exp(-lambda * ageDays)
-	}
-	type recEntry struct {
-		id    string
-		score float64
-	}
-	recSorted := make([]recEntry, 0, len(recencyScores))
-	for id, sc := range recencyScores {
-		recSorted = append(recSorted, recEntry{id, sc})
-	}
-	sort.Slice(recSorted, func(i, j int) bool {
-		return rankBefore(recSorted[i].id, recSorted[i].score, recSorted[j].id, recSorted[j].score)
-	})
-	recRank := make(map[string]int, len(recSorted))
-	for i, e := range recSorted {
-		recRank[e.id] = i + 1
-	}
 
 	// --- RRF fusion ---
 	//
@@ -198,121 +352,64 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		allScored = allScored[:cut]
 	}
 
-	// Collect top-k, deduplicated by text (the documented contract), updating
-	// access metadata along the way. The dedup pass walks the full ranking
-	// rather than slicing first: with N identical texts inside the top-k, the
-	// slice would spend budget on duplicates and return fewer distinct facts
-	// than the caller asked for. Duplicates arise whenever a caller re-stores
-	// the same sentence across sessions — the store is append-only by design.
-	result := make([]string, 0, topK)
-	seen := make(map[string]bool, topK)
-	touched := make([]Fact, 0, topK)
-	for _, sc := range allScored {
-		if len(result) >= topK {
-			break
-		}
-		f, ok := factByID[sc.id]
-		if !ok {
-			continue
-		}
-		if seen[f.Text] {
-			continue
-		}
-		result = append(result, f.Text)
-		seen[f.Text] = true
-		// Access metadata rides on one batched transaction after the loop.
-		// The previous shape spawned one goroutine holding one bbolt write
-		// transaction PER RETURNED FACT - up to eight write txns and eight
-		// goroutines per recall, contending with writers under load for
-		// bookkeeping. One txn for the batch carries the same information.
-		f.AccessCount++
-		f.AccessedAt = nowT.UTC()
-		touched = append(touched, *f)
-	}
-	s.touchFacts(touched)
-
-	// Enrich with knowledge graph neighbors (optional; graph may be nil).
-	s.mu.RLock()
-	graph := s.graph
-	extractor := s.extractor
-	s.mu.RUnlock()
-	if graph != nil && extractor != nil && len(result) > 0 {
-		// Extract entity IDs from the top-ranked fact and surface neighbors.
-		//
-		// Budget (ADR-003 condition 2): at most kgMaxNeighbors entries are
-		// appended in total. Enrichment is a hint, not a second result set —
-		// an uncapped append would grow the prompt without bound on hub
-		// entities and defeat the token discipline the rest of the system
-		// enforces.
-		ids, _ := extractor.ExtractIDs(result[0])
-		appended := 0
-		for _, id := range ids {
-			if appended >= kgMaxNeighbors {
-				break
-			}
-			neighborTexts, gErr := graph.NeighborTexts(id, 1)
-			if gErr != nil {
-				break
-			}
-			for _, nt := range neighborTexts {
-				if appended >= kgMaxNeighbors {
-					break
-				}
-				// The graph stores node labels, not fact IDs, so a superseded
-				// fact's text can still be reachable as a neighbour. Skip it:
-				// the tombstone has to hold on every path into the result.
-				if !seen[nt] && !supersededTexts[nt] {
-					seen[nt] = true
-					result = append(result, nt)
-					appended++
-				}
-			}
-		}
-	}
-
-	if s.cfg.OnRecall != nil {
-		s.cfg.OnRecall(agentID, query, len(result), time.Since(start))
-	}
-	return result, nil
+	return &recallPipeline{
+		facts:           facts,
+		factByID:        factByID,
+		ranked:          allScored,
+		vectorRank:      vectorRank,
+		kwRank:          kwRank,
+		recRank:         recRank,
+		k:               k,
+		nowT:            nowT,
+		supersededTexts: supersededTexts,
+	}, nil
 }
 
 // keywordScore returns a TF-IDF-like score for each fact against the query.
 // It uses simple term frequency over token overlap — no external deps.
+//
+// One tokenize pass per fact: each fact's term frequencies are computed once
+// and reused for both the document-frequency counts and the scoring pass. The
+// two-pass version re-tokenized every fact (10k facts ≈ 11 ms per pass, which
+// showed up directly in the hook latency gate), with byte-identical scores.
 func keywordScore(query string, facts []Fact) map[string]float64 {
 	queryTerms := tokenize(query)
 	if len(queryTerms) == 0 {
 		return nil
 	}
 
-	// DF: how many facts contain each term.
-	df := make(map[string]int, len(queryTerms))
-	for _, f := range facts {
-		seen := make(map[string]bool)
-		for _, t := range tokenize(f.Text) {
-			if !seen[t] {
-				df[t]++
-				seen[t] = true
-			}
-		}
+	type factTerms struct {
+		terms []string
+		tf    map[string]int
 	}
-
-	n := float64(len(facts))
-	scores := make(map[string]float64, len(facts))
-	for _, f := range facts {
+	perFact := make([]factTerms, len(facts))
+	df := make(map[string]int, len(queryTerms)*8)
+	for i, f := range facts {
 		terms := tokenize(f.Text)
 		tf := make(map[string]int, len(terms))
 		for _, t := range terms {
 			tf[t]++
 		}
+		// DF: how many facts contain each term — exactly the set of unique
+		// terms in the fact, which the tf map already holds.
+		for t := range tf {
+			df[t]++
+		}
+		perFact[i] = factTerms{terms: terms, tf: tf}
+	}
+
+	n := float64(len(facts))
+	scores := make(map[string]float64, len(facts))
+	for i, f := range facts {
 		var score float64
 		for _, qt := range queryTerms {
-			if count, ok := tf[qt]; ok {
+			if count, ok := perFact[i].tf[qt]; ok {
 				idf := math.Log((n + 1) / (float64(df[qt]) + 1))
 				score += float64(count) * idf
 			}
 		}
 		if score > 0 {
-			scores[f.ID] = score / float64(len(terms)+1)
+			scores[f.ID] = score / float64(len(perFact[i].terms)+1)
 		}
 	}
 	return scores

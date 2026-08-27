@@ -24,6 +24,7 @@ func initCmd() *cobra.Command {
 		noPath           bool
 		only             string
 		enableKG         bool
+		installHooks     bool
 	)
 
 	cmd := &cobra.Command{
@@ -196,6 +197,32 @@ resolves a command through it.`,
 				pathChanged = maybeAddToPath(quiet)
 			}
 
+			// --hooks installs Claude Code's automatic memory hooks into
+			// .claude/settings.json — the per-turn injection and capture
+			// layer that does not depend on the model calling tools. Merge
+			// semantics and drift reporting live in the hooks package; init
+			// only adds the flag surface. Runs last so a failure here is
+			// reported after everything else is wired.
+			if installHooks {
+				exe, err := resolveOwnBinary()
+				if err != nil {
+					return err
+				}
+				path, err := claudeSettingsPath(scopeProject)
+				if err != nil {
+					return err
+				}
+				res, err := upsertHookSettings(path, exe, true)
+				if err != nil {
+					return err
+				}
+				// Unconditional on purpose: printHookResult respects --quiet
+				// for the status lines but still surfaces drift warnings —
+				// overwriting a hand-edited file silently is the one thing
+				// this step must never do.
+				printHookResult(cmd, "install", res)
+			}
+
 			if !quiet {
 				for _, w := range warnings {
 					fmt.Fprintf(os.Stderr, "\n%s\n", w)
@@ -217,6 +244,8 @@ resolves a command through it.`,
 	cmd.Flags().BoolVar(&skipInstructions, "skip-instructions", false, "do not write the memory block into CLAUDE.md / AGENTS.md")
 	cmd.Flags().BoolVar(&enableKG, "kg", false,
 		"enable knowledge-graph auto-population: writes "+daemon.KGSentinelFile+" into the data dir so every future daemon extracts entities and co-mention edges (remove the file to turn off)")
+	cmd.Flags().BoolVar(&installHooks, "hooks", false,
+		"install Claude Code memory hooks into .claude/settings.json: automatic per-turn recall injection, instant-save via \"remember: ...\", checkpoints before /compact, detached consolidation at session end")
 	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
 	cmd.Flags().BoolVar(&noPath, "no-path", false,
 		"do not add the executable's directory to your user PATH")

@@ -76,6 +76,20 @@ type RecallAllResponse struct {
 	Facts []string
 }
 
+// RecallExplainRequest is the wire form of Store.RecallExplain: the same
+// retrieval as Recall with per-fact receipts.
+type RecallExplainRequest struct {
+	AgentID string
+	Query   string
+	TopK    int
+}
+
+// RecallExplainResponse carries one RecallReceipt per returned fact, in the
+// same ranked order Recall would produce.
+type RecallExplainResponse struct {
+	Receipts []memory.RecallReceipt
+}
+
 // ListRequest is the wire form of AdvancedStore.List.
 type ListRequest struct {
 	AgentID string

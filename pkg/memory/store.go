@@ -518,6 +518,36 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 	return facts, nil
 }
 
+// listLite is List for the recall pipeline: same facts, same order, decoded
+// with the lite decoder that skips the fields ranking never reads (see
+// factLite). Every caller is inside this package, so the lite/full agreement
+// test in recall_lite_test.go is what keeps the two decoders honest.
+func (s *Store) listLite(agentID string) ([]Fact, error) {
+	var facts []Fact
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		parent := tx.Bucket(bucketFacts)
+		if parent == nil {
+			return nil
+		}
+		b := parent.Bucket([]byte(agentID))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(_, v []byte) error {
+			f, err := unmarshalFactLite(v)
+			if err != nil {
+				return nil // skip corrupt entries, same as List
+			}
+			facts = append(facts, f)
+			return nil
+		})
+	}); err != nil {
+		return nil, err
+	}
+	sortFactsByTime(facts)
+	return facts, nil
+}
+
 // ListAgents returns all known agent IDs.
 func (s *Store) ListAgents() ([]string, error) {
 	var agents []string
@@ -584,27 +614,38 @@ func (s *Store) touchFacts(facts []Fact) {
 			if b == nil {
 				continue
 			}
-			data, err := facts[i].marshal()
-			if err != nil {
-				continue
-			}
+			key := []byte(facts[i].ID)
 			// Update, never create: if the fact vanished mid-recall (forget
 			// racing the batch), a Put here would resurrect it - the exact
 			// class of bug the UpdateFact guard closed.
-			if b.Get([]byte(facts[i].ID)) == nil {
+			raw := b.Get(key)
+			if raw == nil {
+				continue
+			}
+			// Read-modify-write the CURRENT stored fact, not the recall-time
+			// snapshot: a concurrent consolidation may have changed weight,
+			// tombstone state or pinned flag between List and this write, and
+			// the snapshot must not stomp it. The old shape marshalled the
+			// snapshot back whole — correct only while writes were serialised
+			// by luck, and it made the lite decode path impossible besides.
+			current, uerr := unmarshalFact(raw)
+			if uerr != nil {
 				continue
 			}
 			// Update, never resurrect: the same race with the tombstone half
 			// — a consolidation cycle can supersede the fact between Recall's
 			// filter and this writeback, and the stale snapshot must not
 			// clear the tombstone. See UpdateFact for the full story.
-			if raw := b.Get([]byte(facts[i].ID)); raw != nil {
-				current, uerr := unmarshalFact(raw)
-				if uerr == nil && current.IsSuperseded() && !facts[i].IsSuperseded() {
-					continue
-				}
+			if current.IsSuperseded() {
+				continue
 			}
-			if err := b.Put([]byte(facts[i].ID), data); err != nil {
+			current.AccessCount++
+			current.AccessedAt = facts[i].AccessedAt
+			data, err := current.marshal()
+			if err != nil {
+				continue
+			}
+			if err := b.Put(key, data); err != nil {
 				return err
 			}
 		}

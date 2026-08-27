@@ -90,6 +90,10 @@ func main() {
 		contextSyncCmd(),
 		pinCmd(),
 		unpinCmd(),
+		hooksCmd(),
+		consolidateCmd(),
+		demoCmd(),
+		kgCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

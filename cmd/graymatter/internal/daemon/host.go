@@ -411,3 +411,18 @@ func (b rememberBackend) RecallAll(ctx context.Context, agentID, query string, t
 	}
 	return b.mem.RecallAll(ctx, agentID, query)
 }
+
+// RecallExplain mirrors the Recall topK policy on the explain path: TopK<=0
+// means the daemon's configured default. The receipts come from the concrete
+// store, which owns the ranking.
+func (b rememberBackend) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	if re, ok := b.AdvancedStore.(interface {
+		RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
+	}); ok {
+		return re.RecallExplain(ctx, agentID, query, topK)
+	}
+	return nil, errors.New("memory store does not expose RecallExplain")
+}

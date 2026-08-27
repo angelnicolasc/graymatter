@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	chromem "github.com/philippgille/chromem-go"
@@ -102,9 +103,34 @@ func (c *chromemVectorStore) Query(ctx context.Context, collection string, embed
 	if err != nil {
 		return nil, err
 	}
-	raw, err := col.QueryEmbedding(ctx, embedding, n, nil, nil)
+	count := col.Count()
+	if count == 0 || n <= 0 {
+		return nil, nil
+	}
+	// chromem-go v0.7.0 refuses nResults greater than the number of documents
+	// (an error instead of "at most n"), which silently killed the vector
+	// signal on young stores: a recall over three facts asks for 2*topK=16
+	// results and got an error the pipeline swallows by design. And with tied
+	// similarities chromem's top-n selection follows its internal map order,
+	// so even WHICH documents came back differed call to call.
+	//
+	// QueryEmbedding scans every document regardless of n, so fetching all
+	// and selecting here costs the same. Selection is the total order the
+	// recall pipeline imposes everywhere else — similarity descending, then
+	// ID ascending — truncated to n: identical to chromem's pick when
+	// similarities are distinct, deterministic when they tie.
+	raw, err := col.QueryEmbedding(ctx, embedding, count, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	sort.SliceStable(raw, func(i, j int) bool {
+		if raw[i].Similarity != raw[j].Similarity {
+			return raw[i].Similarity > raw[j].Similarity
+		}
+		return raw[i].ID < raw[j].ID
+	})
+	if len(raw) > n {
+		raw = raw[:n]
 	}
 	results := make([]VectorResult, len(raw))
 	for i, r := range raw {

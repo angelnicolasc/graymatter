@@ -46,6 +46,10 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).Recall(ctx, agentID, query string, topK int) ([]string, error)` | Result ordering is deterministic — see below |
 | `(*Store).RecallShared(ctx, query string, topK int) ([]string, error)` | |
 | `(*Store).RecallAll(ctx, agentID, query string, topK int) ([]string, error)` | |
+| `(*Store).RecallExplain(ctx, agentID, query string, topK int) ([]RecallReceipt, error)` | Added in v0.17.0. The same ranking as `Recall` — identical order, dedup and access-metadata side effects — with one receipt per returned fact instead of bare text. KG neighbour enrichment is text-only and has no receipts, so it is not part of the explain result |
+| `RecallReceipt` struct (`text`, `weight`, `age_days`, `ranks`, `provenance`, `kg_links`) | Added in v0.17.0. JSON tags are the wire contract for `graymatter recall --explain --json` and the MCP `explained` payload |
+| `RecallRanks` struct (`vector_rank`, `keyword_rank`, `recency_rank`, `fused_score`, `k`) | Added in v0.17.0. A rank of 0 means the signal did not rank the fact; the fused score reproduces from the ranks and `k` using the documented RRF arithmetic |
+| `RecallProvenance` struct (`fact_id`, `written_at`, `superseded_by`, `confidence`, `pinned`) | Added in v0.17.0 |
 | `(*Store).PutShared(ctx, text string) error` | |
 | `(*Store).MaybeConsolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
 | `(*Store).Consolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
@@ -156,7 +160,7 @@ verified against a live `tools/list` exchange at the time of writing.
 
 | Tool | Required parameters | Optional parameters |
 |---|---|---|
-| `memory_search` | `agent_id`, `query` | `top_k` (default `8`) |
+| `memory_search` | `agent_id`, `query` | `top_k` (default `8`), `explain` (boolean, default `false`) |
 | `memory_add` | `agent_id`, `text` | — |
 | `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
 | `checkpoint_resume` | `agent_id` | — |
@@ -172,6 +176,7 @@ and when both spellings arrive `agent_id` wins.
 | Tool | Success payload | Notes |
 |---|---|---|
 | `memory_search` | `{"agent_id", "query", "count", "facts"}` | `facts` is nullable in the schema; the empty result is `count: 0, facts: []` with a "No memories found" text notice |
+| `memory_search` with `explain: true` | `{"agent_id", "query", "count", "facts", "explained"?}` | Added in v0.17.0. `explained` carries one `RecallReceipt` per fact (same JSON shape as the Go type); `facts` is present but empty so the payload conforms to the declared schema. The ranking is identical to `explain: false` — explain only reads it out |
 | `memory_add` | `{"agent_id", "stored"}` | `stored` is `true` on success |
 | `checkpoint_save` | `{"agent_id", "checkpoint_id", "created_at"}` | `created_at` is RFC3339 |
 | `checkpoint_resume` | `{"id", "created_at", "state"?, "message_count"?}` | `state` is the persisted JSON object; keys marked `?` may be absent when empty |

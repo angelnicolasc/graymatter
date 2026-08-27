@@ -1,5 +1,7 @@
 package mcp
 
+import "github.com/angelnicolasc/graymatter/pkg/memory"
+
 // Result payloads mirrored as structuredContent alongside the human-readable
 // text content (issue #76, ADR-013). Per the MCP spec, a tool returning
 // structured content SHOULD also return functionally equivalent unstructured
@@ -14,6 +16,13 @@ type searchResult struct {
 	Query   string   `json:"query"`
 	Count   int      `json:"count"`
 	Facts   []string `json:"facts"`
+	// Explained carries the per-fact receipts when memory_search was called
+	// with explain=true (v0.17.0). Omitted otherwise, so the schema stays
+	// additive: the property is optional and the bare shape is unchanged.
+	// The receipt type is pkg/memory's RecallReceipt verbatim — one struct,
+	// so the MCP wire shape and `graymatter recall --explain --json` cannot
+	// drift apart.
+	Explained []memory.RecallReceipt `json:"explained,omitempty"`
 }
 
 type addResult struct {

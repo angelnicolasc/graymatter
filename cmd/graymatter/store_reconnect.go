@@ -158,6 +158,16 @@ func (r *reconnectingStore) RecallAll(ctx context.Context, agentID, query string
 	return out, err
 }
 
+func (r *reconnectingStore) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
+	var out []memory.RecallReceipt
+	err := r.do(func(s cliStore) error {
+		var e error
+		out, e = s.RecallExplain(ctx, agentID, query, topK)
+		return e
+	})
+	return out, err
+}
+
 func (r *reconnectingStore) ListAgents() ([]string, error) {
 	var out []string
 	err := r.do(func(s cliStore) error {

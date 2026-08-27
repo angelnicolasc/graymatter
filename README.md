@@ -67,9 +67,8 @@ entities (person, organization, project) and links the ones that appear
 together. No manual tagging. No configuration. The graph builds itself from
 ordinary use.
 
-
 <p align="center">
-  <img src=".github/assets/kg-graph-view.png" alt="Knowledge Graph in Obsidian" width="800px" style="max-width: 900px;"> 
+  <img src=".github/assets/kg-graph-view.png" alt="Knowledge Graph in Obsidian" width="800px" style="max-width: 900px;">
 </p>
 
 <p align="center">
@@ -79,7 +78,16 @@ connections become wikilinks, and the whole graph renders natively.
 </p>
 
 ```bash
-graymatter daemon run --kg    # that's it
+graymatter daemon run --kg          # that's it
+graymatter kg render --out graph.html   # the graph as a self-contained page:
+                                        # force-directed SVG, zero external assets,
+                                        # offline — hover an edge to see its fact-ID receipts
+graymatter kg render --out graph.dot    # or Graphviz source for your own layout
+graymatter doctor --graph --html        # analytics + the same render in one command
+
+# watch the graph build itself, one frame per session:
+scripts/kg-timelapse.sh               # deterministic corpus → frames → GIF (see the script header;
+                                      # runs anywhere with Docker via scripts/Dockerfile.kg-timelapse)
 ```
 
 ---
@@ -121,6 +129,8 @@ ratio — printed or emitted as JSON.
 |---|---|
 | **Persistent memory** | Facts survive across sessions. Recall by meaning, not just keyword |
 | **90% token reduction** | Top-8 relevant facts instead of full-history injection |
+| **Automatic hooks** | Claude Code injects memory every turn — no tool calls required (`graymatter hooks install`) |
+| **Receipts, not vibes** | `recall --explain` returns why each fact ranked: per-signal ranks, fused score, provenance |
 | **Knowledge graph** | Typed entities and co-mention edges, auto-populated from ordinary use |
 | **Self-curation** | `memory_reflect` lets the agent add, update, forget, and link its own memories |
 | **Context block** | Projects top facts into CLAUDE.md / AGENTS.md inside a token budget (`context-sync`) |
@@ -132,15 +142,19 @@ ratio — printed or emitted as JSON.
 
 ## Quick start
 
-Install and wire in under a minute:
+Install and see it working in under a minute — no API keys, no Ollama:
 
 ```bash
 go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
-graymatter init            # wires MCP config + memory block into CLAUDE.md / AGENTS.md
+graymatter demo            # step 2: a working store with 3 agents, graph on, TUI open
+graymatter init            # wire YOUR project: MCP config + memory block
+graymatter init --hooks    # and Claude Code: memory injected automatically, every turn
 graymatter doctor          # verify everything
 ```
 
-Restart your editor. Five memory tools are live.
+`graymatter demo` seeds a scratch store, runs consolidation, and opens the
+TUI — then `graymatter kg render --out kg-graph.html` shows the graph it
+built. Restart your editor. Five memory tools are live.
 
 <details>
 <summary><strong>Package managers</strong> — Homebrew, Scoop, Nix</summary>
@@ -189,6 +203,9 @@ from other MCP servers are merged, never overwritten.
 
 **Also works out of the box:** Pi (reads `.mcp.json` natively), Zed, Cline,
 and any MCP-compatible client — point them at `graymatter mcp serve`.
+Per-client verified configs for 25 clients, including the ones that need a
+different shape (VS Code's `servers` key, Codex TOML, Zed's
+`context_servers`), live in [docs/integrations.md](docs/integrations.md).
 See [docs/AGENTS.md](docs/AGENTS.md) for tool parameters and query patterns.
 </details>
 
@@ -242,6 +259,26 @@ Consolidate() [async]        ← summarise + decay + prune + extract entities
 
 Consolidation is the only "smart" step. Everything else is deterministic.
 
+### Hooks (Claude Code, opt-in)
+
+`graymatter hooks install` writes the hook block into `.claude/settings.json`
+and after that memory runs itself — the model never has to remember to call a
+tool:
+
+| Hook | What it does |
+|------|--------------|
+| `SessionStart` | Injects the freshest live facts — and re-injects after `/compact` (your memory survives compaction) |
+| `UserPromptSubmit` | Short per-turn recall (top-3), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save |
+| `PreCompact` | Deterministic checkpoint before context compaction |
+| `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
+
+Failure contract: every error exits 0 with empty stdout and a receipt in
+`<dataDir>/hooks.log` — a broken memory degrades silently, it never breaks
+the session. `graymatter hooks doctor` verifies registration, the recorded
+binary path, and store latency; the budgets (user-prompt < 150 ms p99 on a
+10k-fact store, session-end < 500 ms) are machine-checked in
+[`benchmarks/hook_latency`](benchmarks/hook_latency).
+
 ### Context block (opt-in)
 
 `graymatter context-sync` projects the highest-weight live facts into a managed
@@ -260,9 +297,15 @@ Safety properties:
 
 ```bash
 graymatter init                                    # create .graymatter/ + .mcp.json
-graymatter init --kg                               # persist KG activation for future daemons
+graymatter init --kg --hooks                       # persist KG activation + Claude Code hooks
+graymatter demo                                    # seed a demo store and open it in the TUI
 graymatter remember "agent" "text"                 # store a fact
 graymatter recall   "agent" "query"                # print context
+graymatter recall   "agent" "query" --explain      # receipts: ranks, fused score, provenance
+graymatter hooks install                           # Claude Code auto-memory (merge, never overwrite)
+graymatter hooks doctor                            # verify hooks, binary path, latency
+graymatter consolidate "agent"                     # one consolidation cycle
+graymatter kg render --out graph.html              # self-contained force-graph page (or .dot)
 graymatter pin                                      # exempt a fact from decay/pruning (ADR-010)
 graymatter unpin                                    # restore normal decay
 graymatter export --format obsidian --include-graph # dump facts + entities to Obsidian
@@ -270,7 +313,7 @@ graymatter tui                                     # 4-view terminal UI
 graymatter bench                                   # audit published numbers from the binary
 graymatter status                                  # facts, recalls, KG state, injection estimate
 graymatter doctor --audit [path]                   # audit any instruction file
-graymatter doctor --graph                          # knowledge-graph analytics
+graymatter doctor --graph --html                   # KG analytics + visual render
 graymatter doctor --health                         # store health audit (supersede loops, dumping, near-prune criticals, duplicates)
 graymatter context-sync                            # managed context block (opt-in)
 graymatter mcp serve                               # start MCP server

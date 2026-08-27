@@ -14,7 +14,7 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 | `checkpoint_save` | `agent_id` | `state` (JSON-encoded string) |
 | `checkpoint_resume` | `agent_id` | — |
 
-> ⚠️ **`memory_reflect` uses `agent`, not `agent_id`.** The other four use `agent_id`. Don't mix them up — the call will silently fail with a parameter-validation error.
+> **`memory_reflect` uses `agent_id` (canonical since ADR-014).** The other four also use `agent_id`. The deprecated alias `agent` is still accepted for compatibility; `agent_id` wins when both are set.
 
 ## When to call which
 

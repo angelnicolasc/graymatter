@@ -25,6 +25,11 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		return toolError("query is required")
 	}
 	topK := getInt(args, "top_k", 0) // 0 = store default
+	explain := getBool(args, "explain")
+
+	if explain {
+		return s.handleMemorySearchExplain(ctx, agentID, query, topK)
+	}
 
 	facts, err := s.backend.Recall(ctx, agentID, query, topK)
 	if err != nil {
@@ -46,6 +51,43 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, f))
 	}
 	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts}, sb.String())
+}
+
+// handleMemorySearchExplain is the explain=true branch of memory_search: the
+// same ranking as the plain path, with one receipt per fact. The plain path's
+// text contract is untouched; this branch has its own prose shape, and the
+// structured payload rides the same searchResult type under the optional
+// `explained` key so the declared output schema covers both.
+func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query string, topK int) (*mcp.CallToolResult, error) {
+	receipts, err := s.backend.RecallExplain(ctx, agentID, query, topK)
+	if err != nil {
+		return toolError(fmt.Sprintf("recall error: %v", err))
+	}
+
+	if len(receipts) == 0 {
+		notice := fmt.Sprintf("No memories found for agent %q matching %q.", agentID, query)
+		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}}, notice)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d relevant memories for agent %q (with receipts):\n\n", len(receipts), agentID))
+	for i, r := range receipts {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, r.Text))
+		sb.WriteString(fmt.Sprintf("   score %.4f = vector %d / keyword %d / recency %d (k %.0f) · weight %.3f · age %.1fd · written %s\n",
+			r.Ranks.FusedScore, r.Ranks.VectorRank, r.Ranks.KeywordRank, r.Ranks.RecencyRank, r.Ranks.K,
+			r.Weight, r.AgeDays, r.Provenance.WrittenAt.Format("2006-01-02")))
+		sb.WriteString(fmt.Sprintf("   fact_id %s\n", r.Provenance.FactID))
+	}
+	return toolStructured(searchResult{
+		AgentID: agentID,
+		Query:   query,
+		Count:   len(receipts),
+		// Explain mode carries the receipts under `explained`; the bare
+		// facts array stays present-but-empty so the payload always
+		// conforms to the declared output schema (null would not).
+		Facts:     []string{},
+		Explained: receipts,
+	}, sb.String())
 }
 
 func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

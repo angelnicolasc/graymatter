@@ -1,0 +1,280 @@
+// Package kgrender renders the knowledge graph as self-contained artifacts:
+// a single-file HTML page with an inline force-directed SVG (zero external
+// assets — offline-first, like the rest of GrayMatter) and a Graphviz DOT
+// source for people who run their own layout.
+//
+// Nothing here reads the store or the filesystem: pure functions over the
+// kg.Node/kg.Edge slices, so tests can pin behaviour without a store.
+package kgrender
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"html"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
+)
+
+// nodeJSON is the per-node payload embedded into the HTML page. Colour is
+// computed here (Go) rather than in the page script, so the visual mapping is
+// testable and identical across viewers.
+type nodeJSON struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Type  string  `json:"type"`
+	W     float64 `json:"w"`
+	Color string  `json:"color"`
+}
+
+// edgeJSON is the per-edge payload. Sources are the fact IDs the edge was
+// extracted from — the receipts the tooltip shows.
+type edgeJSON struct {
+	From     string   `json:"from"`
+	To       string   `json:"to"`
+	Relation string   `json:"relation"`
+	W        float64  `json:"w"`
+	Sources  []string `json:"sources,omitempty"`
+}
+
+// typeColors fixes the colours of the extractor's known entity types; unknown
+// types hash into the palette.
+var typeColors = map[string]string{
+	"person":    "#7da7d9",
+	"project":   "#9ac37e",
+	"tool":      "#d9a37d",
+	"concept":   "#c37dd9",
+	"location":  "#7dc9d9",
+	"event":     "#d9c37d",
+	"component": "#d97d8f",
+}
+
+// palette is the fallback cycle for entity types without a fixed colour.
+var palette = []string{
+	"#7da7d9", "#9ac37e", "#d9a37d", "#c37dd9", "#7dc9d9",
+	"#d9c37d", "#d97d8f", "#8fd97d", "#7d8fd9", "#d97dc9",
+}
+
+// colorFor maps an entity type to a fill colour: fixed for known types,
+// deterministic hash otherwise (same type always gets the same colour, on
+// every render, on every machine).
+func colorFor(t string) string {
+	if c, ok := typeColors[t]; ok {
+		return c
+	}
+	sum := sha256.Sum256([]byte(t))
+	return palette[int(sum[0])%len(palette)]
+}
+
+// sortedInputs orders nodes and edges deterministically so the same graph
+// produces byte-identical output.
+func sortedInputs(nodes []kg.Node, edges []kg.Edge) ([]nodeJSON, []edgeJSON) {
+	ns := make([]nodeJSON, len(nodes))
+	for i, n := range nodes {
+		ns[i] = nodeJSON{ID: n.ID, Label: n.Label, Type: n.EntityType, W: n.Weight, Color: colorFor(n.EntityType)}
+	}
+	sort.Slice(ns, func(i, j int) bool { return ns[i].ID < ns[j].ID })
+
+	es := make([]edgeJSON, len(edges))
+	for i, e := range edges {
+		src := make([]string, len(e.Sources))
+		copy(src, e.Sources)
+		sort.Strings(src)
+		es[i] = edgeJSON{From: e.From, To: e.To, Relation: e.Relation, W: e.Weight, Sources: src}
+	}
+	sort.Slice(es, func(i, j int) bool {
+		if es[i].From != es[j].From {
+			return es[i].From < es[j].From
+		}
+		if es[i].To != es[j].To {
+			return es[i].To < es[j].To
+		}
+		return es[i].Relation < es[j].Relation
+	})
+	return ns, es
+}
+
+// HTML writes a self-contained force-graph page for nodes/edges. Offline by
+// construction: one <style> block, one inline <script>, no CDN, no fonts, no
+// external images. Node colour by entity type, node size by weight, edge
+// thickness by weight, tooltips carrying the edge's fact-ID receipts.
+func HTML(w io.Writer, nodes []kg.Node, edges []kg.Edge) error {
+	ns, es := sortedInputs(nodes, edges)
+	data, err := json.Marshal(map[string]any{"nodes": ns, "edges": es})
+	if err != nil {
+		return fmt.Errorf("marshal graph: %w", err)
+	}
+	// json.Marshal HTML-escapes < > & to \u003c \u003e \u0026 by default, so a
+	// label containing "</script>" lands as \u003c/script and can never
+	// terminate the script block — the payload is inert by construction.
+
+	var sb strings.Builder
+	sb.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GrayMatter knowledge graph</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f172a;color:#e2e8f0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden}
+  #legend{position:fixed;top:10px;left:12px;font-size:11px;line-height:1.7;
+    background:rgba(15,23,42,.85);border:1px solid #334155;border-radius:6px;padding:8px 10px}
+  #legend .sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
+  #meta{position:fixed;bottom:8px;left:12px;font-size:11px;color:#64748b}
+  svg{display:block}
+  text{fill:#94a3b8;font-size:10px;pointer-events:none}
+  line{stroke:#334155}
+</style>
+</head>
+<body>
+<div id="legend"></div>
+<div id="meta"></div>
+<script>
+const GRAPH = `)
+	sb.Write(data)
+	sb.WriteString(`;
+(function render() {
+  const nodes = GRAPH.nodes, edges = GRAPH.edges;
+  const meta = document.getElementById('meta');
+  meta.textContent = nodes.length + ' entities \u00b7 ' + edges.length + ' edges \u00b7 generated by graymatter kg render';
+
+  // Legend: one entry per distinct entity type, deterministic order.
+  const types = [...new Set(nodes.map(n => n.type))].sort();
+  document.getElementById('legend').innerHTML = types.map(t => {
+    const c = nodes.find(n => n.type === t).color;
+    return '<div><span class="sw" style="background:' + c + '"></span>' + t + '</div>';
+  }).join('');
+
+  const W = Math.max(window.innerWidth, 800), H = Math.max(window.innerHeight, 600);
+  const CX = W / 2, CY = H / 2;
+
+  // Fixed-seed PRNG: the layout is a pure function of the graph.
+  let seed = 42;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+
+  nodes.forEach((n, i) => {
+    const a = 2 * Math.PI * i / Math.max(nodes.length, 1);
+    n.x = CX + 200 * Math.cos(a) + rnd() * 20;
+    n.y = CY + 200 * Math.sin(a) + rnd() * 20;
+  });
+
+  // Force simulation, precomputed before any paint: static SVG, no animation
+  // loop, nothing keeps running after the page settles.
+  const STEPS = 300, K = 0.02;
+  const ids = new Map(nodes.map((n, i) => [n.id, i]));
+  for (let s = 0; s < STEPS; s++) {
+    const t = 1 - s / STEPS; // cool-down
+    // repulsion (O(n^2); graphs here are hundreds of nodes at most)
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        let dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+        let d2 = dx * dx + dy * dy, d = Math.sqrt(d2) || 1;
+        const f = 6000 / d2 * t;
+        dx /= d; dy /= d;
+        nodes[i].x += dx * f; nodes[i].y += dy * f;
+        nodes[j].x -= dx * f; nodes[j].y -= dy * f;
+      }
+    }
+    // springs along edges
+    for (const e of edges) {
+      const a = nodes[ids.get(e.from)], b = nodes[ids.get(e.to)];
+      if (!a || !b) continue;
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f = (d - 110) * K * t;
+      dx /= d; dy /= d;
+      a.x += dx * f; a.y += dy * f;
+      b.x -= dx * f; b.y -= dy * f;
+    }
+    // gravity toward the center
+    for (const n of nodes) {
+      n.x += (CX - n.x) * 0.005 * t;
+      n.y += (CY - n.y) * 0.005 * t;
+    }
+  }
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+
+  const tip = (lines) => {
+    const t = document.createElementNS(NS, 'title');
+    t.textContent = lines.join('\n');
+    return t;
+  };
+
+  for (const e of edges) {
+    const a = nodes[ids.get(e.from)], b = nodes[ids.get(e.to)];
+    if (!a || !b) continue;
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+    line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+    line.setAttribute('stroke-width', (0.6 + e.w * 3).toFixed(2));
+    line.appendChild(tip([
+      a.label + ' \u2014[' + e.relation + ']\u2192 ' + b.label,
+      'weight: ' + e.w.toFixed(3),
+      e.sources && e.sources.length ? 'receipts (fact IDs):' : 'receipts: none recorded',
+      ...(e.sources || [])
+    ]));
+    svg.appendChild(line);
+  }
+
+  for (const n of nodes) {
+    const r = 4 + n.w * 10;
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', n.x); c.setAttribute('cy', n.y); c.setAttribute('r', r.toFixed(2));
+    c.setAttribute('fill', n.color);
+    c.setAttribute('fill-opacity', '0.9');
+    c.appendChild(tip([n.label + ' [' + n.type + ']', 'id: ' + n.id, 'weight: ' + n.w.toFixed(3)]));
+    svg.appendChild(c);
+
+    const label = document.createElementNS(NS, 'text');
+    label.setAttribute('x', n.x + r + 3);
+    label.setAttribute('y', n.y + 3);
+    label.textContent = n.label;
+    svg.appendChild(label);
+  }
+
+  document.body.appendChild(svg);
+})();
+</script>
+</body>
+</html>
+`)
+	_, err = io.WriteString(w, sb.String())
+	return err
+}
+
+// DOT writes a Graphviz source for the graph. Edge pen width scales with
+// weight so a plain `dot -Tsvg` render already communicates strength.
+func DOT(w io.Writer, nodes []kg.Node, edges []kg.Edge) error {
+	ns, es := sortedInputs(nodes, edges)
+
+	if _, err := fmt.Fprintln(w, "digraph graymatter {"); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "  rankdir=LR;")
+	fmt.Fprintln(w, "  node [shape=ellipse, style=filled, fontname=\"sans-serif\"];")
+	fmt.Fprintln(w, "  edge [color=\"#94a3b8\", fontname=\"sans-serif\", fontsize=9];")
+	for _, n := range ns {
+		if _, err := fmt.Fprintf(w, "  %s [label=%q, fillcolor=%q];\n", dotID(n.ID), n.Label, n.Color); err != nil {
+			return err
+		}
+	}
+	for _, e := range es {
+		pen := 1.0 + e.W*3.0
+		if _, err := fmt.Fprintf(w, "  %s -> %s [label=%q, penwidth=%.2f];\n",
+			dotID(e.From), dotID(e.To), e.Relation, pen); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w, "}")
+	return err
+}
+
+// dotID renders a graph-safe dot identifier: kg node IDs look like
+// `person:Maria` and may contain quotes from stored text.
+func dotID(id string) string { return "\"" + html.EscapeString(strings.ReplaceAll(id, "\"", "'")) + "\"" }

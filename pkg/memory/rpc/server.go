@@ -32,6 +32,7 @@ type Backend interface {
 	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
 	RecallShared(ctx context.Context, query string, topK int) ([]string, error)
 	RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
 	List(agentID string) ([]memory.Fact, error)
 	ListAgents() ([]string, error)
 	Stats(agentID string) (memory.MemoryStats, error)
@@ -298,6 +299,18 @@ func (s *Server) RecallAll(req *RecallAllRequest, resp *RecallAllResponse) error
 		return err
 	}
 	resp.Facts = facts
+	return nil
+}
+
+// RecallExplain handles a remote Store.RecallExplain: the Recall ranking with
+// per-fact receipts.
+func (s *Server) RecallExplain(req *RecallExplainRequest, resp *RecallExplainResponse) error {
+	defer s.touch()
+	receipts, err := s.backend.RecallExplain(context.Background(), req.AgentID, req.Query, req.TopK)
+	if err != nil {
+		return err
+	}
+	resp.Receipts = receipts
 	return nil
 }
 

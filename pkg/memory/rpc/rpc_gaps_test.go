@@ -39,6 +39,9 @@ func (failingBackend) RecallShared(context.Context, string, int) ([]string, erro
 func (failingBackend) RecallAll(context.Context, string, string, int) ([]string, error) {
 	return nil, errors.New("backend down")
 }
+func (failingBackend) RecallExplain(context.Context, string, string, int) ([]memory.RecallReceipt, error) {
+	return nil, errors.New("backend down")
+}
 func (failingBackend) List(string) ([]memory.Fact, error) {
 	return nil, errors.New("backend down")
 }
