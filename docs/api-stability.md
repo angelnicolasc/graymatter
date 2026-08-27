@@ -121,6 +121,62 @@ now returns 8 facts. Pass `?k=5` for the old count.
 
 ---
 
+## MCP wire contract (stable within the v0.x series)
+
+The Go package that implements the MCP server, `cmd/graymatter/internal/mcp`,
+is internal and carries no Go-level guarantee (see [Internal / unstable
+packages](#internal--unstable-packages)). The **wire contract it serves** is
+different: any MCP client — in any language, often with no Go dependency at
+all — compiles against the payloads below. Within the v0.x series:
+
+- **Tool names, parameter names, and required parameters** will not be removed or renamed.
+- **`outputSchema` objects are authoritative**: a success result's
+  `structuredContent` conforms to the tool's declared schema, which sets
+  `additionalProperties: false`. New keys arrive only through a schema
+  revision, never silently.
+- **Text content** remains functionally equivalent to `structuredContent` per
+  the MCP compatibility guidance. Exact prose wording is best-effort and may
+  be reworded; clients should read the structured payload.
+- Changes that would break a conforming client follow the same deprecation
+  rule as the Go identifiers above: notice in the prior minor release.
+- Enforcement is mechanical, not aspirational: `tdqs_contract_test.go` (tool
+  set, titles, descriptions, input schemas), `structured_contract_test.go`
+  (payload ↔ `outputSchema` agreement), and `annotations_test.go` (safety
+  hints) fail CI on drift.
+
+The tables below reflect the definitions served by `graymatter mcp serve`,
+verified against a live `tools/list` exchange at the time of writing.
+
+### Tools
+
+| Tool | Required parameters | Optional parameters |
+|---|---|---|
+| `memory_search` | `agent_id`, `query` | `top_k` (default `8`) |
+| `memory_add` | `agent_id`, `text` | — |
+| `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
+| `checkpoint_resume` | `agent_id` | — |
+| `memory_reflect` | `action`, `agent` | `agent_id` (documented alias of `agent`; `agent` wins when both are set), `text`, `target` |
+
+`memory_reflect.action` is an enum: `add`, `update`, `forget`, `link`, `pin`,
+`unpin`.
+
+### `structuredContent` payloads
+
+| Tool | Success payload | Notes |
+|---|---|---|
+| `memory_search` | `{"agent_id", "query", "count", "facts"}` | `facts` is nullable in the schema; the empty result is `count: 0, facts: []` with a "No memories found" text notice |
+| `memory_add` | `{"agent_id", "stored"}` | `stored` is `true` on success |
+| `checkpoint_save` | `{"agent_id", "checkpoint_id", "created_at"}` | `created_at` is RFC3339 |
+| `checkpoint_resume` | `{"id", "created_at", "state"?, "message_count"?}` | `state` is the persisted JSON object; keys marked `?` may be absent when empty |
+| `memory_reflect` | `{"action", "agent", "ok"}` | `ok` is `true` on success |
+
+One error carries a typed payload: `checkpoint_resume` with no checkpoint
+returns `isError: true` with `{"error": "not_found", "agent_id"}`. All other
+errors (validation, storage, unavailable features) are prose-only `isError`
+results and carry no machine-readable contract — their wording may change.
+
+---
+
 ## Provisional (may change before v0.2.0)
 
 | Identifier | Reason |
@@ -140,7 +196,7 @@ The following packages are implementation details and provide no stability guara
 - `cmd/graymatter/internal/kg` — knowledge graph and entity extraction
 - `cmd/graymatter/internal/session` — session checkpointing
 - `cmd/graymatter/internal/harness` — agent runner
-- `cmd/graymatter/internal/mcp` — MCP server handlers
+- `cmd/graymatter/internal/mcp` — MCP server handlers. The Go package is internal and may change freely; the **wire contract it serves** is stable — see [MCP wire contract](#mcp-wire-contract-stable-within-the-v0x-series)
 - `cmd/graymatter/internal/server` — REST API server
 - `cmd/graymatter/internal/plugin` — plugin protocol
 - `cmd/graymatter/internal/export` — Obsidian / markdown export

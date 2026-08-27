@@ -50,8 +50,11 @@ error strings into a public schema for no consumer benefit.
   declared schema (key subset, required presence, primitive/union type match)
   and the typed not-found payload — schema drift or payload drift is a CI
   failure.
-- JSON tags in `types.go` are the wire contract: renaming one breaks clients
-  that learned the schema, so renames are major-version territory.
+- The wire contract this decision introduces — tool names, parameter names,
+  schemas, and `structuredContent` keys — is covered by the compatibility
+  promise in [api-stability.md](../api-stability.md#mcp-wire-contract-stable-within-the-v0x-series).
+  The JSON tags in `types.go` are the wire contract: renaming one is
+  major-version territory.
 - `checkpoint_resume`'s state maps through as a JSON object; `omitempty`
   fields may be absent, and the schema declares them non-required — clients
   must tolerate absent keys (standard JSON Schema semantics).
