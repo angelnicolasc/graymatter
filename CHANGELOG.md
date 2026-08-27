@@ -6,7 +6,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [Unreleased]
+## [0.16.0] - 2026-08-27
 
 - **`Recall` deduplicates identical stored text** — the documented contract ("deduplicated by text") is now enforced: storing the same sentence across sessions yields it exactly once per result set. Found by the agent-lifecycle simulation, where repeated session templates stored identical facts.
 - **Tombstones survive concurrent consolidation writebacks** ([#78](https://github.com/angelnicolasc/graymatter/issues/78)). A consolidation cycle's decay pass wrote back its batch snapshot, silently overwriting a tombstone that landed mid-cycle — superseded facts resurrected with `SupersededBy=""`. `UpdateFact` and `touchFacts` now enforce update-never-resurrect: when the stored fact is tombstoned and the incoming snapshot is not, the tombstone wins. Found by the new agent-lifecycle simulation; fixed the same day, with the deterministic reproduction (`update_never_resurrect_test.go`) and the full 100-session re-run reporting 0 superseded facts returned.

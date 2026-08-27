@@ -172,7 +172,12 @@ jobs:
         run: |
           set -euo pipefail
           MOD="github.com/angelnicolasc/graymatter/cmd/graymatter@${TAG}"
-          GOFLAGS= GOPROXY=direct GOWORK=off go install "${MOD}"
+          # GONOSUMDB scoped to this module: the checksum database lags a
+          # freshly pushed tag by minutes, and the gate is deterministic —
+          # tag integrity is already guaranteed by GitHub serving this
+          # workflow from the tag itself, while every real user's first
+          # `go install` still verifies against the sumdb as usual.
+          GOFLAGS= GOPROXY=direct GOWORK=off GONOSUMDB=github.com/angelnicolasc/* go install "${MOD}"
           INSTALLED="$(go env GOPATH)/bin/graymatter"
           # --help is the only guaranteed side-effect-free invocation: it
           # exercises cobra's command graph end to end without touching disk.
