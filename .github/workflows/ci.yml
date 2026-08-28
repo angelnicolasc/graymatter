@@ -35,6 +35,7 @@ jobs:
       # moment this push is accepted — the require bump travels on the same
       # push as its tag by release rule.
       GOPROXY: direct
+      GONOSUMDB: github.com/angelnicolasc/*
 
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
@@ -305,6 +306,7 @@ jobs:
       # module graph names the tag being released, which the proxy has not
       # crawled yet — direct-from-GitHub has no crawl lag.
       GOPROXY: direct
+      GONOSUMDB: github.com/angelnicolasc/*
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -332,6 +334,7 @@ jobs:
       # Same reason as the test job: the release commit's module graph names
       # the tag being released; direct fetch has no crawl lag.
       GOPROXY: direct
+      GONOSUMDB: github.com/angelnicolasc/*
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
