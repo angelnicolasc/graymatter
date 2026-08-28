@@ -203,11 +203,71 @@ func TestRecallExplain_Provenance(t *testing.T) {
 	}
 }
 
-// TestRecallExplain_OverheadUnderBudget is the published acceptance criterion
-// ("cost of --explain over normal recall: < 5 ms"): the receipts must be a
-// read-out of the ranking's own state, never a second scoring pass. Measured
-// as the delta of per-method minima across interleaved runs — the minimum is
-// stable against scheduler noise where a mean is not.
+// TestRecallExplain_NoSecondScoringPass is the structural half of the published
+// acceptance criterion ("the ranking is identical to explain: false — explain
+// only reads it out", docs/api-stability.md). It counts scoring passes instead
+// of timing them: runRecallPipeline fires the debugRanking seam exactly once
+// per pass, so an explain that re-ran the ranking — the regression the 5 ms
+// budget exists to catch — surfaces as a second call no matter how loaded the
+// machine is. Wall clock cannot prove this on shared CI hardware; a counter
+// can, and this test is the one that must never be relaxed.
+func TestRecallExplain_NoSecondScoringPass(t *testing.T) {
+	s, clock, closeStore := newExplainStore(t)
+	defer closeStore()
+	seedExplainCorpus(t, s, clock)
+
+	ctx := context.Background()
+	passes := func(call func() error) int {
+		n := 0
+		s.debugRanking = func(string, []scored) { n++ }
+		defer func() { s.debugRanking = nil }()
+		if err := call(); err != nil {
+			t.Fatalf("call: %v", err)
+		}
+		s.wg.Wait() // access-metadata batch, so the seam is quiet before we unset it
+		return n
+	}
+
+	recallPasses := passes(func() error {
+		_, err := s.Recall(ctx, "explain-agent", explainQuery, 5)
+		return err
+	})
+	explainPasses := passes(func() error {
+		_, err := s.RecallExplain(ctx, "explain-agent", explainQuery, 5)
+		return err
+	})
+
+	if recallPasses != 1 {
+		t.Fatalf("Recall ran %d scoring passes, want 1 — the seam moved, fix the test before trusting the next line", recallPasses)
+	}
+	if explainPasses != recallPasses {
+		t.Errorf("RecallExplain ran %d scoring passes, want %d: explain is recomputing the ranking, not reading it out", explainPasses, recallPasses)
+	}
+}
+
+// TestRecallExplain_OverheadUnderBudget defends the published number itself
+// ("cost of --explain over normal recall: < 5 ms"). The guarantee behind it is
+// structural and lives in TestRecallExplain_NoSecondScoringPass; this test is
+// the wall-clock corroboration, and it has to survive shared CI hardware.
+//
+// 5 ms on top of a ~200 ms recall means resolving 2.5% of wall clock under
+// -race on a borrowed macOS runner, which no naive timing does. Three things
+// make the measurement sound:
+//
+//   - Runs are interleaved and paired on one query, so every delta compares
+//     identical work under identical machine conditions. The earlier shape
+//     timed all seven recalls, then all seven explains, and charged every
+//     drift between the two blocks — thermal, GC, a neighbouring job starting
+//     — to explain, which always ran second. Its minima also came from
+//     different queries, so the two halves were not even the same workload.
+//   - The statistic is the minimum per-pair delta: the pair the scheduler
+//     touched least.
+//   - A recall-versus-recall control runs the identical apparatus over two
+//     calls known to cost the same. Whatever it reports above zero is the
+//     penalty this machine charges for running second, so the budget carries
+//     it. On a quiet machine the control is ~0 and the published 5 ms bites
+//     exactly as written; a second scoring pass costs about +100% and breaches
+//     any of these bounds by two orders of magnitude.
 func TestRecallExplain_OverheadUnderBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times full recalls over a seeded store; skipped in -short")
@@ -232,40 +292,61 @@ func TestRecallExplain_OverheadUnderBudget(t *testing.T) {
 		}
 	}
 
-	const runs = 7
-	minOf := func(fns []func() error) time.Duration {
-		best := time.Hour
-		for _, fn := range fns {
-			start := time.Now()
-			if err := fn(); err != nil {
-				t.Fatal(err)
+	recall := func(q string) error {
+		_, err := s.Recall(ctx, "explain-bench", q, 8)
+		return err
+	}
+	explain := func(q string) error {
+		_, err := s.RecallExplain(ctx, "explain-bench", q, 8)
+		return err
+	}
+	measure := func(fn func(string) error, q string) time.Duration {
+		start := time.Now()
+		if err := fn(q); err != nil {
+			t.Fatal(err)
+		}
+		return time.Since(start)
+	}
+
+	// Warm up both paths. The first passes over a fresh bbolt file pay for
+	// page-cache misses and lazily grown buffers that no later run repeats,
+	// and whichever method absorbs them wins the comparison for free.
+	for i := 0; i < 2; i++ {
+		measure(recall, "warmup deployment runbook procedures")
+		measure(explain, "warmup deployment runbook procedures")
+	}
+
+	// minPairDelta times b immediately after a on the same query, and returns
+	// the smallest b-a across runs together with a's own best time.
+	const runs = 9
+	minPairDelta := func(a, b func(string) error) (delta, baseline time.Duration) {
+		delta, baseline = time.Hour, time.Hour
+		for i := 0; i < runs; i++ {
+			q := "deployment runbook procedures " + fmt.Sprint(i)
+			da := measure(a, q)
+			db := measure(b, q)
+			if d := db - da; d < delta {
+				delta = d
 			}
-			if d := time.Since(start); d < best {
-				best = d
+			if da < baseline {
+				baseline = da
 			}
 		}
-		return best
+		return delta, baseline
 	}
 
-	var recalls, explains []func() error
-	for i := 0; i < runs; i++ {
-		q := "deployment runbook procedures " + fmt.Sprint(i)
-		recalls = append(recalls, func() error {
-			_, err := s.Recall(ctx, "explain-bench", q, 8)
-			return err
-		})
-		explains = append(explains, func() error {
-			_, err := s.RecallExplain(ctx, "explain-bench", q, 8)
-			return err
-		})
+	overhead, recallMin := minPairDelta(recall, explain)
+	control, _ := minPairDelta(recall, recall)
+	if control < 0 {
+		control = 0 // running second was not penalised here; claim no allowance
 	}
 
-	recallMin := minOf(recalls)
-	explainMin := minOf(explains)
-	overhead := explainMin - recallMin
-	t.Logf("recall min %v · explain min %v · overhead %v", recallMin, explainMin, overhead)
-	if overhead > 5*time.Millisecond {
-		t.Errorf("explain overhead %v exceeds the published 5 ms budget", overhead)
+	budget := 5*time.Millisecond + control
+	t.Logf("recall min %v · explain overhead %v · second-call control %v · budget %v",
+		recallMin, overhead, control, budget)
+	if overhead > budget {
+		t.Errorf("explain overhead %v exceeds the published 5 ms budget plus this machine's %v second-call penalty; see TestRecallExplain_NoSecondScoringPass for whether the ranking is actually being recomputed",
+			overhead, control)
 	}
 }
 
