@@ -34,7 +34,7 @@ func TestTUI_DeleteAllowedInWriteMode(t *testing.T) {
 		readOnly: false,
 		memPane:  memPaneFacts,
 		// factList and agentList are zero-value: SelectedItem() returns nil,
-		// so the inner delete block is skipped â€” but no status is set either.
+		// so the inner delete block is skipped — but no status is set either.
 	}
 
 	_ = m.updateMemoryKey(keyMsg('d'))

@@ -96,17 +96,17 @@ removal of a gap in it.
 
 ---
 
-## Amendment (2026-08-26) — the third slot dials Voyage AI
+## Amendment (2026-08-26) â€” the third slot dials Voyage AI
 
 Anthropic has never offered an embeddings endpoint. Slot 3 as originally
-written dialled pi.anthropic.com/v1/embeddings, so with only
-ANTHROPIC_API_KEY set every embedding call failed and Put silently
-degraded each fact to keyword-only — the chain's middle link was decorative.
+written dialled `api.anthropic.com/v1/embeddings`, so with only
+`ANTHROPIC_API_KEY` set every embedding call failed and `Put` silently
+degraded each fact to keyword-only â€” the chain's middle link was decorative.
 
-Slot 3 now targets Voyage AI (pi.voyageai.com/v1/embeddings,
-oyage-3, 1024 dims — unchanged, so existing stores stay valid) and keys
-off VOYAGE_API_KEY. The ordering is unchanged; only the third slot's
-credential and endpoint are corrected. EmbeddingAnthropic /
-ModeAnthropic remain accepted as deprecated aliases resolving to the same
+Slot 3 now targets Voyage AI (`api.voyageai.com/v1/embeddings`,
+`voyage-3`, 1024 dims â€” unchanged, so existing stores stay valid) and keys
+off `VOYAGE_API_KEY`. The ordering is unchanged; only the third slot's
+credential and endpoint are corrected. `EmbeddingAnthropic` /
+`ModeAnthropic` remain accepted as deprecated aliases resolving to the same
 slot, and without a Voyage key they resolve to keyword directly rather than
 constructing a provider guaranteed to fail on every call.

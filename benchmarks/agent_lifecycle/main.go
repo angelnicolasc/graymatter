@@ -1,6 +1,6 @@
-﻿// agent_lifecycle simulates one hundred real working sessions of a coding
+// agent_lifecycle simulates one hundred real working sessions of a coding
 // agent through the exact interface a host uses: the compiled graymatter
-// binary over MCP stdio, one fresh process per session â€” the process death
+// binary over MCP stdio, one fresh process per session — the process death
 // between sessions is the durability claim under test, not a simulation of
 // one.
 //
@@ -66,8 +66,8 @@ var paraphrase = struct {
 
 // Distractor families: several facts per family share vocabulary, forcing the
 // ranking to discriminate within a topic instead of matching a lone keyword.
-// Facts are written at the density a working agent actually produces â€” a
-// sentence or three with concrete nouns â€” because a thin corpus under-tests
+// Facts are written at the density a working agent actually produces — a
+// sentence or three with concrete nouns — because a thin corpus under-tests
 // the token-reduction claim (the fixed-K recall floor dominates when the
 // stored history is tiny).
 var distractorFamilies = [][]string{
@@ -525,7 +525,7 @@ func checkDead(text string, m *metrics) {
 	}
 	if strings.Contains(text, supersededV1) {
 		m.deadReturned++
-		fmt.Printf("DIAGNOSTIC â€” superseded fact returned as a result:\n%s\n", text)
+		fmt.Printf("DIAGNOSTIC — superseded fact returned as a result:\n%s\n", text)
 	}
 }
 
@@ -564,8 +564,8 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	var b strings.Builder
 	w := func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }
 
-	w("# Agent lifecycle simulation â€” 100 real sessions\n\n")
-	w("Protocol: one fresh `graymatter mcp serve` process per session (JSON-RPC over stdio); the process dies at every session end â€” durability across restarts is under test, not simulated. Corpus is realistic and adversarial: distractor families sharing vocabulary, a supersede pair, paraphrase probe, shared namespace. Deterministic seed.\n\n")
+	w("# Agent lifecycle simulation — 100 real sessions\n\n")
+	w("Protocol: one fresh `graymatter mcp serve` process per session (JSON-RPC over stdio); the process dies at every session end — durability across restarts is under test, not simulated. Corpus is realistic and adversarial: distractor families sharing vocabulary, a supersede pair, paraphrase probe, shared namespace. Deterministic seed.\n\n")
 	w("| Metric | Claim under test | Measured | Verdict |\n|---|---|---|\n")
 
 	hitRate := 100 * float64(m.probeHits) / float64(max(1, m.probeTotal))
@@ -573,7 +573,7 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	if hitRate < 70 {
 		verdict = "FAIL"
 	}
-	w("| Probe recall after ~96 sessions + %d process deaths | 83%% (band â‰¥70%%) | %.0f%% (%d/%d) | %s |\n",
+	w("| Probe recall after ~96 sessions + %d process deaths | 83%% (band ≥70%%) | %.0f%% (%d/%d) | %s |\n",
 		sessions-4, hitRate, m.probeHits, m.probeTotal, verdict)
 
 	deadVerdict := "PASS"
@@ -586,7 +586,7 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	if reduction < 0.85 {
 		redVerdict = "FAIL"
 	}
-	w("| Token reduction vs full-history | ~90%% (band â‰¥85%%) | %.0f%% | %s |\n", reduction*100, redVerdict)
+	w("| Token reduction vs full-history | ~90%% (band ≥85%%) | %.0f%% | %s |\n", reduction*100, redVerdict)
 
 	resumeVerdict := "PASS"
 	if m.resumeOK != m.resumeTried {
