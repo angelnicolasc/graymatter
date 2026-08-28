@@ -182,13 +182,13 @@ scoop install graymatter
 
 ```bash
 # Linux (x86_64)
-curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/v0.17.0/graymatter_0.17.0_linux_amd64.tar.gz | tar -xz && sudo mv graymatter /usr/local/bin/
+curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/v0.18.0/graymatter_0.18.0_linux_amd64.tar.gz | tar -xz && sudo mv graymatter /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/v0.17.0/graymatter_0.17.0_darwin_arm64.tar.gz | tar -xz && sudo mv graymatter /usr/local/bin/
+curl -sSL https://github.com/angelnicolasc/graymatter/releases/download/v0.18.0/graymatter_0.18.0_darwin_arm64.tar.gz | tar -xz && sudo mv graymatter /usr/local/bin/
 
 # Windows (PowerShell)
-iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.17.0/graymatter_0.17.0_windows_amd64.zip -OutFile graymatter.zip
+iwr https://github.com/angelnicolasc/graymatter/releases/download/v0.18.0/graymatter_0.18.0_windows_amd64.zip -OutFile graymatter.zip
 Expand-Archive graymatter.zip -DestinationPath .
 ```
 </details>
@@ -533,4 +533,4 @@ It is exactly one thing: **the missing stateful layer for Go agents**, packaged 
 
 ---
 
-*GrayMatter — v0.17.0 — August 2026*
+*GrayMatter — v0.18.0 — August 2026*

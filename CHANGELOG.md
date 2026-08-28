@@ -6,11 +6,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [Unreleased]
+## [0.18.0] - 2026-08-28
+
+### Added
+
+- **`remember shared: <text>` — the instant-save prefix reaches the project-wide namespace.** `remember:` has always written to the cwd agent, so nothing typed in a prompt could reach `__shared__`: Claude Code could read project conventions but never create one, and the only way to file one was an MCP client that chose the namespace explicitly. The new prefix is checked before `remember:` (which it cannot collide with — `remember ` carries a space where `remember:` carries a colon), matches case-insensitively like its sibling, and answers `Saved to shared memory: <text>`. `remember:` is unchanged.
 
 ### Fixed
 
-- **The hooks never injected `__shared__` — the documented path for project-wide conventions led to a silent hole.** `AGENTS.md` tells every agent that project conventions belong in the reserved `__shared__` namespace, and both automatic hooks ignored it: `SessionStart` and the `UserPromptSubmit` recall called `Recall` with the cwd agent only, so a convention archived there was invisible to Claude Code at session open and on every turn — with zero errors, zero warnings, empty stdout, the exact failure mode that reads as "memory is broken". Both runners now recall the shared namespace under its own budget (session-start top-5 agent + top-3 shared, per-turn top-3 + top-3) and render it as a labeled `## Shared memory (project-wide)` section — separate budgets, because a merged ranking on session-start (where recency is the only ranked signal) would let old conventions displace the agent's freshest facts. The failure contract holds per namespace: one recall failing never costs the other's facts, the degraded injection still goes out, and the error lands in `hooks.log`. The instant-save path gains `remember shared: <text>`, closing the write-side asymmetry — until now nothing typed in a prompt could reach `__shared__`. The identical-block throttle keeps working on merged blocks, and `graymatter status`'s INJECTION line now estimates the block the hooks actually inject instead of a generic top-8.
+- **The hooks never injected `__shared__` — the documented path for project-wide conventions led to a silent hole.** `AGENTS.md` tells every agent that project conventions belong in the reserved `__shared__` namespace, and both automatic hooks ignored it: `SessionStart` and the `UserPromptSubmit` recall called `Recall` with the cwd agent only, so a convention archived there was invisible to Claude Code at session open and on every turn — with zero errors, zero warnings, empty stdout, the exact failure mode that reads as "memory is broken". Both runners now recall the shared namespace under its own budget (session-start top-5 agent + top-3 shared, per-turn top-3 + top-3) and render it as a labeled `## Shared memory (project-wide)` section — separate budgets, because a merged ranking on session-start (where recency is the only ranked signal) would let old conventions displace the agent's freshest facts. The failure contract holds per namespace: one recall failing never costs the other's facts, the degraded injection still goes out, and the error lands in `hooks.log`. The identical-block throttle keeps working on merged blocks, and `graymatter status`'s INJECTION line now estimates the block the hooks actually inject instead of a generic top-8.
 
 ---
 
