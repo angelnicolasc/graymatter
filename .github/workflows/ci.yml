@@ -26,18 +26,15 @@ jobs:
         go: ["1.25", "1.26.7"]
 
     env:
-      # No job in this workflow resolves the GrayMatter library from the
-      # module proxy: workspace builds load the module graph, the graph names
-      # the library version cmd/graymatter/go.mod requires, and between a
-      # version bump on main and the release tag that version does not exist
-      # on the proxy yet — every build fails with "unknown revision" until
-      # release choreography catches up (the 0.16.x cycle needed three
-      # re-tags; the v0.17.0 prep broke `go build ./...` outright). The
-      # checkout IS the library that ships with this tree, so every step
-      # below resolves it from source. The proxy resolution property is
-      # enforced once, where it is real: the release workflow's install-smoke
-      # runs `go install cmd/graymatter@<tag>` against the published tag.
-      GOWORK: "off"
+      # The test job builds BOTH workspace modules and gates mixed-module
+      # coverage profiles, so it runs in workspace mode. The module graph
+      # names the library version cmd/graymatter/go.mod requires — on the
+      # release commit that is the version being tagged, which the proxy has
+      # not crawled yet (0s-old tags 404; verified on v0.16.0/v0.16.1).
+      # GOPROXY=direct fetches straight from GitHub, where the tag exists the
+      # moment this push is accepted — the require bump travels on the same
+      # push as its tag by release rule.
+      GOPROXY: direct
 
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
@@ -50,14 +47,6 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
-
-      # With the workspace off, cmd/graymatter's go.mod requires the library
-      # at the version recorded in go.sum; a source replace redirects it to
-      # this checkout so the CLI tests exercise the same library source the
-      # workspace builds use. Ephemeral runner: never reverted.
-      - name: Source-replace the library into the CLI module
-        working-directory: cmd/graymatter
-        run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
 
       - name: Download dependencies
         run: go mod download
@@ -247,33 +236,35 @@ jobs:
           go-version: "1.26.7"
           cache: true
 
-      # go.work makes every build here resolve the library from the checkout
-      # next door, which hid the fact that cmd/graymatter/go.mod required it at
-      # v0.5.0 — a version predating pkg/memory/rpc and internal/tokens, both
-      # of which the CLI imports. The module did not build on its own, and
-      # nothing noticed because nothing ever built it on its own.
-      #
-      # Standalone therefore means: no workspace AND no proxy guesswork. The
-      # library is source-replaced to this checkout, so the build exercises
-      # exactly the tree that ships together at tag time. Building against the
-      # proxy-pinned version instead failed on every push that moved the
-      # library surface ahead of the last tag — the 0.16.x cycle needed three
-      # re-tags to get this job green, and every feature drop since needed
-      # version bumps before CI. The pinned-proxy property is enforced where
-      # it is real: the release workflow's install-smoke runs
-      # `go install cmd/graymatter@<tag>` against the actual published tag
-      # after it lands.
+      # This job is the standalone-build check, so it runs GOWORK=off for
+      # every step: the CLI module with the library source-replaced to this
+      # checkout — the exact tree that ships together at tag time. Building
+      # against the proxy-pinned version instead failed on every push that
+      # moved the library surface ahead of the last tag (the 0.16.x cycle
+      # needed three re-tags; the v0.17.0 prep broke outright). The replace
+      # is applied ONCE after setup-go and never reverted: the later steps
+      # (version-injected build, MCP handshake) build the same standalone
+      # tree, and reverting mid-job re-enabled a workspace graph fetch of a
+      # library version that does not exist on the proxy yet
+      # (run 33130062871). The pinned-proxy property is enforced where it is
+      # real: the release workflow's install-smoke runs
+      # `go install cmd/graymatter@<tag>` against the actual published tag.
+      - name: Source-replace the library into the CLI module
+        working-directory: cmd/graymatter
+        env:
+          GOWORK: "off"
+        run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+
       - name: The CLI module must build without the workspace
         working-directory: cmd/graymatter
         env:
           GOWORK: "off"
-        run: |
-          go mod edit -replace github.com/angelnicolasc/graymatter=../..
-          go build -o /dev/null ./...
-          git checkout -- go.mod
+        run: go build -o /dev/null ./...
 
       - name: Build with an injected version
         working-directory: cmd/graymatter
+        env:
+          GOWORK: "off"
         run: go build -ldflags="-X main.version=9.9.9-ci" -o "${RUNNER_TEMP}/graymatter" .
 
       - name: The CLI and the MCP handshake must report the same version
@@ -309,6 +300,11 @@ jobs:
   vulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    env:
+      # Workspace mode (both modules scanned); on the release commit the
+      # module graph names the tag being released, which the proxy has not
+      # crawled yet — direct-from-GitHub has no crawl lag.
+      GOPROXY: direct
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -332,6 +328,10 @@ jobs:
     name: Benchmarks (non-blocking)
     runs-on: ubuntu-latest
     needs: test
+    env:
+      # Same reason as the test job: the release commit's module graph names
+      # the tag being released; direct fetch has no crawl lag.
+      GOPROXY: direct
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
