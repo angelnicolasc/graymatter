@@ -78,16 +78,24 @@ connections become wikilinks, and the whole graph renders natively.
 </p>
 
 ```bash
-graymatter daemon run --kg          # that's it
-graymatter kg render --out graph.html   # the graph as a self-contained page:
-                                        # force-directed SVG, zero external assets,
-                                        # offline — hover an edge to see its fact-ID receipts
-graymatter kg render --out graph.dot    # or Graphviz source for your own layout
-graymatter doctor --graph --html        # analytics + the same render in one command
+graymatter daemon run --kg    # that's it — the graph builds itself
+```
 
-# watch the graph build itself, one frame per session:
-scripts/kg-timelapse.sh               # deterministic corpus → frames → GIF (see the script header;
-                                      # runs anywhere with Docker via scripts/Dockerfile.kg-timelapse)
+The graph as one self-contained page — inline force-directed SVG, zero
+external assets, works offline. Hover any edge to see the fact IDs that
+produced it:
+
+```bash
+graymatter kg render --out graph.html
+graymatter kg render --out graph.dot    # Graphviz, for your own layout
+graymatter doctor --graph --html        # analytics + this render in one go
+```
+
+Watch it build, one frame per session:
+
+```bash
+scripts/kg-timelapse.sh    # deterministic corpus -> frames -> GIF
+                           # or anywhere: scripts/Dockerfile.kg-timelapse
 ```
 
 ---
@@ -146,10 +154,10 @@ Install and see it working in under a minute — no API keys, no Ollama:
 
 ```bash
 go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest
-graymatter demo            # step 2: a working store with 3 agents, graph on, TUI open
-graymatter init            # wire YOUR project: MCP config + memory block
-graymatter init --hooks    # and Claude Code: memory injected automatically, every turn
-graymatter doctor          # verify everything
+graymatter demo              # a working store with 3 agents, then the TUI opens
+graymatter init              # wire YOUR project: MCP config + memory block
+graymatter init --hooks      # Claude Code: memory injected every turn
+graymatter doctor            # verify everything
 ```
 
 `graymatter demo` seeds a scratch store, runs consolidation, and opens the
@@ -300,28 +308,41 @@ Safety properties:
 ## CLI
 
 ```bash
-graymatter init                                    # create .graymatter/ + .mcp.json
-graymatter init --kg --hooks                       # persist KG activation + Claude Code hooks
-graymatter demo                                    # seed a demo store and open it in the TUI
-graymatter remember "agent" "text"                 # store a fact
-graymatter recall   "agent" "query"                # print context
-graymatter recall   "agent" "query" --explain      # receipts: ranks, fused score, provenance
-graymatter hooks install                           # Claude Code auto-memory (merge, never overwrite)
-graymatter hooks doctor                            # verify hooks, binary path, latency
-graymatter consolidate "agent"                     # one consolidation cycle
-graymatter kg render --out graph.html              # self-contained force-graph page (or .dot)
-graymatter pin                                      # exempt a fact from decay/pruning (ADR-010)
-graymatter unpin                                    # restore normal decay
-graymatter export --format obsidian --include-graph # dump facts + entities to Obsidian
-graymatter tui                                     # 4-view terminal UI
-graymatter bench                                   # audit published numbers from the binary
-graymatter status                                  # facts, recalls, KG state, injection estimate
-graymatter doctor --audit [path]                   # audit any instruction file
-graymatter doctor --graph --html                   # KG analytics + visual render
-graymatter doctor --health                         # store health audit (supersede loops, dumping, near-prune criticals, duplicates)
-graymatter context-sync                            # managed context block (opt-in)
-graymatter mcp serve                               # start MCP server
-graymatter server                                  # REST API server (127.0.0.1:8080)
+# setup
+graymatter init                  # .graymatter/ + MCP wiring
+graymatter init --kg --hooks     # + KG auto-population + Claude Code hooks
+graymatter demo                  # scratch store + TUI in one command
+
+# memory
+graymatter remember "agent" "text"     # store a fact
+graymatter recall "agent" "query"      # print context
+graymatter recall "a" "q" --explain    # why each fact ranked (receipts)
+
+# hooks + consolidation
+graymatter hooks install         # Claude Code auto-memory (merge, never
+                                 # overwrite)
+graymatter hooks doctor          # verify hooks, binary path, latency
+graymatter consolidate "agent"   # one consolidation cycle
+
+# knowledge graph
+graymatter kg render --out g.html    # self-contained page (or .dot)
+
+# lifecycle + inspection
+graymatter pin "agent" "fact"        # exempt from decay/pruning (ADR-010)
+graymatter unpin "agent" "fact"      # restore normal decay
+graymatter tui                       # 4-view terminal UI
+graymatter status                    # facts, recalls, KG state
+graymatter doctor                    # full setup check
+graymatter doctor --graph --html     # KG analytics + visual render
+graymatter doctor --health           # store health audit
+graymatter doctor --audit [path]     # audit any instruction file
+
+# export / serve / measure
+graymatter export --format obsidian --include-graph
+graymatter mcp serve                 # MCP over stdio
+graymatter server                    # REST API server (127.0.0.1:8080)
+graymatter bench                     # audit published numbers (--hooks, --store)
+graymatter context-sync              # managed context block (opt-in)
 ```
 
 ---
