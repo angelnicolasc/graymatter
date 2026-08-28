@@ -25,6 +25,20 @@ jobs:
         # fixed at 1.26.6 or earlier.
         go: ["1.25", "1.26.7"]
 
+    env:
+      # No job in this workflow resolves the GrayMatter library from the
+      # module proxy: workspace builds load the module graph, the graph names
+      # the library version cmd/graymatter/go.mod requires, and between a
+      # version bump on main and the release tag that version does not exist
+      # on the proxy yet — every build fails with "unknown revision" until
+      # release choreography catches up (the 0.16.x cycle needed three
+      # re-tags; the v0.17.0 prep broke `go build ./...` outright). The
+      # checkout IS the library that ships with this tree, so every step
+      # below resolves it from source. The proxy resolution property is
+      # enforced once, where it is real: the release workflow's install-smoke
+      # runs `go install cmd/graymatter@<tag>` against the published tag.
+      GOWORK: "off"
+
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
       # commit its owner last moved it to; the version comment is for humans,
@@ -36,6 +50,14 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+
+      # With the workspace off, cmd/graymatter's go.mod requires the library
+      # at the version recorded in go.sum; a source replace redirects it to
+      # this checkout so the CLI tests exercise the same library source the
+      # workspace builds use. Ephemeral runner: never reverted.
+      - name: Source-replace the library into the CLI module
+        working-directory: cmd/graymatter
+        run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
 
       - name: Download dependencies
         run: go mod download
@@ -328,9 +350,19 @@ jobs:
       # benchmark step above). A breach here is a signal to look at, not a
       # merge blocker: the deterministic hot-path gates run blocking in the
       # test job, and absolute/delta timings on a shared runner carry the
-      # runner's own noise floor with them.
+      # runner's own noise floor with them. The measurement builds the CLI
+      # from source, so it gets the same no-proxy source replace as the test
+      # job — with the workspace on, the module graph would fetch the library
+      # version cmd/graymatter/go.mod requires, which may not exist on the
+      # proxy yet.
+      - name: Source-replace the library into the CLI module
+        working-directory: cmd/graymatter
+        run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+
       - name: Run hooks hot-path measurement
         shell: bash
+        env:
+          GOWORK: "off"
         run: go test -count=1 -timeout=900s -v ./benchmarks/hook_latency/
         continue-on-error: true
 
