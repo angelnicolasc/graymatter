@@ -54,6 +54,12 @@ const (
 	// hooksRememberPrefix turns a prompt into a deterministic instant-save,
 	// no model in the loop.
 	hooksRememberPrefix = "remember:"
+
+	// hooksRememberSharedPrefix is the same instant-save aimed at the
+	// __shared__ namespace every agent reads: "remember shared: <text>".
+	// Checked before hooksRememberPrefix, which it does not collide with
+	// ("remember " carries a space where "remember:" carries a colon).
+	hooksRememberSharedPrefix = "remember shared:"
 )
 
 // timeNow is the process clock, a seam so latency paths are testable.
@@ -65,6 +71,21 @@ const (
 	hookUserPromptBudget = 150 * time.Millisecond
 	hookSessionEndBudget = 500 * time.Millisecond
 	hookPreCompactBudget = 200 * time.Millisecond
+)
+
+// Injection budgets per event and namespace. The two namespaces get separate
+// budgets, not one merged top-k: project conventions are old by nature, and
+// on session-start — where an empty query leaves recency as the only ranked
+// signal — a merged ranking would let them displace the agent's freshest
+// facts. Shared gets its own ceiling instead, so it can never cannibalize the
+// agent's history. Session-start totals top-8, the injection size
+// `graymatter status` quotes an estimate for.
+const (
+	hookSessionStartAgentTopK  = 5
+	hookSessionStartSharedTopK = 3
+
+	hookUserPromptAgentTopK  = 3
+	hookUserPromptSharedTopK = 3
 )
 
 func hooksRunCmd() *cobra.Command {
@@ -205,38 +226,59 @@ func deriveAgentID(dir string) string {
 
 // --- event handlers ------------------------------------------------------------
 
-// hookSessionStart recalls the agent's top facts and renders them for
-// injection. Query "" makes recency the only ranked signal (there are no
-// query terms to match), which is exactly "start where the last session
-// ended": the freshest live facts, deterministic order.
+// hookSessionStart recalls the agent's top facts plus the __shared__ project
+// conventions and renders them for injection. Query "" makes recency the only
+// ranked signal (there are no query terms to match), which is exactly "start
+// where the last session ended": the freshest live facts, deterministic order.
 func hookSessionStart(agent string, payload hookEventPayload) (string, error) {
+	start := timeNow()
 	store, err := openStore()
 	if err != nil {
 		return "", fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 
-	facts, err := store.Recall(context.Background(), agent, "", 5)
-	if err != nil {
-		return "", fmt.Errorf("recall: %w", err)
-	}
-	if len(facts) == 0 {
+	block, degrade := hookRecallBlock(store, agent, "", hookSessionStartAgentTopK, hookSessionStartSharedTopK)
+	if block == "" {
+		if degrade != nil {
+			return "", degrade
+		}
 		return "", nil // never noise: an empty memory injects nothing
 	}
-	return renderMemoryBlock(facts), nil
+	if degrade != nil {
+		hookLog(payload, "session-start", timeNow().Sub(start), "error", degrade.Error())
+	}
+	return block, nil
 }
 
 // hookUserPrompt either performs a deterministic remember (prompt starts with
-// "remember:") or a short recall. Consecutive turns with identical recall
-// output are suppressed via the state file: the context is already there.
+// "remember:" or "remember shared:") or a short recall from both namespaces.
+// Consecutive turns with identical recall output are suppressed via the state
+// file: the context is already there.
 func hookUserPrompt(agent string, payload hookEventPayload) (string, error) {
 	prompt := strings.TrimSpace(payload.Prompt)
 	if prompt == "" {
 		return "", nil
 	}
 
-	// Instant-save path: "remember: <text>".
-	if rest, ok := hooksRememberRest(prompt); ok {
+	// Instant-save to the project-wide namespace: "remember shared: <text>".
+	if rest, ok := hookPromptRest(prompt, hooksRememberSharedPrefix); ok {
+		if rest == "" {
+			return "", fmt.Errorf("remember shared: with no text")
+		}
+		store, err := openStore()
+		if err != nil {
+			return "", fmt.Errorf("open store: %w", err)
+		}
+		defer func() { _ = store.Close() }()
+		if err := store.PutShared(context.Background(), rest); err != nil {
+			return "", fmt.Errorf("remember shared: %w", err)
+		}
+		return fmt.Sprintf("Saved to shared memory: %s", rest), nil
+	}
+
+	// Instant-save to the cwd agent: "remember: <text>".
+	if rest, ok := hookPromptRest(prompt, hooksRememberPrefix); ok {
 		if rest == "" {
 			return "", fmt.Errorf("remember: with no text")
 		}
@@ -251,20 +293,23 @@ func hookUserPrompt(agent string, payload hookEventPayload) (string, error) {
 		return fmt.Sprintf("Saved to memory (%s): %s", agent, rest), nil
 	}
 
+	start := timeNow()
 	store, err := openStore()
 	if err != nil {
 		return "", fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 
-	facts, err := store.Recall(context.Background(), agent, prompt, 3)
-	if err != nil {
-		return "", fmt.Errorf("recall: %w", err)
-	}
-	if len(facts) == 0 {
+	block, degrade := hookRecallBlock(store, agent, prompt, hookUserPromptAgentTopK, hookUserPromptSharedTopK)
+	if block == "" {
+		if degrade != nil {
+			return "", degrade
+		}
 		return "", nil
 	}
-	block := renderMemoryBlock(facts)
+	if degrade != nil {
+		hookLog(payload, "user-prompt", timeNow().Sub(start), "error", degrade.Error())
+	}
 	if hookStateSeenBlock(agent, block) {
 		return "", nil // identical context already injected on a recent turn
 	}
@@ -272,16 +317,51 @@ func hookUserPrompt(agent string, payload hookEventPayload) (string, error) {
 	return block, nil
 }
 
-// hooksRememberRest strips the remember: prefix case-insensitively. Returns
-// the remaining text and whether the prefix was present.
-func hooksRememberRest(prompt string) (string, bool) {
-	if len(prompt) < len(hooksRememberPrefix) {
+// hookPromptRest strips a prefix case-insensitively, returning the remaining
+// text and whether the prefix was present.
+func hookPromptRest(prompt, prefix string) (string, bool) {
+	if len(prompt) < len(prefix) {
 		return "", false
 	}
-	if !strings.EqualFold(prompt[:len(hooksRememberPrefix)], hooksRememberPrefix) {
+	if !strings.EqualFold(prompt[:len(prefix)], prefix) {
 		return "", false
 	}
-	return strings.TrimSpace(prompt[len(hooksRememberPrefix):]), true
+	return strings.TrimSpace(prompt[len(prefix):]), true
+}
+
+// hookRecallBlock recalls one injection's worth of context: the agent's own
+// facts plus the __shared__ namespace, each under its own budget. A var seam
+// (timeNow precedent) so the degradation paths are testable without a store
+// that fails selectively.
+//
+// Degradation contract: one namespace failing never costs the other's facts —
+// the block comes back carrying whichever side still answered, along with a
+// non-nil degrade error the caller turns into an error receipt in hooks.log
+// while injecting the block anyway. Only when nothing injectable survived
+// (both namespaces failed, or the only populated one did) is the error a hard
+// failure that aborts the injection.
+var hookRecallBlock = func(store cliStore, agent, query string, agentTopK, sharedTopK int) (string, error) {
+	ctx := context.Background()
+	agentFacts, agentErr := store.Recall(ctx, agent, query, agentTopK)
+	sharedFacts, sharedErr := store.RecallShared(ctx, query, sharedTopK)
+
+	switch {
+	case agentErr != nil && sharedErr != nil:
+		return "", fmt.Errorf("recall agent: %v; recall shared: %v", agentErr, sharedErr)
+	case agentErr != nil:
+		block := renderMemoryBlock(nil, sharedFacts)
+		if block == "" {
+			return "", fmt.Errorf("recall agent: %w", agentErr)
+		}
+		return block, fmt.Errorf("agent recall failed, injecting shared facts only: %w", agentErr)
+	case sharedErr != nil:
+		block := renderMemoryBlock(agentFacts, nil)
+		if block == "" {
+			return "", fmt.Errorf("recall shared: %w", sharedErr)
+		}
+		return block, fmt.Errorf("shared recall failed, injecting agent facts only: %w", sharedErr)
+	}
+	return renderMemoryBlock(agentFacts, sharedFacts), nil
 }
 
 // hookCheckpoint is the pre-compact runner: one deterministic checkpoint, no
@@ -358,15 +438,37 @@ func sessionCheckpointFor(agent string, payload hookEventPayload, event string) 
 
 // renderMemoryBlock renders the injected context. Plain text (Claude Code
 // accepts plain text or JSON; plain keeps the block human-readable in the
-// transcript too). Facts longer than one line are folded — the block must stay
-// skimmable inside a prompt.
-func renderMemoryBlock(facts []string) string {
+// transcript too). Two labeled sections — the agent's own facts, then the
+// project-wide __shared__ conventions — because a model consuming the block
+// must be able to tell its own history from standing project rules. Facts
+// longer than one line are folded, and a text stored in both namespaces
+// renders once under Memory: the block must stay skimmable inside a prompt.
+func renderMemoryBlock(agentFacts, sharedFacts []string) string {
 	var sb strings.Builder
-	sb.WriteString("## Memory\n")
-	for _, f := range facts {
-		line := strings.ReplaceAll(strings.TrimSpace(f), "\n", " ")
-		sb.WriteString("- " + line + "\n")
+	seen := make(map[string]bool, len(agentFacts)+len(sharedFacts))
+	render := func(header string, facts []string) {
+		lines := make([]string, 0, len(facts))
+		for _, f := range facts {
+			line := strings.ReplaceAll(strings.TrimSpace(f), "\n", " ")
+			if line == "" || seen[line] {
+				continue
+			}
+			seen[line] = true
+			lines = append(lines, line)
+		}
+		if len(lines) == 0 {
+			return
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(header + "\n")
+		for _, line := range lines {
+			sb.WriteString("- " + line + "\n")
+		}
 	}
+	render("## Memory", agentFacts)
+	render("## Shared memory (project-wide)", sharedFacts)
 	return strings.TrimRight(sb.String(), "\n")
 }
 

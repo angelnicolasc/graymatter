@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -188,6 +189,58 @@ func TestDirectStoreOverview_MatchesGroundTruth(t *testing.T) {
 	}
 	if ov.TotalTombstones != 1 {
 		t.Errorf("tombstones = %d, want 1", ov.TotalTombstones)
+	}
+}
+
+// TestStatus_InjectionEstimateReflectsHookBudgets: the INJECTION line quotes
+// the session-start hook's real block — the agent's top-5 plus the shared
+// namespace's top-3 — not a generic top-8, and __shared__ itself is never
+// counted as a hook agent row.
+func TestStatus_InjectionEstimateReflectsHookBudgets(t *testing.T) {
+	agentFacts := []memory.Fact{
+		{ID: "w1", AgentID: "writer", Text: "one two three four five six"},
+	}
+	sharedFacts := []memory.Fact{
+		{ID: "s1", AgentID: memory.SharedAgentID, Text: "shared convention one two three"},
+		{ID: "s2", AgentID: memory.SharedAgentID, Text: "shared convention four five six"},
+	}
+	view := statusView{
+		Mode: "in-process",
+		Overview: &daemon.StoreOverviewResponse{
+			TotalAgents:    2,
+			TotalLiveFacts: 3,
+			Agents: []daemon.AgentSummary{
+				{Agent: "writer", LiveFacts: 1},
+				{Agent: memory.SharedAgentID, LiveFacts: 2},
+			},
+		},
+		KG:    &daemon.KGStateResponse{},
+		Facts: map[string][]memory.Fact{"writer": agentFacts, memory.SharedAgentID: sharedFacts},
+	}
+
+	var out bytes.Buffer
+	if err := renderStatus(&out, view); err != nil {
+		t.Fatalf("renderStatus: %v", err)
+	}
+	got := out.String()
+
+	wantBlock := estimateTopN(agentFacts, hookSessionStartAgentTopK) + estimateTopN(sharedFacts, hookSessionStartSharedTopK)
+	wantLine := fmt.Sprintf("INJECTION  est. session-start block (top-%d agent + top-%d shared): ~%d–%d tk/agent",
+		hookSessionStartAgentTopK, hookSessionStartSharedTopK, wantBlock, wantBlock)
+	if !strings.Contains(got, wantLine) {
+		t.Errorf("INJECTION line must quote the hook's real block (%s):\n%s", wantLine, got)
+	}
+
+	// The old generic top-8 shape must not come back: top-8 of the agent
+	// alone (no shared part) is a different number for this store.
+	onlyAgentTop8 := estimateTopN(agentFacts, 8)
+	if onlyAgentTop8 != wantBlock {
+		// Guard the guard: with these facts the two estimates differ, so the
+		// assertion below is meaningful.
+		if strings.Contains(got, fmt.Sprintf("~%d–%d tk/agent", onlyAgentTop8, onlyAgentTop8)) &&
+			!strings.Contains(got, wantLine) {
+			t.Errorf("INJECTION line fell back to a plain top-8 estimate:\n%s", got)
+		}
 	}
 }
 

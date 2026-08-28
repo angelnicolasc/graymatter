@@ -100,6 +100,11 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		// The shared namespace must ride the same injection path through the
+		// daemon: one project-wide convention seeded before any hook fires.
+		if err := mem.RememberShared(ctx, "production deploys freeze on fridays; wait until monday"); err != nil {
+			t.Fatal(err)
+		}
 		if err := mem.Remember(ctx, agent, "ancient fact waiting to be pruned"); err != nil {
 			t.Fatal(err)
 		}
@@ -135,10 +140,13 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 		t.Fatalf("hooks install: exit=%d out=%s", code, out)
 	}
 
-	// 2. session-start injects
+	// 2. session-start injects the agent's facts AND the shared convention
 	out, code := runE2E(t, bin, proj, hookStdin(proj, ""), "hooks", "run", "session-start")
 	if code != 0 || !strings.Contains(out, "## Memory") || !strings.Contains(out, "release checklist") {
 		t.Fatalf("session-start: exit=%d out=%q", code, out)
+	}
+	if !strings.Contains(out, "## Shared memory (project-wide)") || !strings.Contains(out, "freeze on fridays") {
+		t.Errorf("session-start lost the shared namespace: %q", out)
 	}
 
 	// 3. user-prompt recall injects
@@ -151,6 +159,17 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 	out, code = runE2E(t, bin, proj, hookStdin(proj, "remember: the offcall rota lives in ops/rota.md"), "hooks", "run", "user-prompt")
 	if code != 0 || !strings.Contains(out, "Saved to memory") {
 		t.Fatalf("user-prompt remember: exit=%d out=%q", code, out)
+	}
+
+	// 4b. user-prompt remember shared: saves into the shared namespace, and
+	// the fact is readable back over the daemon wire.
+	out, code = runE2E(t, bin, proj, hookStdin(proj, "remember shared: the weekly demo is thursdays at 15:00 utc"), "hooks", "run", "user-prompt")
+	if code != 0 || !strings.Contains(out, "Saved to shared memory") {
+		t.Fatalf("user-prompt remember shared: exit=%d out=%q", code, out)
+	}
+	out, code = runE2E(t, bin, proj, "", "--dir", storeDir, "recall", "proj-e2e", "weekly demo", "--shared")
+	if code != 0 || !strings.Contains(out, "weekly demo is thursdays") {
+		t.Errorf("remember shared: fact not readable via recall --shared (exit=%d): %q", code, out)
 	}
 
 	// 5. pre-compact checkpoints silently

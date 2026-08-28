@@ -324,25 +324,25 @@ func measureStoreAgent(agent string, facts []memory.Fact) storeAgentRow {
 		window = window[:8]
 	}
 	row.Sliding8Tokens = tokens.Approx(strings.Join(window, "\n"))
-	row.Top8WeightedTok = estimateTop8Tokens(facts)
+	row.Top8WeightedTok = estimateTopN(facts, 8)
 	return row
 }
 
-// estimateTop8Tokens estimates what injecting an agent's eight highest-weight
-// live facts would cost, without issuing a Recall (which would bump access
+// estimateTopN estimates what injecting an agent's n highest-weight live
+// facts would cost, without issuing a Recall (which would bump access
 // counters via detached writebacks). Shared by bench --store and status so
 // both surfaces quote the same number for the same store.
-func estimateTop8Tokens(facts []memory.Fact) int {
+func estimateTopN(facts []memory.Fact, n int) int {
 	byWeight := make([]memory.Fact, len(facts))
 	copy(byWeight, facts)
 	sort.SliceStable(byWeight, func(i, j int) bool { return byWeight[i].Weight > byWeight[j].Weight })
-	top := make([]string, 0, 8)
+	top := make([]string, 0, n)
 	for _, f := range byWeight {
 		if f.SupersededBy != "" {
 			continue
 		}
 		top = append(top, f.Text)
-		if len(top) == 8 {
+		if len(top) == n {
 			break
 		}
 	}

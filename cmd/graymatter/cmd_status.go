@@ -175,16 +175,17 @@ func renderStatus(out io.Writer, view statusView) error {
 		fmt.Fprintln(out, "           no harness runs recorded (MCP sessions are not measured)")
 	}
 
-	minTop8, maxTop8, maxDump := 1<<30, 0, 0
+	// The session-start hook injects the agent's top facts plus the shared
+	// namespace's top conventions (the hooks' own budgets,
+	// hookSessionStartAgentTopK / hookSessionStartSharedTopK), so estimate
+	// that block rather than a generic top-8. __shared__ is never a hook
+	// agent — no cwd maps to it — so it contributes the shared part of every
+	// agent's estimate instead of a row of its own.
+	sharedTk := estimateTopN(view.Facts[memory.SharedAgentID], hookSessionStartSharedTopK)
+	minBlock, maxBlock, maxDump := 1<<30, 0, 0
+	agentsCounted := 0
 	for _, a := range ov.Agents {
 		facts := view.Facts[a.Agent]
-		tk := estimateTop8Tokens(facts)
-		if tk < minTop8 {
-			minTop8 = tk
-		}
-		if tk > maxTop8 {
-			maxTop8 = tk
-		}
 		live := make([]string, 0, len(facts))
 		for _, f := range facts {
 			if f.SupersededBy == "" {
@@ -194,10 +195,26 @@ func renderStatus(out io.Writer, view statusView) error {
 		if dump := tokens.Approx(strings.Join(live, "\n")); dump > maxDump {
 			maxDump = dump
 		}
+		if a.Agent == memory.SharedAgentID {
+			continue
+		}
+		tk := estimateTopN(facts, hookSessionStartAgentTopK) + sharedTk
+		agentsCounted++
+		if tk < minBlock {
+			minBlock = tk
+		}
+		if tk > maxBlock {
+			maxBlock = tk
+		}
 	}
-	if ov.TotalLiveFacts > 0 {
-		fmt.Fprintf(out, "INJECTION  est. top-8 recall cost now: ~%d–%d tk/agent vs full dump ~%d\n",
-			minTop8, maxTop8, maxDump)
+	if agentsCounted == 0 && sharedTk > 0 {
+		// A store holding only shared facts: every hook session injects the
+		// shared block alone.
+		minBlock, maxBlock, agentsCounted = sharedTk, sharedTk, 1
+	}
+	if ov.TotalLiveFacts > 0 && agentsCounted > 0 {
+		fmt.Fprintf(out, "INJECTION  est. session-start block (top-%d agent + top-%d shared): ~%d–%d tk/agent vs full dump ~%d\n",
+			hookSessionStartAgentTopK, hookSessionStartSharedTopK, minBlock, maxBlock, maxDump)
 		fmt.Fprintf(out, "           estimates ~%.2f tok/word; the server cannot see your chat history.\n",
 			tokens.PerWord)
 	}

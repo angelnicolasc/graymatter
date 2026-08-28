@@ -455,7 +455,7 @@ Other useful subcommands:
 |---------|---------|
 | `graymatter init` | Wire MCP into Claude Code, Cursor, Codex, OpenCode, Antigravity (see [README.md](../README.md)); `--kg` persists graph auto-population, `--hooks` installs Claude Code memory hooks |
 | `graymatter demo` | Seed a scratch multi-agent store, run consolidation, open the TUI — one command, no keys |
-| `graymatter hooks install` / `uninstall` / `doctor` | Manage Claude Code automatic memory hooks (per-turn injection, `remember:` instant-save, /compact survival); every hook failure degrades silently |
+| `graymatter hooks install` / `uninstall` / `doctor` | Manage Claude Code automatic memory hooks (per-turn injection of agent facts + `__shared__` conventions, `remember:` / `remember shared:` instant-save, /compact survival); every hook failure degrades silently |
 | `graymatter recall <agent> "<query>" --explain` | Receipts per fact: per-signal RRF ranks, fused score, weight, age, provenance (`fact_id`, `written_at`) — same JSON shape as the MCP `explain` payload |
 | `graymatter consolidate <agent_id>` | Run one consolidation cycle through the daemon's policy |
 | `graymatter kg render --out graph.html` | Self-contained force-graph page (offline, tooltips carry fact-ID receipts); `--out graph.dot` for Graphviz |
