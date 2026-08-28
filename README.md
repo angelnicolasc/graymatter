@@ -275,8 +275,8 @@ tool:
 
 | Hook | What it does |
 |------|--------------|
-| `SessionStart` | Injects the freshest live facts — and re-injects after `/compact` (your memory survives compaction) |
-| `UserPromptSubmit` | Short per-turn recall (top-3), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save |
+| `SessionStart` | Injects the freshest live facts plus project-wide `__shared__` conventions — and re-injects after `/compact` (your memory survives compaction) |
+| `UserPromptSubmit` | Short per-turn recall (top-3 agent + top-3 shared), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save, `remember shared: <text>` saves into the shared namespace every agent reads |
 | `PreCompact` | Deterministic checkpoint before context compaction |
 | `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
 

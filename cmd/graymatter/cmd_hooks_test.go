@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // The settings.json this package writes is a contract with Claude Code's hook
@@ -552,5 +555,352 @@ func TestHookRun_UnknownEvent(t *testing.T) {
 	withHooksEnv(t)
 	if _, err := dispatchHook("session-middle", hookEventPayload{}); err == nil {
 		t.Error("unknown event must be a dispatch error")
+	}
+}
+
+// --- __shared__ injection (HS-28AGO) --------------------------------------------
+//
+// AGENTS.md directs project-wide conventions to the reserved __shared__
+// namespace; the hooks are the automatic injection path, so both reading
+// events must merge it in, and the remember: path must be able to write it.
+
+// seedSharedFacts plants facts in the __shared__ namespace of the test store.
+func seedSharedFacts(t *testing.T, facts ...string) {
+	t.Helper()
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, f := range facts {
+		if err := store.PutShared(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = store.Close()
+}
+
+// TestHookRun_SessionStart_SharedNamespace: session-start must inject the
+// shared namespace alongside the agent's own — shared-only, agent-only
+// (legacy shape, byte-compatible), and both together.
+func TestHookRun_SessionStart_SharedNamespace(t *testing.T) {
+	t.Run("shared only", func(t *testing.T) {
+		withHooksEnv(t)
+		seedSharedFacts(t, "Deploys freeze on Fridays: do not deploy to production on Fridays")
+
+		out, err := dispatchHook("session-start", hookEventPayload{CWD: mustWorkdir()})
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if !strings.Contains(out, "## Shared memory (project-wide)") || !strings.Contains(out, "Deploys freeze on Fridays") {
+			t.Errorf("shared-only injection = %q, want the shared section carrying the convention", out)
+		}
+		if strings.Contains(out, "## Memory\n") {
+			t.Errorf("shared-only injection must not render an empty agent section: %q", out)
+		}
+	})
+
+	t.Run("agent only keeps the legacy block", func(t *testing.T) {
+		withHooksEnv(t)
+		agent := deriveAgentID(mustWorkdir())
+		store, err := openStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Remember(context.Background(), agent, "The catalog service talks to Postgres on db-01"); err != nil {
+			t.Fatal(err)
+		}
+		_ = store.Close()
+
+		out, err := dispatchHook("session-start", hookEventPayload{CWD: mustWorkdir()})
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if !strings.HasPrefix(out, "## Memory\n") || !strings.Contains(out, "Postgres on db-01") {
+			t.Errorf("agent-only injection = %q, want the legacy Memory block", out)
+		}
+		if strings.Contains(out, "Shared memory") {
+			t.Errorf("agent-only injection must not carry a shared section: %q", out)
+		}
+	})
+
+	t.Run("both namespaces", func(t *testing.T) {
+		withHooksEnv(t)
+		agent := deriveAgentID(mustWorkdir())
+		seedSharedFacts(t, "Deploys freeze on Fridays: do not deploy to production on Fridays")
+		store, err := openStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Remember(context.Background(), agent, "The catalog service talks to Postgres on db-01"); err != nil {
+			t.Fatal(err)
+		}
+		_ = store.Close()
+
+		out, err := dispatchHook("session-start", hookEventPayload{CWD: mustWorkdir()})
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		memIdx := strings.Index(out, "## Memory\n")
+		shrIdx := strings.Index(out, "## Shared memory (project-wide)")
+		if memIdx < 0 || shrIdx < 0 || memIdx > shrIdx {
+			t.Errorf("both-namespaces injection = %q, want Memory section before Shared memory", out)
+		}
+		if !strings.Contains(out, "Postgres on db-01") || !strings.Contains(out, "Deploys freeze on Fridays") {
+			t.Errorf("both-namespaces injection lost a fact: %q", out)
+		}
+	})
+}
+
+// TestHookRun_UserPrompt_SharedNamespace: the per-turn recall must match
+// against the shared namespace too — a prompt about a project convention
+// brings the convention back.
+func TestHookRun_UserPrompt_SharedNamespace(t *testing.T) {
+	withHooksEnv(t)
+	agent := deriveAgentID(mustWorkdir())
+
+	// Shared-only.
+	seedSharedFacts(t, "The API rate limit for shared tenants is 60 requests per minute")
+	out, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "what is the rate limit"})
+	if err != nil {
+		t.Fatalf("shared-only store: %v", err)
+	}
+	if !strings.Contains(out, "rate limit") || !strings.Contains(out, "## Shared memory (project-wide)") {
+		t.Errorf("shared-only per-turn injection = %q, want the shared convention", out)
+	}
+
+	// Both namespaces against one query.
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remember(context.Background(), agent, "The agent-local retry budget is three attempts"); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+
+	out, err = dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "retry budget and rate limit"})
+	if err != nil {
+		t.Fatalf("both namespaces: %v", err)
+	}
+	if !strings.Contains(out, "retry budget") || !strings.Contains(out, "rate limit") {
+		t.Errorf("per-turn injection lost a namespace: %q", out)
+	}
+}
+
+// TestHookRun_UserPrompt_SharedThrottle: the identical-block suppression must
+// hold on merged blocks — an unchanged turn injects nothing, a changed shared
+// namespace re-injects.
+func TestHookRun_UserPrompt_SharedThrottle(t *testing.T) {
+	withHooksEnv(t)
+	seedSharedFacts(t, "Deploys freeze on Fridays: do not deploy to production on Fridays")
+
+	first, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "can I deploy on a Friday"})
+	if err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	if !strings.Contains(first, "Deploys freeze on Fridays") {
+		t.Fatalf("first injection = %q, want the shared convention", first)
+	}
+
+	second, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "and what about Saturday"})
+	if err != nil {
+		t.Fatalf("second turn: %v", err)
+	}
+	if second != "" {
+		t.Errorf("second injection = %q, want suppressed (identical merged block)", second)
+	}
+
+	// A changed shared fact changes the block: it must inject again.
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutShared(context.Background(), "Ship window reopens Monday 09:00 UTC"); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	third, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "when does the ship window reopen"})
+	if err != nil {
+		t.Fatalf("third turn: %v", err)
+	}
+	if third == "" || !strings.Contains(third, "Ship window reopens") {
+		t.Errorf("changed shared namespace must re-inject, got %q", third)
+	}
+}
+
+// TestHookRun_UserPromptRememberShared: "remember shared: <text>" is the
+// deterministic instant-save into the namespace every agent reads.
+func TestHookRun_UserPromptRememberShared(t *testing.T) {
+	withHooksEnv(t)
+	agent := deriveAgentID(mustWorkdir())
+
+	out, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "remember shared: All PRs need one approval from a CODEOWNER"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !strings.Contains(out, "Saved to shared memory") || !strings.Contains(out, "All PRs need one approval") {
+		t.Errorf("confirmation = %q, want it to name the shared save", out)
+	}
+
+	// Case-insensitive prefix, same destination.
+	if _, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "REMEMBER SHARED: Standups are async in writing"}); err != nil {
+		t.Fatalf("shouty prefix: %v", err)
+	}
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	shared, err := store.List(memory.SharedAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, f := range shared {
+		got[f.Text] = true
+	}
+	for _, want := range []string{
+		"All PRs need one approval from a CODEOWNER",
+		"Standups are async in writing",
+	} {
+		if !got[want] {
+			t.Errorf("shared namespace missing %q (has %v)", want, got)
+		}
+	}
+	agentFacts, err := store.List(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agentFacts) != 0 {
+		t.Errorf("remember shared: leaked %d facts into the agent namespace", len(agentFacts))
+	}
+
+	// "remember shared:" with nothing after it is a user error the runner
+	// must survive (error → silent path), not store junk.
+	if _, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "remember shared:   "}); err == nil {
+		t.Error("empty shared remember must be an error")
+	}
+}
+
+// hookRecallStub is a cliStore whose two recall calls answer from canned
+// values, so the degradation contract is testable without a store that fails
+// selectively. Only Recall and RecallShared are ever called on it.
+type hookRecallStub struct {
+	cliStore
+	agentFacts  []string
+	agentErr    error
+	sharedFacts []string
+	sharedErr   error
+}
+
+func (s *hookRecallStub) Recall(context.Context, string, string, int) ([]string, error) {
+	return s.agentFacts, s.agentErr
+}
+
+func (s *hookRecallStub) RecallShared(context.Context, string, int) ([]string, error) {
+	return s.sharedFacts, s.sharedErr
+}
+
+// TestHookRecallBlock_Degradation: one namespace failing never costs the
+// other's facts; only a total failure aborts the injection.
+func TestHookRecallBlock_Degradation(t *testing.T) {
+	okAgent := &hookRecallStub{agentFacts: []string{"agent fact"}, sharedErr: fmt.Errorf("shared boom")}
+	block, degrade := hookRecallBlock(okAgent, "a", "q", 3, 3)
+	if block == "" || !strings.Contains(block, "agent fact") {
+		t.Errorf("shared failure must still inject agent facts, got %q", block)
+	}
+	if degrade == nil || !strings.Contains(degrade.Error(), "shared recall failed") {
+		t.Errorf("shared failure must surface a degrade error, got %v", degrade)
+	}
+
+	okShared := &hookRecallStub{agentErr: fmt.Errorf("agent boom"), sharedFacts: []string{"shared fact"}}
+	block, degrade = hookRecallBlock(okShared, "a", "q", 3, 3)
+	if block == "" || !strings.Contains(block, "shared fact") {
+		t.Errorf("agent failure must still inject shared facts, got %q", block)
+	}
+	if degrade == nil || !strings.Contains(degrade.Error(), "agent recall failed") {
+		t.Errorf("agent failure must surface a degrade error, got %v", degrade)
+	}
+
+	bothDown := &hookRecallStub{agentErr: fmt.Errorf("agent boom"), sharedErr: fmt.Errorf("shared boom")}
+	if block, degrade := hookRecallBlock(bothDown, "a", "q", 3, 3); block != "" || degrade == nil {
+		t.Errorf("both namespaces failing must be a hard error, got block=%q degrade=%v", block, degrade)
+	}
+
+	// The only populated namespace failing is also a hard error, even though
+	// the other call succeeded with an empty result.
+	emptyAgent := &hookRecallStub{agentFacts: nil, sharedErr: fmt.Errorf("shared boom")}
+	if block, degrade := hookRecallBlock(emptyAgent, "a", "q", 3, 3); block != "" || degrade == nil {
+		t.Errorf("shared failure with no agent facts must be a hard error, got block=%q degrade=%v", block, degrade)
+	}
+}
+
+// TestHookRun_DegradeReceiptInLog: a degraded injection still goes out, and
+// the failure leaves its error receipt in hooks.log — the session never sees
+// the half-broken store, the log does.
+func TestHookRun_DegradeReceiptInLog(t *testing.T) {
+	dir := withHooksEnv(t)
+	seedHookStoreFacts(t, "The rate limit is 60 requests per minute")
+
+	oldRecall := hookRecallBlock
+	hookRecallBlock = func(store cliStore, agent, query string, agentTopK, sharedTopK int) (string, error) {
+		facts, err := store.Recall(context.Background(), agent, query, agentTopK)
+		if err != nil {
+			return "", err
+		}
+		return renderMemoryBlock(facts, nil), fmt.Errorf("shared recall failed, injecting agent facts only: broken on purpose")
+	}
+	t.Cleanup(func() { hookRecallBlock = oldRecall })
+
+	out, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit check"})
+	if err != nil {
+		t.Fatalf("degraded injection must not error the dispatch: %v", err)
+	}
+	if !strings.Contains(out, "rate limit") {
+		t.Errorf("degraded injection lost the agent facts: %q", out)
+	}
+
+	logData, err := os.ReadFile(filepath.Join(dir, "hooks.log"))
+	if err != nil {
+		t.Fatalf("hooks.log: %v", err)
+	}
+	if !strings.Contains(string(logData), `"outcome":"error"`) ||
+		!strings.Contains(string(logData), "injecting agent facts only") {
+		t.Errorf("hooks.log missing the degradation receipt: %s", logData)
+	}
+}
+
+// TestRenderMemoryBlock_Sections pins the block shape: agent facts first, the
+// shared section second, exact duplicates across namespaces rendered once,
+// multi-line facts folded, and an empty pair of lists rendering nothing.
+func TestRenderMemoryBlock_Sections(t *testing.T) {
+	cases := []struct {
+		name        string
+		agent, shrd []string
+		want        string
+	}{
+		{"agent only keeps the legacy shape", []string{"a fact"}, nil, "## Memory\n- a fact"},
+		{"shared only", nil, []string{"a convention"}, "## Shared memory (project-wide)\n- a convention"},
+		{
+			"both sections, agent first",
+			[]string{"own history"},
+			[]string{"project convention"},
+			"## Memory\n- own history\n\n## Shared memory (project-wide)\n- project convention",
+		},
+		{
+			"exact duplicate renders once, under Memory",
+			[]string{"same text"},
+			[]string{"same text"},
+			"## Memory\n- same text",
+		},
+		{"multi-line folded", []string{"line one\nline two"}, nil, "## Memory\n- line one line two"},
+		{"both empty is nothing", nil, nil, ""},
+	}
+	for _, c := range cases {
+		if got := renderMemoryBlock(c.agent, c.shrd); got != c.want {
+			t.Errorf("%s: renderMemoryBlock = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
