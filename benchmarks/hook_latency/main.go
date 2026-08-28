@@ -453,10 +453,44 @@ func maxOf(durs []time.Duration) time.Duration {
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000.0 }
 
+// cliModuleDir walks up from the working directory to the checkout root and
+// returns the CLI module's own directory. go test runs in the package dir and
+// go run in the caller's, so a fixed relative path is not dependable, and
+// runtime.Caller is rewritten by -trimpath. The module file is the anchor.
+func cliModuleDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "cmd", "graymatter", "go.mod")); err == nil {
+			return filepath.Join(dir, "cmd", "graymatter"), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no cmd/graymatter/go.mod above the working directory")
+		}
+		dir = parent
+	}
+}
+
 // buildBinary compiles the current tree; the cleanup removes the artifact.
+//
+// The build runs inside cmd/graymatter and names the package by its local
+// path. The CLI is a separate module, so resolving it by import path only
+// works while go.work is in play — and CI runs this step with GOWORK=off to
+// keep the module graph off the proxy, which left the gate reporting a build
+// error instead of a measurement. Building from the module's own directory
+// needs neither the workspace nor a network fetch.
 func buildBinary(dir string) (string, func(), error) {
+	moduleDir, err := cliModuleDir()
+	if err != nil {
+		return "", nil, fmt.Errorf("locate CLI module: %w", err)
+	}
 	bin := filepath.Join(dir, "graymatter-hooklatency.bin")
-	out, err := exec.Command("go", "build", "-o", bin, "github.com/angelnicolasc/graymatter/cmd/graymatter").CombinedOutput()
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = moduleDir
+	out, err := build.CombinedOutput()
 	if err != nil {
 		return "", nil, fmt.Errorf("build binary: %v: %s", err, out)
 	}
