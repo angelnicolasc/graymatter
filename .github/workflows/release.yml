@@ -171,10 +171,22 @@ jobs:
   # from now on, a release is not done until the exact tag being published
   # installs through the module machinery a fresh user would use.
   #
-  # GOPROXY=direct fetches the tag straight from GitHub, bypassing the
-  # public proxy's caching delay for freshly pushed tags — the proxy catch-up
-  # is a property of the CDN, not of this release, and a retry loop against
-  # it would trade determinism for waiting.
+  # This gate used to run GOPROXY=direct, which is precisely not the machinery
+  # a fresh user would use, and the gap showed on v0.18.0: the job went green
+  # while `go install …/cmd/graymatter@v0.18.0` — the README's own first
+  # command — failed for every user with a 404 from sum.golang.org. The
+  # submodule had been indexed; the root library it requires had not, and the
+  # checksum lookup for a transitive dependency aborts the whole install.
+  #
+  # The earlier reasoning held that the proxy's catch-up is a property of the
+  # CDN and that a retry loop would trade determinism for waiting. Half of
+  # that is right: it is the CDN's timing. What it misses is that the delay is
+  # not only something to wait out — proxy.golang.org fetches a version the
+  # first time it is asked for one, so a request is what starts the clock. The
+  # warm step below asks, then polls the checksum database until it answers,
+  # and only then does the install run the unadorned command. The wait is
+  # bounded and it is waiting on a condition this workflow itself triggered,
+  # which is a different thing from waiting on a CDN and hoping.
   install-smoke:
     name: go install at the released tag
     runs-on: ubuntu-latest
@@ -185,18 +197,69 @@ jobs:
         with:
           go-version: "1.26.6"
 
+      # Both modules are warmed, not just the CLI: `go install` of the CLI
+      # resolves the root library as a require, and it is the library's
+      # checksum lookup that 404s and takes the install down with it.
+      - name: Warm the public proxy and wait for the checksum database
+        env:
+          TAG: ${{ github.ref_name }}
+          WARM_ATTEMPTS: "60"
+          WARM_INTERVAL: "10"
+        run: |
+          set -euo pipefail
+          LIB="github.com/angelnicolasc/graymatter"
+          CLI="${LIB}/cmd/graymatter"
+
+          # The request is the trigger. The sumdb is bypassed here on purpose:
+          # populating it is the whole point of the step. Retried because a tag
+          # pushed seconds ago can 404 while GitHub is still replicating it,
+          # which is a race worth losing a few times, not a release failure.
+          for mod in "${LIB}" "${CLI}"; do
+            warmed=""
+            for attempt in $(seq 1 "${WARM_ATTEMPTS}"); do
+              if GOFLAGS= GOWORK=off GOPROXY=https://proxy.golang.org \
+                 GONOSUMDB="github.com/angelnicolasc/*" go list -m "${mod}@${TAG}"; then
+                warmed="yes"; break
+              fi
+              printf '  proxy has not served %s@%s yet (attempt %s/%s)\n' \
+                "${mod}" "${TAG}" "${attempt}" "${WARM_ATTEMPTS}"
+              sleep "${WARM_INTERVAL}"
+            done
+            if [ -z "${warmed}" ]; then
+              echo "::error::proxy.golang.org never served ${mod}@${TAG}"
+              exit 1
+            fi
+          done
+
+          # Then prove it rather than trust it: the install below consults
+          # exactly this endpoint, so it is the gate's precondition, checked.
+          for mod in "${LIB}" "${CLI}"; do
+            served=""
+            for attempt in $(seq 1 "${WARM_ATTEMPTS}"); do
+              code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                "https://sum.golang.org/lookup/${mod}@${TAG}" || echo "000")"
+              if [ "${code}" = "200" ]; then served="yes"; break; fi
+              printf '  %s@%s -> %s (attempt %s/%s)\n' \
+                "${mod}" "${TAG}" "${code}" "${attempt}" "${WARM_ATTEMPTS}"
+              sleep "${WARM_INTERVAL}"
+            done
+            if [ -z "${served}" ]; then
+              echo "::error::${mod}@${TAG} is absent from sum.golang.org, so the README's go install fails for every user until it lands"
+              exit 1
+            fi
+            echo "  ${mod}@${TAG} is served by the checksum database"
+          done
+
       - name: Install and run the released binary
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           MOD="github.com/angelnicolasc/graymatter/cmd/graymatter@${TAG}"
-          # GONOSUMDB scoped to this module: the checksum database lags a
-          # freshly pushed tag by minutes, and the gate is deterministic —
-          # tag integrity is already guaranteed by GitHub serving this
-          # workflow from the tag itself, while every real user's first
-          # `go install` still verifies against the sumdb as usual.
-          GOFLAGS= GOPROXY=direct GOWORK=off GONOSUMDB=github.com/angelnicolasc/* go install "${MOD}"
+          # No flags. This is the README's command, character for character,
+          # against the default proxy and the real checksum database — the
+          # only version of this check that can catch what v0.18.0 shipped.
+          go install "${MOD}"
           INSTALLED="$(go env GOPATH)/bin/graymatter"
           # --help is the only guaranteed side-effect-free invocation: it
           # exercises cobra's command graph end to end without touching disk.
