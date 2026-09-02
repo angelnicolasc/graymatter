@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -24,7 +25,18 @@ import (
 // The split matters for the inverted index: an index removes the scoring pass
 // but not the load, so if the load dominates, the index alone will not reach a
 // latency target.
+//
+// Gated with the rest of the measurements in this package. It asserts nothing
+// — it is a diagnostic that prints a split — but it builds a 3000-fact store
+// and times 60 recalls, and under -race in the blocking suite that is minutes
+// of a budget shared with tests that do assert something.
+//
+// Run it as: GRAYMATTER_SCALE_GATE=1 go test -run TestLatencyBreakdown -v
+// ./pkg/memory  — without -race, which distorts the split it reports.
 func TestLatencyBreakdown(t *testing.T) {
+	if os.Getenv("GRAYMATTER_SCALE_GATE") != "1" {
+		t.Skip("set GRAYMATTER_SCALE_GATE=1 to run the latency breakdown")
+	}
 	if testing.Short() {
 		t.Skip("builds a 3000-fact store; skipped in -short")
 	}

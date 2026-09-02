@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -21,7 +22,29 @@ import (
 // Reported as a distribution rather than a mean: a p99 hiding behind an average
 // is how latency claims go bad, and the injection hook that fires on every user
 // prompt cares about the tail, not the typical case.
+//
+// It measures the SCAN, deliberately: StoreConfig's zero value is the
+// unindexed path, and this is the baseline the candidate-set work was
+// justified against. The shipped path's latency contract lives in
+// TestP4ScaleGate, which measures both arms at 600, 3000, 10 000 and 30 000.
+//
+// GATED, and the reason is a lesson rather than a cost. This assertion is a
+// wall clock, and a wall clock measures a machine, not a contract. Run
+// unguarded in the blocking suite it turned every CI runner into a voter:
+// under -race on shared runners the same tree measured 225 ms on Linux and
+// 406 ms on macOS against a 100 ms bar — the race detector's own overhead,
+// not a regression — and it spent 143-199 s of the package's 300 s budget,
+// which timed the whole package out on Windows. A number that swings 4x with
+// the instrumentation cannot gate a merge. Behind the switch it is still
+// reproducible on demand, and the same switch already guards every other
+// measurement in this package.
+//
+// Run it as: GRAYMATTER_SCALE_GATE=1 go test -run TestRecallLatencyInProcess
+// ./pkg/memory  — without -race, which invalidates the number it prints.
 func TestRecallLatencyInProcess(t *testing.T) {
+	if os.Getenv("GRAYMATTER_SCALE_GATE") != "1" {
+		t.Skip("set GRAYMATTER_SCALE_GATE=1 to run the in-process latency measurement")
+	}
 	if testing.Short() {
 		t.Skip("builds stores up to 3000 facts; skipped in -short")
 	}
