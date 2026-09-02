@@ -311,3 +311,17 @@ func (c *Client) RecallDefault(ctx context.Context, agentID, query string) ([]st
 func (c *Client) RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error) {
 	return c.Client.RecallExplain(ctx, agentID, query, topK)
 }
+
+// RecallDetailed runs the Recall ranking server-side plus the weak-match
+// vocabulary block. The facts are identical to Recall's; the block is
+// additive text for the caller to surface.
+func (c *Client) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	return c.Client.RecallDetailed(ctx, agentID, query, topK)
+}
+
+// PutAlias teaches the daemon-side store's vocabulary. Alias facts are
+// never injectable; they only widen what later queries reach.
+func (c *Client) PutAlias(ctx context.Context, agentID, term string, equivalents []string) error {
+	_, err := c.Client.PutAlias(ctx, agentID, term, equivalents)
+	return err
+}

@@ -203,6 +203,27 @@ func (c *Client) RecallShared(ctx context.Context, query string, topK int) ([]st
 	return resp.Facts, nil
 }
 
+// RecallDetailed runs the Recall ranking server-side and additionally returns
+// the weak-match vocabulary block (empty when the match is strong). The facts
+// are identical to Recall's.
+func (c *Client) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	var resp RecallDetailedResponse
+	if err := c.call("RecallDetailed", &RecallDetailedRequest{AgentID: agentID, Query: query, TopK: topK}, &resp); err != nil {
+		return nil, "", err
+	}
+	return resp.Facts, resp.Feedback, nil
+}
+
+// PutAlias teaches the server-side store's vocabulary: term ≡ equivalents.
+// Returns the alias fact that landed.
+func (c *Client) PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error) {
+	var resp PutAliasResponse
+	if err := c.call("PutAlias", &PutAliasRequest{AgentID: agentID, Term: term, Equivalents: equivalents}, &resp); err != nil {
+		return memory.Fact{}, err
+	}
+	return resp.Fact, nil
+}
+
 // RecallAll returns the merged agent + shared facts for query. TopK<=0 uses
 // the daemon's configured default.
 func (c *Client) RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error) {

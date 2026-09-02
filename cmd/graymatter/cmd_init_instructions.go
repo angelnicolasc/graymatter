@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // Instruction-file writers: drop a memory-usage block into the agent
@@ -80,6 +81,7 @@ Facts every agent in the project should see go to the reserved id ~__shared__~.
 | You fix a non-trivial bug or find a workaround | ~memory_add~ |
 | The user corrects you | ~memory_reflect~ with ~action="update"~ |
 | A stored fact became wrong | ~memory_reflect~ with ~action="forget"~ |
+| A search comes back with a **weak-match note** | Reformulate **once** with the note's suggested terms; if your wording and the store's differ, declare it with ~ALIAS_TOOL~ before trying more synonyms |
 
 Err toward storing. A fact you never needed costs nothing. One you failed to
 store costs the same mistake a second time.
@@ -91,11 +93,21 @@ store costs the same mistake a second time.
 | ~memory_search~ | ~agent_id~, ~query~ | ~top_k~ (default 8) |
 | ~memory_add~ | ~agent_id~, ~text~ | |
 | ~memory_reflect~ | ~action~, ~agent~ | ~text~, ~target~ |
+| ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | teach the store a vocabulary bridge |
 | ~checkpoint_save~ | ~agent_id~ | ~state~ |
 | ~checkpoint_resume~ | ~agent_id~ | |
 
-⚠ ~memory_reflect~ takes ~agent~, not ~agent_id~. The other four take
-~agent_id~. Mixing them up fails validation.
+⚠ ~memory_reflect~ takes ~agent~, not ~agent_id~. Every other tool,
+including ~ALIAS_TOOL~, takes ~agent_id~. Mixing them up fails validation.
+
+### The store learns its own vocabulary
+
+When a search misses because your wording and the store's differ, the store
+learns that bridge from use: declare it once with ~ALIAS_TOOL~, or let two
+sessions repeat the same unknown word and the store promotes the alias by
+itself. ~graymatter alias list~ shows which aliases you taught (~authored~)
+and which the store concluded from use (~usage~). A wrong one is revised like
+any fact.
 
 ### Store conclusions, not transcripts
 
@@ -104,7 +116,14 @@ transient (that is what checkpoints are for), and never store secrets.
 `
 
 func instructionsBlock() string {
-	return instrBeginMarker + strings.ReplaceAll(blockTmpl, "~", "`") + instrEndMarker + "\n"
+	// The action name comes from memory.FeedbackAction — the same symbol the
+	// weak-match block formats and the CLI registers as a command alias.
+	// Hardcoding it here would leave this block naming a tool nobody answers
+	// to the day that name changes, which is exactly the failure the
+	// uninstructed-agent arms measured, in the one surface a user reads
+	// first. The template writes ALIAS_TOOL; this substitutes it.
+	body := strings.ReplaceAll(blockTmpl, "ALIAS_TOOL", memory.FeedbackAction)
+	return instrBeginMarker + strings.ReplaceAll(body, "~", "`") + instrEndMarker + "\n"
 }
 
 // upsertInstructionsBlock writes the graymatter memory block into path:

@@ -42,10 +42,16 @@ func TestToolAnnotations(t *testing.T) {
 
 	type hints struct{ readOnly, destructive, idempotent bool }
 	want := map[string]hints{
-		"memory_search":     {readOnly: true, destructive: false, idempotent: true},
-		"checkpoint_resume": {readOnly: true, destructive: false, idempotent: true},
-		"memory_add":        {readOnly: false, destructive: false, idempotent: false},
-		"checkpoint_save":   {readOnly: false, destructive: false, idempotent: false},
+		"memory_search":       {readOnly: true, destructive: false, idempotent: true},
+		"memory_search_batch": {readOnly: true, destructive: false, idempotent: true},
+		"checkpoint_resume":   {readOnly: true, destructive: false, idempotent: true},
+		"memory_add":          {readOnly: false, destructive: false, idempotent: false},
+		// memory_alias writes an alias fact per call: additive, not read-only,
+		// and re-declaring the same mapping appends another fact, so not
+		// idempotent. The alias never enters a result set; its only effect is
+		// widening what later queries can reach.
+		"memory_alias":  {readOnly: false, destructive: false, idempotent: false},
+		"checkpoint_save": {readOnly: false, destructive: false, idempotent: false},
 		// memory_reflect retires facts via forget/update, but destructive stays
 		// false: the hint is per-tool and three of four actions are additive.
 		// Advertising destructive makes strict hosts gate every self-edit behind

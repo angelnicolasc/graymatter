@@ -1,7 +1,10 @@
 package mcp
 
 import (
+	"fmt"
+
 	"github.com/angelnicolasc/graymatter/internal/tokens"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // serverInstructions is returned to the client in the initialize handshake
@@ -10,24 +13,34 @@ import (
 // hosts that never read CLAUDE.md or AGENTS.md — the failure mode behind
 // issues #3 and #14.
 //
-// It is a compile-time constant on purpose. The initialize response is not a
-// data channel: this string must never contain store contents, agent IDs, or
-// anything derived from runtime state (see docs/threat-model.md on treating
-// memory as untrusted input — recalled facts reach the model through tool
-// results inside the session, never through this field).
+// It is built from compile-time constants on purpose. The initialize response
+// is not a data channel: this text must never contain store contents, agent
+// IDs, or anything derived from runtime state (see docs/threat-model.md on
+// treating memory as untrusted input — recalled facts reach the model through
+// tool results inside the session, never through this field). The one
+// interpolation is memory.FeedbackAction, itself a source constant: the
+// briefing names the same action the block prints and the CLI registers, so
+// the three surfaces cannot drift apart.
 //
 // Budget: the text rides every initialize of every client, so its recurring
 // token cost has to stay trivial against the savings it produces. The
 // TestServerInstructionsBudget test pins it at 240 tokens via the same
 // estimator every benchmark uses; raise the budget in that test, with
 // reasoning, rather than growing the copy silently.
-const serverInstructions = `GrayMatter gives you persistent memory across sessions.
+//
+// Step 5 exists because two measured arms proved the weak-match block alone
+// is not a teaching channel: with the block firing and the command
+// resolving, two model-instances ran 217 recalls and wrote zero aliases —
+// 98 and 119 calls against the instructed baseline of 6. The protocol had
+// to move to where the agent is already looking: the session briefing.
+var serverInstructions = fmt.Sprintf(`GrayMatter gives you persistent memory across sessions.
 Session protocol:
 1. Before your first substantive reply, call memory_search for the task at hand, then call it again with agent_id "__shared__" for user-level preferences.
 2. When you learn something durable — a user preference, a decision, a correction, a completed milestone — store it with memory_reflect action=add. Err toward storing.
 3. Found a contradiction? memory_reflect action=update supersedes the stale fact; never leave both versions live.
 4. Long session? checkpoint_save before context gets heavy, checkpoint_resume next time.
-Full guide: docs/AGENTS.md in the GrayMatter repository.`
+5. A search returning a weak-match note hit a vocabulary gap: reformulate once with the suggested terms, and if your wording and the store's differ, declare it with %s so future searches bridge — before trying more synonyms.
+Full guide: docs/AGENTS.md in the GrayMatter repository.`, memory.FeedbackAction)
 
 // Option customises the MCP server.
 type Option func(*serverOptions)

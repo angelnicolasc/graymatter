@@ -55,6 +55,17 @@ type RecallProvenance struct {
 	SupersededBy string    `json:"superseded_by,omitempty"`
 	Confidence   string    `json:"confidence,omitempty"`
 	Pinned       bool      `json:"pinned,omitempty"`
+	// Supersedes names every fact this one replaced, walked transitively, so a
+	// value corrected twice reports both retired versions. Empty for a fact
+	// that revised nothing.
+	//
+	// This is the other half of the tombstone. Recall drops superseded facts
+	// before scoring, which is what makes the answer current — but it also
+	// makes the correction invisible: the caller receives one value with no
+	// sign that it replaced anything. Naming the retired IDs restores the
+	// justification without putting a retired belief back in the ranking, and
+	// the IDs resolve against the store, which keeps every tombstone.
+	Supersedes []string `json:"supersedes,omitempty"`
 }
 
 // newReceipt builds one receipt from the pipeline's ranking state. Extracted
@@ -77,6 +88,7 @@ func (s *Store) newReceipt(f *Fact, p *recallPipeline, fused float64) RecallRece
 			SupersededBy: f.SupersededBy,
 			Confidence:   f.Confidence,
 			Pinned:       f.Pinned,
+			Supersedes:   p.lineage(f.ID),
 		},
 	}
 	s.mu.RLock()

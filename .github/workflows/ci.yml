@@ -105,7 +105,7 @@ jobs:
       # is visible without blocking merges.
       - name: Test benchmark packages
         shell: bash
-        run: go test -race -count=1 -timeout=1200s ./benchmarks/token_count/... ./benchmarks/retrieval_quality/...
+        run: go test -race -count=1 -timeout=1200s ./benchmarks/token_count/... ./benchmarks/retrieval_quality/... ./benchmarks/revision_currency/...
 
       - name: Coverage gate — core library (≥70%)
         shell: bash
@@ -380,4 +380,15 @@ jobs:
       - name: Retrieval quality
         shell: bash
         run: go run ./benchmarks/retrieval_quality
+        continue-on-error: true
+
+      # Revision currency is the cross-session question: after a value was
+      # corrected, does the caller get the one that holds? Printed here for
+      # visibility; the structural claims it makes — every retired fact kept
+      # out of the caller's block, currency settled on every probe — are
+      # asserted blocking in the test job above, because a regression there is
+      # a correctness bug rather than a slower number.
+      - name: Revision currency
+        shell: bash
+        run: go run ./benchmarks/revision_currency
         continue-on-error: true

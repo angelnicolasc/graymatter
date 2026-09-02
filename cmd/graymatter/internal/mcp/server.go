@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -45,6 +46,13 @@ type Backend interface {
 	Remember(ctx context.Context, agentID, text string) error
 	// Recall with topK<=0 uses the store's configured default.
 	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	// RecallDetailed is Recall plus the weak-match vocabulary block: the
+	// facts are identical, the second return carries additive feedback text
+	// (empty when the match is strong). topK<=0 uses the store's default.
+	RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	// PutAlias teaches the store's vocabulary: term ≡ equivalents. Alias
+	// facts are never injectable; they only widen what later queries reach.
+	PutAlias(ctx context.Context, agentID, term string, equivalents []string) error
 	// RecallExplain is Recall's ranking with per-fact receipts (v0.17.0).
 	// topK<=0 uses the store's configured default, like Recall.
 	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
@@ -122,6 +130,41 @@ func (b *DirectBackend) Recall(ctx context.Context, agentID, query string, topK 
 		return nil, errors.New("memory store not initialised")
 	}
 	return store.Recall(ctx, agentID, query, topK)
+}
+
+// RecallDetailed reaches the concrete store the same way RecallExplain does:
+// AdvancedStore deliberately does not grow a method for every retrieval
+// variant, and the concrete store implements this one.
+func (b *DirectBackend) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, "", errors.New("memory store not initialised")
+	}
+	if rd, ok := store.(interface {
+		RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	}); ok {
+		return rd.RecallDetailed(ctx, agentID, query, topK)
+	}
+	return nil, "", errors.New("memory store does not expose RecallDetailed")
+}
+
+// PutAlias reaches the concrete store the same way RecallDetailed does: the
+// alias kind is a concrete-store capability AdvancedStore does not carry.
+func (b *DirectBackend) PutAlias(ctx context.Context, agentID, term string, equivalents []string) error {
+	store := b.mem.Advanced()
+	if store == nil {
+		return errors.New("memory store not initialised")
+	}
+	if pa, ok := store.(interface {
+		PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error)
+	}); ok {
+		_, err := pa.PutAlias(ctx, agentID, term, equivalents)
+		return err
+	}
+	return errors.New("memory store does not expose PutAlias")
 }
 
 // RecallExplain reaches the concrete store: AdvancedStore deliberately does
@@ -298,7 +341,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_search",
 			mcp.WithToolTitle("Search agent memory"),
-			mcp.WithDescription("Search one agent's stored facts and return the most relevant ones ranked by hybrid recall (semantic + keyword + recency). Call once with your agent_id, then again with agent_id \"__shared__\" for project-wide conventions. Returns a numbered list with a count header, or a \"No memories found\" notice when nothing matches; superseded and decayed facts never appear. To store new facts use memory_add; to correct, remove, or pin existing ones use memory_reflect."),
+			mcp.WithDescription("Search one agent's stored facts and return the most relevant ones ranked by hybrid recall (semantic + keyword + recency). Call once with your agent_id, then again with agent_id \"__shared__\" for project-wide conventions. Returns a numbered list with a count header, or a \"No memories found\" notice when nothing matches; superseded and decayed facts never appear. Results may carry a weak-match note naming the store's nearby vocabulary: reformulate once with those terms, and declare a lasting synonym with memory_alias instead of retrying synonyms blindly. To store new facts use memory_add; to correct, remove, or pin existing ones use memory_reflect."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
@@ -313,11 +356,42 @@ func (s *Server) registerTools() {
 				mcp.DefaultNumber(8),
 			),
 			mcp.WithBoolean("explain",
-				mcp.Description("Set true to receive per-fact receipts instead of bare text: each fact under `explained` carries the per-signal ranks (vector/keyword/recency, 0 = signal absent) that produced its fused RRF score, the stored weight, its age in days, and provenance (fact_id, written_at, tombstone state). The ranking is identical either way — explain only reads it out. Use it when the caller wants to know WHY a fact was returned."),
+				mcp.Description("Set true to receive per-fact receipts instead of bare text: each fact under `explained` carries the per-signal ranks (vector/keyword/recency, 0 = signal absent) that produced its fused RRF score, the stored weight, its age in days, and provenance (fact_id, written_at, tombstone state, and `supersedes` — the ids of the earlier versions this fact replaced, empty when it revised nothing). The ranking is identical either way — explain only reads it out. Use it when the caller wants to know WHY a fact was returned."),
 			),
 			outputSchemaOf[searchResult](),
 		),
 		s.handleMemorySearch,
+	)
+
+	// memory_search_batch
+	//
+	// A separate tool rather than an optional array on memory_search, for two
+	// reasons: memory_search's schema keeps `query` required, so no existing
+	// integration changes; and a distinctly named tool is what makes an agent
+	// holding six questions reach for one call instead of six. The bottleneck
+	// this addresses is conversational turns, so discoverability is the
+	// feature.
+	s.mcpSrv.AddTool(
+		mcp.NewTool("memory_search_batch",
+			mcp.WithToolTitle("Search agent memory with several queries at once"),
+			mcp.WithDescription("Answer SEVERAL questions against one agent's memory in a single call, run concurrently. Use it whenever you hold more than one open question; use memory_search when you have exactly one. Put EVERY open question into ONE call: queries run in parallel server-side and splitting them costs a model round trip each. A query may come back with a weak-match note naming nearby vocabulary: reformulate those once with the suggested terms; lasting synonyms belong in memory_alias. Returns `merged`, a deduplicated best-first block ready to read where a fact answering several queries appears once, plus `per_query` for the individual lists. Ranking per query is identical to calling memory_search alone; this changes how many turns you spend, not what comes back."),
+			readOnlyTool(),
+			mcp.WithString("agent_id",
+				mcp.Required(),
+				mcp.Description("Stable agent identifier, e.g. \"graymatter-backend\". Pass \"__shared__\" for project-wide memory."),
+			),
+			mcp.WithArray("queries",
+				mcp.Required(),
+				mcp.Description("The natural-language queries to answer, one per open question. Word each as you would for a single search; they are ranked independently and merged."),
+				mcp.WithStringItems(),
+			),
+			mcp.WithNumber("top_k",
+				mcp.Description("Optional cap on facts returned per query. Omitted or non-positive uses the store default."),
+				mcp.DefaultNumber(8),
+			),
+			outputSchemaOf[batchResult](),
+		),
+		s.handleMemorySearchBatchTool,
 	)
 
 	// memory_add
@@ -337,6 +411,36 @@ func (s *Server) registerTools() {
 			outputSchemaOf[addResult](),
 		),
 		s.handleMemoryAdd,
+	)
+
+	// memory_alias
+	//
+	// The store learns its own vocabulary from the agents
+	// that use it. Alias facts are vocabulary mapping, never injectable —
+	// they only widen what a later query can reach. The feedback block of
+	// memory_search names this tool as its suggested action, which is what
+	// turns a cold encounter into a warm store.
+	s.mcpSrv.AddTool(
+		mcp.NewTool("memory_alias",
+			mcp.WithToolTitle("Teach the store a vocabulary alias"),
+			mcp.WithDescription("Declare that a term and another term mean the same thing in one agent's memory vocabulary, so later memory_search queries bridging the two reach the right facts. Use it when a search missed because your wording and the store's wording differ — the weak-match feedback block names this tool for exactly that case. Alias facts are never returned as memories and can be corrected with memory_reflect like any fact. Returns a confirmation naming the term and its equivalents."),
+			writeTool(),
+			mcp.WithString("agent_id",
+				mcp.Required(),
+				mcp.Description("Stable agent identifier whose vocabulary this alias belongs to. Pass \"__shared__\" for project-wide memory."),
+			),
+			mcp.WithString("term",
+				mcp.Required(),
+				mcp.Description("The word or phrase as you would naturally write it in a query."),
+			),
+			mcp.WithArray("equivalents",
+				mcp.Required(),
+				mcp.Description("The words or phrases the store actually uses for the same thing; one or more."),
+				mcp.WithStringItems(),
+			),
+			outputSchemaOf[aliasResult](),
+		),
+		s.handleMemoryAlias,
 	)
 
 	// checkpoint_save
@@ -486,6 +590,23 @@ func getInt(args map[string]any, key string, def int) int {
 
 // getBool extracts an optional boolean argument, returning false if absent.
 // Clients that send the JSON literals true/false arrive here as bool.
+// getStringSlice reads a JSON array of strings, skipping blanks. MCP clients
+// send arrays as []any, so the elements are asserted one at a time rather than
+// type-asserting the slice whole.
+func getStringSlice(args map[string]any, key string) []string {
+	raw, ok := args[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func getBool(args map[string]any, key string) bool {
 	v, ok := args[key]
 	if !ok {

@@ -79,6 +79,30 @@ go run ./benchmarks/retrieval_quality
 One of its three pre-registered predictions failed, and it is written up there
 in full.
 
+## Revision currency
+
+Retrieval quality asks whether the right facts come back. This asks the
+question that only shows up across sessions: after a value was stated,
+corrected, and sometimes corrected again, does the caller get the one that
+holds?
+
+```bash
+go run ./benchmarks/revision_currency
+```
+
+The same 600-fact history is built twice - once with every correction written
+as an independent fact, once with the corrections recorded through
+`graymatter revise` - and both arms are measured on a compound endpoint: the
+current value must outrank every retired sibling **and** land in the injected
+top-8. Reporting only the first is gameable, and was gamed during development.
+
+Recording the revision settles currency on 35 of 35 probes and shows the caller
+zero retired facts, against 11/35 and 35 for the flat arm (McNemar exact,
+paired, p = 1.5e-5). What it does not move is retrieval: the ten probes still
+missed are ones where the corrected value never reaches the top-8 at all.
+Numbers, strata and the committed predictions:
+[revision_currency/RESULTS.md](../benchmarks/revision_currency/RESULTS.md).
+
 ## The retrieval-quality harness: three corpora
 
 Relevance runs through a separate harness with its own gates - this document

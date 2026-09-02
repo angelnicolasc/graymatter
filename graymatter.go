@@ -102,6 +102,10 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 		StrictWrite:             cfg.StrictWrite,
 		SignalWeights:           cfg.SignalWeights,
 		MinRelevance:            cfg.MinRelevance,
+		StemKeywords:            cfg.StemKeywords,
+		UsageAliasLearning:      cfg.UsageAliasLearning,
+		UsageAliasAffinityMin:   cfg.UsageAliasAffinityMin,
+		CandidateRetrieval:      cfg.CandidateRetrieval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("graymatter: open store: %w", err)

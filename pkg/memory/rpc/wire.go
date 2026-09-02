@@ -52,6 +52,34 @@ type RecallResponse struct {
 	Facts []string
 }
 
+// RecallDetailedRequest is the wire form of Store.RecallDetailed: the Recall
+// retrieval plus the weak-match vocabulary block.
+type RecallDetailedRequest struct {
+	AgentID string
+	Query   string
+	TopK    int
+}
+
+// RecallDetailedResponse carries the recalled facts (identical to Recall's)
+// and the feedback block, empty when the match is strong.
+type RecallDetailedResponse struct {
+	Facts    []string
+	Feedback string
+}
+
+// PutAliasRequest is the wire form of the store's PutAlias: teach the
+// vocabulary that term ≡ equivalents for an agent.
+type PutAliasRequest struct {
+	AgentID     string
+	Term        string
+	Equivalents []string
+}
+
+// PutAliasResponse carries the stored fact.
+type PutAliasResponse struct {
+	Fact memory.Fact
+}
+
 // RecallSharedRequest is the wire form of AdvancedStore.RecallShared.
 type RecallSharedRequest struct {
 	Query string

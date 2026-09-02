@@ -33,6 +33,14 @@ func (failingBackend) PutShared(context.Context, string) error {
 func (failingBackend) Recall(context.Context, string, string, int) ([]string, error) {
 	return nil, errors.New("backend down")
 }
+
+func (failingBackend) RecallDetailed(context.Context, string, string, int) ([]string, string, error) {
+	return nil, "", errors.New("backend down")
+}
+
+func (failingBackend) PutAlias(context.Context, string, string, []string) (memory.Fact, error) {
+	return memory.Fact{}, errors.New("backend down")
+}
 func (failingBackend) RecallShared(context.Context, string, int) ([]string, error) {
 	return nil, errors.New("backend down")
 }
