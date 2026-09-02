@@ -6,6 +6,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`graymatter revise` and `graymatter forget` — a correction stops competing with the value it corrects.** Until now an agent that learned a value had changed could only write a second fact, leaving both live and letting recall rank them against each other; the caller got whichever scored higher, which is a coin flip on wording. `revise <agent> <old> <new>` retires what it replaces and keeps the receipt, `forget <agent> <fact>` retires with no replacement, and both go through the same supersede machinery the MCP tools use. Measured over 35 revision families at 600 facts on a compound endpoint — the current value must outrank every retired sibling **and** land in the injected top-8: recording the revision settles currency on **35 of 35** probes and shows the caller **zero** retired facts, against 11/35 and 35 for the same history written flat (McNemar exact, paired, p = 1.5e-5). What it does not move is retrieval, and that is reported rather than hidden: the ten probes still missed are ones where the corrected value never reaches the top-8 at all, every one of them with keyword rank 0 because the correction shares no content word with the question. Currency is solved; retrieval is not, and the two are now separately measured. Numbers and the committed predictions: `benchmarks/revision_currency/`.
+- **`graymatter alias` and `alias list` — the store learns that two vocabularies mean the same thing.** An alias fact maps a caller's word to the store's, and is content-free by construction: the recall pipeline routes it to query expansion instead of the ranking corpus, so it never appears in a result, never contributes a document frequency and never occupies a top-k slot. `alias list <agent>` prints them with their source, so a store's learned vocabulary is auditable rather than implicit.
+- **Weak-match feedback.** When a query barely overlaps the store's vocabulary, `RecallDetailed` returns a short block naming the store's nearby vocabulary and one action the caller can actually take. It is additive text: the facts and their order are identical with the block on or off, pinned by test.
+- **`Store.BatchRecall`** answers several queries in one call with bounded concurrency, for callers that would otherwise pay a round trip per question.
+- **A revision-currency benchmark** with its predictions committed before the first run (`benchmarks/revision_currency/PREDICTIONS.md`), and pre-registered scale gates for retrieval latency and for stemming.
+
+### Changed
+
+- **Recall stops paying for the whole corpus — `CandidateRetrieval` is on by default.** Every recall used to load and re-tokenise every fact the agent owned before scoring anything, which measured 59–65% of a top-8 recall and put the curve on a straight line: at 30 000 facts the scan measures p50 235 ms / p99 287 ms. Recall now answers from an inverted index and a recency spine, and at 30 000 facts measures **p50 3.3 ms / p99 20.5 ms — 70x and 14x**. The ranking is identical by construction and by test: a pre-registered gate runs both paths over one store and compares fact IDs, order, fused scores, per-signal ranks, the feedback block and lineage. A store written before this default keeps answering — the first recall rebuilds the index and the ranking does not change, verified through the binary on a pre-flip store. The cost is on the write side, ~1.5 ms per `Put`, ratified against a 3 ms bar; `GRAYMATTER_CANDIDATE_RETRIEVAL=0` opts out.
+- **Keyword matching folds morphology — `StemKeywords` is on by default.** Porter stemming on the keyword signal, so a query's `renewed` reaches a stored `renewal`. Worth +4 of 35 out of sample at both 10 000 and 30 000 facts, and the gate pins the **strict-subset property** — four families won, none lost — rather than the count, because a default that trades wins for losses is a different decision needing different evidence. `GRAYMATTER_STEM_KEYWORDS=0` opts out.
+
+### Notes
+
+- **Usage-alias learning ships off.** The store can promote its own vocabulary from observed reformulation pairs, and the mechanism works, but the effect that justified it came from an oracle rather than from agent behaviour; on real runs the net gain is small and a share of promoted pairs is noise that would accumulate. It stays in the tree, documented, auditable through `alias list`, and off until a second corpus says otherwise.
+- **MaxScore-style pruning is deliberately absent.** The fusion reads keyword *ranks*, so skipping a term whose idf is negligible changes which facts have a keyword rank at all and renumbers everything below it — a re-specification rather than an optimisation. The reasoning is recorded in `recall_indexed.go` at the place someone will be tempted.
+
+---
+
 ## [0.18.0] - 2026-08-28
 
 ### Added
