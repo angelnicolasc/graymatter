@@ -317,6 +317,10 @@ graymatter demo                  # scratch store + TUI in one command
 graymatter remember "agent" "text"     # store a fact
 graymatter recall "agent" "query"      # print context
 graymatter recall "a" "q" --explain    # why each fact ranked (receipts)
+graymatter revise "agent" "old" "new"  # record a correction; recall stops
+                                       # returning the old value, and the
+                                       # receipt names what it replaced
+graymatter forget "agent" "fact"       # retire a fact with no replacement
 
 # hooks + consolidation
 graymatter hooks install         # Claude Code auto-memory (merge, never

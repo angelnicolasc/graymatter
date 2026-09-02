@@ -30,6 +30,8 @@ type Backend interface {
 	Put(ctx context.Context, agentID, text string) error
 	PutShared(ctx context.Context, text string) error
 	Recall(ctx context.Context, agentID, query string, topK int) ([]string, error)
+	RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error)
 	RecallShared(ctx context.Context, query string, topK int) ([]string, error)
 	RecallAll(ctx context.Context, agentID, query string, topK int) ([]string, error)
 	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
@@ -288,6 +290,30 @@ func (s *Server) RecallShared(req *RecallSharedRequest, resp *RecallSharedRespon
 		return err
 	}
 	resp.Facts = facts
+	return nil
+}
+
+// RecallDetailed handles a remote Store.RecallDetailed: the Recall ranking
+// plus the weak-match vocabulary block.
+func (s *Server) RecallDetailed(req *RecallDetailedRequest, resp *RecallDetailedResponse) error {
+	defer s.touch()
+	texts, feedback, err := s.backend.RecallDetailed(context.Background(), req.AgentID, req.Query, req.TopK)
+	if err != nil {
+		return err
+	}
+	resp.Facts = texts
+	resp.Feedback = feedback
+	return nil
+}
+
+// PutAlias handles a remote PutAlias: teach the store's vocabulary.
+func (s *Server) PutAlias(req *PutAliasRequest, resp *PutAliasResponse) error {
+	defer s.touch()
+	fact, err := s.backend.PutAlias(context.Background(), req.AgentID, req.Term, req.Equivalents)
+	if err != nil {
+		return err
+	}
+	resp.Fact = fact
 	return nil
 }
 

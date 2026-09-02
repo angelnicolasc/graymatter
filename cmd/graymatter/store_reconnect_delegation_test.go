@@ -49,6 +49,14 @@ func (r *recordingStore) RecallExplain(_ context.Context, agentID, query string,
 	r.rec("RecallExplain", agentID, query, topK)
 	return []memory.RecallReceipt{{Text: "re"}}, nil
 }
+func (r *recordingStore) RecallDetailed(_ context.Context, agentID, query string, topK int) ([]string, string, error) {
+	r.rec("RecallDetailed", agentID, query, topK)
+	return []string{"rd"}, "fb", nil
+}
+func (r *recordingStore) PutAlias(_ context.Context, agentID, term string, equivalents []string) error {
+	r.rec("PutAlias", agentID, term, equivalents)
+	return nil
+}
 func (r *recordingStore) List(agentID string) ([]memory.Fact, error) {
 	r.rec("List", agentID)
 	return []memory.Fact{{ID: "f1"}}, nil
@@ -173,6 +181,12 @@ func TestReconnectingStore_DelegatesEveryMethod(t *testing.T) {
 		{"RecallShared", func(r *reconnectingStore) { _, _ = r.RecallShared(ctx, "query-1", 4) }, []any{"query-1", 4}},
 		{"RecallAll", func(r *reconnectingStore) { _, _ = r.RecallAll(ctx, "agent-1", "query-2", 5) }, []any{"agent-1", "query-2", 5}},
 		{"RecallExplain", func(r *reconnectingStore) { _, _ = r.RecallExplain(ctx, "agent-1", "query-2", 6) }, []any{"agent-1", "query-2", 6}},
+		{"RecallDetailed", func(r *reconnectingStore) {
+			_, _, _ = r.RecallDetailed(ctx, "agent-1", "query-2", 6)
+		}, []any{"agent-1", "query-2", 6}},
+		{"PutAlias", func(r *reconnectingStore) {
+			_ = r.PutAlias(ctx, "agent-1", "term-1", []string{"eq-1", "eq-2"})
+		}, []any{"agent-1", "term-1", []string{"eq-1", "eq-2"}}},
 		{"List", func(r *reconnectingStore) { _, _ = r.List("agent-1") }, []any{"agent-1"}},
 		{"ListAgents", func(r *reconnectingStore) { _, _ = r.ListAgents() }, nil},
 		{"Stats", func(r *reconnectingStore) { _, _ = r.Stats("agent-1") }, []any{"agent-1"}},

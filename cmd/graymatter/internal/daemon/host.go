@@ -426,3 +426,28 @@ func (b rememberBackend) RecallExplain(ctx context.Context, agentID, query strin
 	}
 	return nil, errors.New("memory store does not expose RecallExplain")
 }
+
+// RecallDetailed mirrors the Recall topK policy on the feedback path. The
+// facts are the daemon store's own Recall ranking; the block is additive.
+func (b rememberBackend) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	if rd, ok := b.AdvancedStore.(interface {
+		RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	}); ok {
+		return rd.RecallDetailed(ctx, agentID, query, topK)
+	}
+	return nil, "", errors.New("memory store does not expose RecallDetailed")
+}
+
+// PutAlias writes an alias fact through the concrete store. Alias facts are
+// never injectable; they only widen what later queries reach.
+func (b rememberBackend) PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error) {
+	if pa, ok := b.AdvancedStore.(interface {
+		PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error)
+	}); ok {
+		return pa.PutAlias(ctx, agentID, term, equivalents)
+	}
+	return memory.Fact{}, errors.New("memory store does not expose PutAlias")
+}

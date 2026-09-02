@@ -26,6 +26,15 @@ var (
 	// "<agentID>\x00<factID>" → text signature of the last successfully
 	// extracted version of the fact, so consolidation passes are incremental.
 	bucketKGExtracted = []byte("kg_extracted")
+	// bucketReformPending holds one pendingMiss per agent, for usage-alias
+	// learning: the content
+	// terms of the latest query whose match came back weak, waiting for the
+	// strong query that answers it. Key agentID → JSON.
+	bucketReformPending = []byte("reform_pending")
+	// bucketReformPairs accumulates reformulation-pair evidence: key
+	// "<agentID>\x00<termA>\x00<termB>" (terms sorted) → JSON count+lastAt.
+	// A pair promoted at the pre-registered threshold becomes a usage alias.
+	bucketReformPairs = []byte("reform_pairs")
 
 	// ErrStoreReadOnly is returned by mutating methods when the store was opened
 	// in read-only mode (e.g. another process holds the write lock).
@@ -96,6 +105,71 @@ type StoreConfig struct {
 	// facts, all weight on Keyword ignores age entirely. See
 	// docs/decisions/006-configurable-signal-weights.md.
 	SignalWeights *SignalWeights
+
+	// StemKeywords folds English morphology into the keyword signal, so a
+	// question about "backups" reaches a fact about "backup retention" and one
+	// about a "pager rotation" reaches "rotations were stretched". Three of the
+	// eight probes the keyword ranker missed on the revision harness failed on
+	// exactly that and nothing else.
+	//
+	// The zero value is off, and the PRODUCT default is on: graymatter.Config
+	// sets it (GRAYMATTER_STEM_KEYWORDS=0 opts out). The two disagree on
+	// purpose — a zero-value StoreConfig means "nothing configured", and every
+	// suite in this package pins ranking against that unconfigured baseline.
+	//
+	// It ships on because the delta was measured on a corpus it was not
+	// designed against: 25/35 -> 29/35 at 5k, 10k and 30k facts, winning four
+	// queries and losing none. The strict-subset property is the revert
+	// criterion (benchmarks/retrieval_quality/stem_ab_test.go).
+	//
+	// The cost is the scan path, measured at +61-90% across two machines. On
+	// the candidate-set path it is free on both: the index stems the corpus at
+	// write time and only the query at read time. Pure Go — no model, no download, no cgo
+	// (pkg/memory/stem.go).
+	StemKeywords bool
+
+	// UsageAliasLearning lets the store promote its own vocabulary
+	// from observed reformulation pairs (weak match followed by a strong one
+	// from the same agent), with no agent action and no server-side semantics
+	// — the LLM's reformulation is the semantic decision, the store only
+	// counts evidence and promotes on the second independent observation.
+	//
+	// Off by default, and it stayed off where StemKeywords did not: measured
+	// against real agent reformulations rather than a scripted one, opening
+	// the affinity gate is worth +2 families out of 40 and promotes about one
+	// junk pair in three. The mechanism earned its place in the tree; it did
+	// not earn the default. See pkg/memory/usagealias.go
+	// for the guardrails (k=2, one pending miss per agent, TTL, df filters,
+	// AliasSource="usage" so autonomy cannot masquerade as curation).
+	UsageAliasLearning bool
+
+	// UsageAliasAffinityMin sets how much lexical affinity an unknown word
+	// needs with the working word before a usage alias promotes: the minimum
+	// common leading prefix, in characters.
+	//
+	// 0 (the zero value) normalizes to 3 at Open: the conservative
+	// morphology-only gate, where co-occurrence evidence cannot distinguish a
+	// real bridge from sentence scaffolding, so without affinity the store
+	// would promote "who = payments" from a repeated question shape.
+	// -1 disables the gate: the store then learns the synonym class from
+	// single-gap evidence — the class real agents actually reformulate by,
+	// at a pollution risk measured by classifying every promoted pair over a
+	// blind evaluation corpus. Explicit positive values set a custom prefix
+	// threshold.
+	UsageAliasAffinityMin int
+
+	// CandidateRetrieval routes recall through the candidate-set index
+	// (pkg/memory/index.go) instead of loading and re-tokenising every fact
+	// per query. The ranking is identical by construction and by test — the
+	// index changes what gets read, never what gets scored — and the store
+	// falls back to the scan whenever the index cannot answer.
+	//
+	// The zero value is off, and the PRODUCT default is on: both of its gates
+	// went green on two machines (the numbers live on graymatter.Config). The
+	// two disagree on purpose, as they do on StemKeywords — a zero-value
+	// StoreConfig means "nothing configured", and every suite in this package
+	// pins ranking against that unconfigured baseline.
+	CandidateRetrieval bool
 
 	// MinRelevance drops results scoring below this fraction of the best
 	// score in the same result set. 0 — the zero value — disables the cut
@@ -176,6 +250,20 @@ type EdgeWriter interface {
 // structured storage with a pluggable VectorStore for similarity search.
 // All public methods are safe for concurrent use.
 type Store struct {
+	// idxVerified remembers which agents this process has already checked the
+	// expensive way (a full key count against the facts bucket). The check
+	// exists to catch a write path that bypassed index maintenance — a
+	// code-level mistake — so paying for it once per process is enough, and
+	// paying for it per recall would reintroduce the O(N) the index removes.
+	idxVerified   map[string]bool
+	idxVerifiedMu sync.Mutex
+
+	// spine caches each agent's ordered recency spine against the index write
+	// counter. See recall_indexed.go.
+	spine      map[string]spineSnapshot
+	partitions map[string]partitionSnapshot
+	spineMu    sync.RWMutex
+
 	db       *bolt.DB
 	vectors  VectorStore
 	embedder embedding.Provider
@@ -263,6 +351,14 @@ func Open(cfg StoreConfig) (*Store, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// UsageAliasAffinityMin normalizes 0 (the zero value) to 3 — the measured
+	// conservative gate — so the zero-value StoreConfig keeps the
+	// morphology-only behaviour every evaluation run used. -1 disables the gate
+	// entirely: the synonym-class measured mode, at a documented pollution
+	// cost.
+	if cfg.UsageAliasAffinityMin == 0 {
+		cfg.UsageAliasAffinityMin = 3
+	}
 	s := &Store{
 		db:             db,
 		vectors:        vectors,
@@ -291,6 +387,11 @@ func Open(cfg StoreConfig) (*Store, error) {
 		// (crash between bbolt commit and vector upsert, or transient failures)
 		// - and, after a provider switch, the full re-index queued above.
 		s.reconcileVectors()
+
+		// Expire reformulation pairs that never reached the promotion
+		// threshold within their evidence window: stale evidence must
+		// not promote vocabulary months later.
+		s.pruneReformPairs()
 
 		// Background reconcile loop: retries pending vectors on a cadence so the
 		// inconsistency window collapses to at most VectorReconcileInterval rather
@@ -395,6 +496,14 @@ func (s *Store) Put(ctx context.Context, agentID, text string) error {
 // returns exactly what landed, so callers never have to find their own write
 // again by scanning.
 func (s *Store) putReturningFact(ctx context.Context, agentID, text string) (Fact, error) {
+	return s.putReturningFactKind(ctx, agentID, text, KindFact, "")
+}
+
+// putReturningFactKind is putReturningFact with the fact's kind and alias
+// source. Alias facts skip the embedder on purpose: they are lexical glue,
+// never injectable, and a vector entry for one could only ever contribute a
+// rank nobody reads.
+func (s *Store) putReturningFactKind(ctx context.Context, agentID, text, kind, source string) (Fact, error) {
 	if s.readOnly {
 		return Fact{}, ErrStoreReadOnly
 	}
@@ -402,7 +511,7 @@ func (s *Store) putReturningFact(ctx context.Context, agentID, text string) (Fac
 
 	var emb []float32
 	var embedErr error
-	if s.embedder != nil {
+	if kind != KindAlias && s.embedder != nil {
 		emb, embedErr = s.embedder.Embed(ctx, text)
 		if embedErr != nil {
 			emb = nil
@@ -410,6 +519,8 @@ func (s *Store) putReturningFact(ctx context.Context, agentID, text string) (Fac
 	}
 
 	f := newFact(agentID, text, emb, s.now())
+	f.Kind = kind
+	f.AliasSource = source
 	hasEmbedding := len(emb) > 0
 
 	if err := s.db.Update(func(tx *bolt.Tx) error {
@@ -426,6 +537,24 @@ func (s *Store) putReturningFact(ctx context.Context, agentID, text string) (Fac
 		}
 		if err := tx.Bucket(bucketAgents).Put([]byte(agentID), []byte("1")); err != nil {
 			return err
+		}
+		// Candidate-set index. Inside the fact's own transaction, so the
+		// index can never be durable while the fact is not, or the reverse.
+		//
+		// Only when the store actually reads through it. Maintaining it
+		// unconditionally would have been simpler and was the first shape,
+		// but it made every write on every store pay for a path that is off
+		// by default — measured at roughly double the Put latency — and a
+		// store nobody opted in for should cost exactly what it cost before
+		// this file existed. Turning the flag on later is safe without it:
+		// the count will not match, and the first recall rebuilds.
+		if s.cfg.CandidateRetrieval {
+			if err := idxAddFact(tx, f, s.cfg.StemKeywords); err != nil {
+				return err
+			}
+			if err := idxBumpCount(tx, agentID, +1, s.cfg.StemKeywords); err != nil {
+				return err
+			}
 		}
 		if hasEmbedding {
 			pb, err := tx.Bucket(bucketPendingVector).CreateBucketIfNotExists([]byte(agentID))
@@ -477,8 +606,25 @@ func (s *Store) Delete(agentID, factID string) error {
 		if b == nil {
 			return nil
 		}
+		// Read before deleting: the index entries to erase are derived from
+		// the stored text, so once the fact is gone there is nothing left to
+		// derive them from.
+		if s.cfg.CandidateRetrieval {
+			if raw := b.Get([]byte(factID)); raw != nil {
+				if old, err := unmarshalFactLite(raw); err == nil {
+					if err := idxRemoveFact(tx, old, s.cfg.StemKeywords); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		if err := b.Delete([]byte(factID)); err != nil {
 			return err
+		}
+		if s.cfg.CandidateRetrieval {
+			if err := idxBumpCount(tx, agentID, -1, s.cfg.StemKeywords); err != nil {
+				return err
+			}
 		}
 		if kb := tx.Bucket(bucketKGExtracted); kb != nil {
 			return kb.Delete([]byte(agentID + "\x00" + factID))
@@ -700,7 +846,30 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 		if err != nil {
 			return err
 		}
-		return b.Put([]byte(f.ID), data)
+		// Candidate-set index. This is the path a revision takes — the
+		// tombstone is an UpdateFact — and it is also the path a CreatedAt
+		// rewrite takes, so both the term postings and the fact's place in the
+		// recency spine can move here. Erase the entries derived from what is
+		// stored, then write the ones the new version implies; doing it in
+		// that order is what keeps a rewritten text from stranding postings
+		// under its old vocabulary.
+		if !s.cfg.CandidateRetrieval {
+			return b.Put([]byte(f.ID), data)
+		}
+		if raw := b.Get([]byte(f.ID)); raw != nil {
+			if prev, uerr := unmarshalFactLite(raw); uerr == nil {
+				if err := idxRemoveFact(tx, prev, s.cfg.StemKeywords); err != nil {
+					return err
+				}
+			}
+		}
+		if err := b.Put([]byte(f.ID), data); err != nil {
+			return err
+		}
+		if err := idxAddFact(tx, f, s.cfg.StemKeywords); err != nil {
+			return err
+		}
+		return idxBumpCount(tx, agentID, 0, s.cfg.StemKeywords)
 	})
 }
 

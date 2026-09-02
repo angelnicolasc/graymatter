@@ -168,6 +168,23 @@ func (r *reconnectingStore) RecallExplain(ctx context.Context, agentID, query st
 	return out, err
 }
 
+func (r *reconnectingStore) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	var texts []string
+	var feedback string
+	err := r.do(func(s cliStore) error {
+		var e error
+		texts, feedback, e = s.RecallDetailed(ctx, agentID, query, topK)
+		return e
+	})
+	return texts, feedback, err
+}
+
+func (r *reconnectingStore) PutAlias(ctx context.Context, agentID, term string, equivalents []string) error {
+	return r.do(func(s cliStore) error {
+		return s.PutAlias(ctx, agentID, term, equivalents)
+	})
+}
+
 func (r *reconnectingStore) ListAgents() ([]string, error) {
 	var out []string
 	err := r.do(func(s cliStore) error {

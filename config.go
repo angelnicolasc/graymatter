@@ -2,6 +2,8 @@ package graymatter
 
 import (
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
@@ -145,6 +147,79 @@ type Config struct {
 	// best score in the same result set.
 	// Default: 0 — no cut, Recall returns exactly TopK as it always has.
 	MinRelevance float64
+
+	// StemKeywords folds English morphology into the keyword signal so a
+	// question about "backups" reaches a fact about "backup retention". Pure
+	// Go, no model, no download, no state.
+	//
+	// ON by default since the measurement that earned it: on a corpus this
+	// change was not designed against — the scale corpus, 35 probes, 5k/10k/30k
+	// facts — it lifts one-query retrieval from 25/35 to 29/35 at every size,
+	// and the four it fixes are morphology and nothing else (backups/backup,
+	// rotations/rotation, releases/release, deployment/deploy). The queries it
+	// fails with stemming are a STRICT SUBSET of the ones it fails without: it
+	// wins four and loses none. That subset property is the revert criterion,
+	// and TestStemmingNeverLosesAQueryItWinsWithout pins it.
+	//
+	// The cost is latency on the scan path, and it is not small. Two machines
+	// measured it at +61%/+65% and at +90%/+90% (10k and 30k facts), so the
+	// durable statement is the ratio and not either point: the scan pays
+	// roughly TWICE, and the candidate-set path pays NOTHING — 5 ms either way
+	// at 10k, 11 ms at 30k, on both machines.
+	//
+	// That gap is structural, not luck. On the scan path keywordScoreDetailed
+	// re-tokenises every stored fact on every query, so each token of each fact
+	// walks the suffix rules once per query. The index stems the corpus once at
+	// write time and stems only the query's own terms at read time: O(N) versus
+	// O(query). The cost falls away entirely on the candidate-set path, which
+	// is default ON now — its gate was the counterpart of this default, not a
+	// competing optimisation. Below a few thousand facts it is single-digit
+	// milliseconds either way.
+	//
+	// Env: GRAYMATTER_STEM_KEYWORDS=0 opts out.
+	StemKeywords bool
+
+	// UsageAliasLearning lets the store promote its own vocabulary from
+	// observed reformulations: a weak match followed by a strong one from the
+	// same agent is evidence that the agent's word and the store's word mean
+	// the same thing, and the second independent observation of the pair
+	// promotes an alias. No agent action, no server-side semantics, no model.
+	// Off by default; see pkg/memory/usagealias.go for the guardrails.
+	//
+	// Env: GRAYMATTER_USAGE_ALIAS=1
+	UsageAliasLearning bool
+
+	// UsageAliasAffinityMin is how much lexical affinity an unknown word needs
+	// with the working word before the store promotes a usage alias: the
+	// minimum shared leading prefix, in characters.
+	//
+	// 0 (the zero value) means the conservative default of 3 — the
+	// morphology class, where co-occurrence evidence is decisive. -1 removes
+	// the gate and lets the store learn the synonym class as well.
+	//
+	// Measured on a blind evaluation corpus with real agent reformulations, the
+	// open gate is worth +2 families out of 40 and promotes about one junk
+	// pair in three. That is why it is reachable and not a default.
+	//
+	// Env: GRAYMATTER_USAGE_ALIAS_AFFINITY (e.g. -1)
+	UsageAliasAffinityMin int
+
+	// CandidateRetrieval answers a recall from an inverted index and a
+	// recency spine instead of loading and re-tokenising every stored fact.
+	// The ranking is identical — pinned by a test that runs both paths over
+	// one store and compares fused scores, per-signal ranks and lineage — so
+	// this changes what gets read, never what gets returned.
+	//
+	// ON by default since both of its gates went green on two machines: the
+	// 30k latency gate measured p99 20.4 ms and 21.2 ms against the 40 ms bar,
+	// with a harness that verifies every measured recall returned facts, and
+	// the write-cost bar (<= 3 ms) was ratified by the owner — a write-once,
+	// read-many store pays ~1.5 ms per Put to keep every read sub-linear.
+	// A store written before this default keeps answering: the first recall
+	// rebuilds the index and the ranking does not change.
+	//
+	// Env: GRAYMATTER_CANDIDATE_RETRIEVAL=0 opts out.
+	CandidateRetrieval bool
 }
 
 // DefaultConfig returns a Config with all defaults applied from environment
@@ -168,6 +243,10 @@ func DefaultConfig() Config {
 		DecayHalfLife:           720 * time.Hour,
 		AsyncConsolidate:        true,
 		MaxAsyncConsolidations:  2,
+		StemKeywords:            envBoolDefault("GRAYMATTER_STEM_KEYWORDS", true),
+		UsageAliasLearning:      envBool("GRAYMATTER_USAGE_ALIAS"),
+		UsageAliasAffinityMin:   envInt("GRAYMATTER_USAGE_ALIAS_AFFINITY"),
+		CandidateRetrieval:      envBoolDefault("GRAYMATTER_CANDIDATE_RETRIEVAL", true),
 	}
 }
 
@@ -193,6 +272,46 @@ func resolveConsolidateLLM() string {
 func envOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// envInt reads a signed integer knob. Unset or unparseable is 0, which every
+// consumer reads as "use the built-in default" — so a typo degrades to the
+// documented behaviour instead of to a number nobody chose.
+func envInt(key string) int {
+	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// envBool reads an opt-in switch: unset means off, and only an explicit yes
+// turns it on.
+//
+// DefaultConfig is the single place the daemon, the CLI's --no-daemon path,
+// the MCP server, the REST server and the harness all build their store from,
+// so wiring a switch there reaches every surface at once — and keeps the
+// README's promise intact, since an environment variable is not a config file.
+func envBool(key string) bool {
+	return envBoolDefault(key, false)
+}
+
+// envBoolDefault reads a switch that has a default in either direction.
+//
+// envBool alone cannot express a default-on flag: it maps everything that is
+// not an explicit yes to false, so "unset" and "0" are the same answer and a
+// flag flipped to default-on becomes impossible to turn off. That is the same
+// shape as the affinity knob nobody could reach and the memory_alias that
+// resolved nowhere — a setting that exists in the documentation and not in the
+// product. Three states, so an opt-out is sayable.
+func envBoolDefault(key string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
 	}
 	return def
 }

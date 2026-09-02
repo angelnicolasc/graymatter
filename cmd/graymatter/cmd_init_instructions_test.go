@@ -23,7 +23,7 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent`, not `agent_id`"} {
+	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent`, not `agent_id`", "memory_alias", "weak-match"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
 		}

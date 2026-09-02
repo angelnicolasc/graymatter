@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -31,7 +33,11 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		return s.handleMemorySearchExplain(ctx, agentID, query, topK)
 	}
 
-	facts, err := s.backend.Recall(ctx, agentID, query, topK)
+	// RecallDetailed over Recall: same facts, same order — the second return
+	// is the additive weak-match vocabulary block (empty when the match is
+	// strong), which is what lets the agent reformulate once, informed,
+	// instead of guessing N times.
+	facts, feedback, err := s.backend.RecallDetailed(ctx, agentID, query, topK)
 	if err != nil {
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
@@ -42,7 +48,10 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 
 	if len(facts) == 0 {
 		notice := fmt.Sprintf("No memories found for agent %q matching %q.", agentID, query)
-		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}}, notice)
+		if feedback != "" {
+			notice += "\n\n" + feedback
+		}
+		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}, Feedback: feedback}, notice)
 	}
 
 	var sb strings.Builder
@@ -50,7 +59,34 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	for i, f := range facts {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, f))
 	}
-	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts}, sb.String())
+	if feedback != "" {
+		sb.WriteString("\n" + feedback + "\n")
+	}
+	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts, Feedback: feedback}, sb.String())
+}
+
+// handleMemoryAlias is the memory_alias entry point: it teaches the store's
+// vocabulary so later searches bridging the two sides reach the right facts.
+func (s *Server) handleMemoryAlias(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	agentID, ok := getString(args, "agent_id")
+	if !ok || agentID == "" {
+		return toolError("agent_id is required")
+	}
+	term, ok := getString(args, "term")
+	if !ok || strings.TrimSpace(term) == "" {
+		return toolError("term is required")
+	}
+	equivalents := getStringSlice(args, "equivalents")
+	if len(equivalents) == 0 {
+		return toolError("equivalents is required and must hold at least one non-empty value")
+	}
+	if err := s.backend.PutAlias(ctx, agentID, term, equivalents); err != nil {
+		return toolError(fmt.Sprintf("alias error: %v", err))
+	}
+	out := aliasResult{AgentID: agentID, Term: term, Equivalents: equivalents, Stored: true}
+	return toolStructured(out, fmt.Sprintf("Alias stored for agent %q: %q = %s. Future searches mentioning either side now reach the facts the other side matches.",
+		agentID, term, strings.Join(equivalents, ", ")))
 }
 
 // handleMemorySearchExplain is the explain=true branch of memory_search: the
@@ -77,6 +113,18 @@ func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query s
 			r.Ranks.FusedScore, r.Ranks.VectorRank, r.Ranks.KeywordRank, r.Ranks.RecencyRank, r.Ranks.K,
 			r.Weight, r.AgeDays, r.Provenance.WrittenAt.Format("2006-01-02")))
 		sb.WriteString(fmt.Sprintf("   fact_id %s\n", r.Provenance.FactID))
+		// The structured payload carries this under `explained`, but the agent
+		// reads the prose. A value that replaced an earlier one is different
+		// information from a value nobody ever questioned, and leaving it out
+		// of the text is leaving it out.
+		if n := len(r.Provenance.Supersedes); n > 0 {
+			noun := "version"
+			if n > 1 {
+				noun = "versions"
+			}
+			sb.WriteString(fmt.Sprintf("   supersedes %d earlier %s: %s\n", n, noun,
+				strings.Join(r.Provenance.Supersedes, ", ")))
+		}
 	}
 	return toolStructured(searchResult{
 		AgentID: agentID,
@@ -375,4 +423,104 @@ func newFactID(backend Backend, agentID string, before []memory.Fact) string {
 func (s *Server) supersedeFact(agentID string, f memory.Fact, supersededBy string) error {
 	f.SupersededBy = supersededBy
 	return s.backend.UpdateFact(agentID, f)
+}
+
+// handleMemorySearchBatch answers several queries in one tool call.
+//
+// The fan-out lives here rather than in pkg/memory because the MCP server
+// talks to the store through the Backend interface, which is either an
+// in-process store or an RPC client to the daemon — both already safe for
+// concurrent use, and both benefiting from the same fan-out. Putting it here
+// means the daemon needs no new method and the wire protocol does not change.
+//
+// Per-query failures are reported per query. An agent asking six questions
+// should get the five answers that worked rather than one error for all of
+// them; a batch only fails outright if the whole store is unreachable, which
+// each individual call would report anyway.
+func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, queries []string, topK int) (*mcp.CallToolResult, error) {
+	type row struct {
+		query string
+		facts []string
+		err   error
+	}
+	rows := make([]row, len(queries))
+
+	limit := runtime.GOMAXPROCS(0)
+	if limit > len(queries) {
+		limit = len(queries)
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i, q := range queries {
+		wg.Add(1)
+		go func(i int, q string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			rows[i].query = q
+			facts, err := s.backend.Recall(ctx, agentID, q, topK)
+			if err != nil {
+				rows[i].err = err
+				return
+			}
+			if topK > 0 && topK < len(facts) {
+				facts = facts[:topK]
+			}
+			rows[i].facts = facts
+		}(i, q)
+	}
+	wg.Wait()
+
+	batch := make([]memory.BatchResult, 0, len(rows))
+	for _, r := range rows {
+		batch = append(batch, memory.BatchResult{Query: r.query, Facts: r.facts})
+	}
+	merged := memory.MergedFacts(batch)
+
+	out := batchResult{AgentID: agentID, Count: len(merged), Merged: merged}
+	for _, r := range rows {
+		e := ""
+		if r.err != nil {
+			e = r.err.Error()
+		}
+		out.PerQuery = append(out.PerQuery, struct {
+			Query string   `json:"query"`
+			Facts []string `json:"facts"`
+			Error string   `json:"error,omitempty"`
+		}{Query: r.query, Facts: r.facts, Error: e})
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Answered %d queries for agent %q — %d distinct facts:\n\n", len(queries), agentID, len(merged))
+	for i, f := range merged {
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, f)
+	}
+	var failed []string
+	for _, r := range rows {
+		if r.err != nil {
+			failed = append(failed, fmt.Sprintf("%q: %v", r.query, r.err))
+		}
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(&sb, "\n%d of %d queries failed:\n  %s\n", len(failed), len(queries), strings.Join(failed, "\n  "))
+	}
+	if len(merged) == 0 && len(failed) == 0 {
+		return toolStructured(out, fmt.Sprintf("No memories found for agent %q matching any of the %d queries.", agentID, len(queries)))
+	}
+	return toolStructured(out, sb.String())
+}
+
+// handleMemorySearchBatchTool is the memory_search_batch entry point: it reads
+// the arguments and delegates to the shared fan-out.
+func (s *Server) handleMemorySearchBatchTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	agentID, ok := getString(args, "agent_id")
+	if !ok || agentID == "" {
+		return toolError("agent_id is required")
+	}
+	queries := getStringSlice(args, "queries")
+	if len(queries) == 0 {
+		return toolError("queries is required and must hold at least one non-empty query")
+	}
+	return s.handleMemorySearchBatch(ctx, agentID, queries, getInt(args, "top_k", 0))
 }

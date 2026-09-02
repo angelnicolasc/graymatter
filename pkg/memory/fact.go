@@ -48,6 +48,28 @@ type Fact struct {
 	// key and load as inferred.
 	Confidence string `json:"confidence,omitempty"`
 
+	// Kind marks what the fact carries. Empty (the zero value, and everything
+	// written before v0.18.0) is regular content. KindAlias marks a vocabulary
+	// alias written by memory_alias: "broker = event bus". Alias facts are
+	// vocabulary mapping, not content — they are excluded from the ranking
+	// corpus, the document frequencies and every result set (non-injectable
+	// by construction), and their only reader is the query-expansion step in
+	// the recall pipeline. They stay revisable with the ordinary machinery:
+	// memory_reflect supersedes one exactly like any fact, and a superseded
+	// alias stops expanding.
+	Kind string `json:"kind,omitempty"`
+
+	// AliasSource records who authored an alias fact. Empty — the zero value,
+	// and every alias written before v0.18.1 — is agent-written: the
+	// deliberate act of memory_alias. "usage" marks an alias the store
+	// promoted itself from observed reformulation pairs (see
+	// UsageAliasLearning). The distinction is what keeps autonomy from
+	// becoming pollution: usage aliases carry the promotion evidence in the
+	// reform_pairs bucket and can be pruned by it, agent aliases are
+	// curation. A revision always writes the replacement as agent-authored —
+	// the new wording is the revising agent's decision.
+	AliasSource string `json:"alias_source,omitempty"`
+
 	// Pinned exempts the fact from decay, pruning and summarisation: the
 	// user declared it permanent (a standing obligation, an architecture
 	// decision), and the forgetting curve must not collect it during a
@@ -71,6 +93,19 @@ type Fact struct {
 // excludes a fact from recall; this one records that the removal was a
 // deliberate agent decision rather than a correction pointing at a newer fact.
 const SupersededByAgent = "agent"
+
+// Fact kinds (Fact.Kind). The zero value is regular content.
+const (
+	// KindFact is the empty default: every fact written before v0.18.0.
+	KindFact = ""
+	// KindAlias marks a vocabulary alias written by PutAlias / memory_alias.
+	KindAlias = "alias"
+)
+
+// IsAlias reports whether the fact carries vocabulary mapping rather than
+// content. Alias facts are never injectable: the recall pipeline routes them
+// to the query-expansion map instead of the ranking corpus.
+func (f Fact) IsAlias() bool { return f.Kind == KindAlias }
 
 // IsSuperseded reports whether the fact has been retired and must be kept out
 // of retrieval.
@@ -123,6 +158,8 @@ type factLite struct {
 	Weight       float64   `json:"weight"`
 	SupersededBy string    `json:"superseded_by,omitempty"`
 	Confidence   string    `json:"confidence,omitempty"`
+	Kind         string    `json:"kind,omitempty"`
+	AliasSource  string    `json:"alias_source,omitempty"`
 	Pinned       bool      `json:"pinned,omitempty"`
 }
 
@@ -140,6 +177,8 @@ func unmarshalFactLite(data []byte) (Fact, error) {
 		Weight:       l.Weight,
 		SupersededBy: l.SupersededBy,
 		Confidence:   l.Confidence,
+		Kind:         l.Kind,
+		AliasSource:  l.AliasSource,
 		Pinned:       l.Pinned,
 	}, nil
 }

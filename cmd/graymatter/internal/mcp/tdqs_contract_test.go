@@ -61,7 +61,7 @@ func listToolDefs(t *testing.T) map[string]toolDef {
 func TestToolDefinitionContract(t *testing.T) {
 	byName := listToolDefs(t)
 
-	wantNames := []string{"memory_search", "memory_add", "checkpoint_save", "checkpoint_resume", "memory_reflect"}
+	wantNames := []string{"memory_search", "memory_search_batch", "memory_add", "memory_alias", "checkpoint_save", "checkpoint_resume", "memory_reflect"}
 	if len(byName) != len(wantNames) {
 		t.Fatalf("got %d tools, want %d", len(byName), len(wantNames))
 	}
@@ -79,6 +79,7 @@ func TestToolDefinitionContract(t *testing.T) {
 	startVerb := map[string]string{
 		"memory_search":     "Search",
 		"memory_add":        "Store",
+		"memory_alias":      "Declare",
 		"checkpoint_save":   "Persist",
 		"checkpoint_resume": "Read",
 		"memory_reflect":    "Curate",
@@ -88,6 +89,7 @@ func TestToolDefinitionContract(t *testing.T) {
 	sibling := map[string]string{
 		"memory_search":     "memory_add",
 		"memory_add":        "memory_reflect",
+		"memory_alias":      "memory_search",
 		"checkpoint_save":   "checkpoint_resume",
 		"checkpoint_resume": "checkpoint_save",
 		"memory_reflect":    "memory_add",
@@ -164,11 +166,13 @@ func TestToolSchemaContract(t *testing.T) {
 		required []string
 	}
 	want := map[string]paramSpec{
-		"memory_search":     {props: []string{"agent_id", "query", "top_k", "explain"}, required: []string{"agent_id", "query"}},
-		"memory_add":        {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
-		"checkpoint_save":   {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
-		"checkpoint_resume": {props: []string{"agent_id"}, required: []string{"agent_id"}},
-		"memory_reflect":    {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action"}},
+		"memory_search":       {props: []string{"agent_id", "query", "top_k", "explain"}, required: []string{"agent_id", "query"}},
+		"memory_search_batch": {props: []string{"agent_id", "queries", "top_k"}, required: []string{"agent_id", "queries"}},
+		"memory_add":          {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
+		"memory_alias":        {props: []string{"agent_id", "term", "equivalents"}, required: []string{"agent_id", "term", "equivalents"}},
+		"checkpoint_save":     {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
+		"checkpoint_resume":   {props: []string{"agent_id"}, required: []string{"agent_id"}},
+		"memory_reflect":      {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action"}},
 	}
 
 	for name, spec := range want {

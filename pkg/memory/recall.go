@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strings"
@@ -23,9 +24,22 @@ type recallPipeline struct {
 	recRank    map[string]int
 	k          float64 // RRF constant in force
 	nowT       time.Time
+	// feedback carries the weak-match vocabulary block (empty when the match
+	// is strong enough that the weak-match trigger stays quiet). Additive
+	// output only — nothing in the ranking reads it.
+	feedback string
+	// df is the corpus document frequency of every term, the statistics the
+	// usage-alias learning hook reads to tell an unknown caller word from a known
+	// store word. Same fold as the scorer.
+	df map[string]int
 	// supersededTexts holds the tombstoned texts the filter dropped, so the
 	// KG enrichment step can keep a superseded fact's text out of the result.
 	supersededTexts map[string]bool
+	// retiredBy maps a replacement's ID to the facts it directly retired. The
+	// filter loop below already visits every tombstone, so building it costs
+	// one map write per tombstone and no extra read. It exists so a receipt
+	// can answer "what did this value replace" — the ranking never reads it.
+	retiredBy map[string][]string
 }
 
 // Recall performs hybrid retrieval for agentID given a query string.
@@ -36,10 +50,22 @@ type recallPipeline struct {
 //
 // Returns the top-k fact texts, ready to inject into a system prompt.
 func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]string, error) {
+	texts, _, err := s.RecallDetailed(ctx, agentID, query, topK)
+	return texts, err
+}
+
+// RecallDetailed is Recall plus the weak-match vocabulary block: when the
+// query's vocabulary barely overlaps the store's (the weak-match trigger),
+// the second return carries a short feedback
+// block naming the store's nearby vocabulary and the memory_alias action. The
+// facts and their order are identical to Recall's by construction — Recall
+// delegates here and drops the block — and TestFeedbackAdditiveRanking pins
+// it. The block is additive text; nothing in the ranking reads it.
+func (s *Store) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
 	start := time.Now()
 	p, err := s.runRecallPipeline(ctx, agentID, query, topK)
 	if err != nil || p == nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Collect top-k, deduplicated by text (the documented contract), updating
@@ -74,6 +100,13 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 		touched = append(touched, *f)
 	}
 	s.touchFacts(touched)
+
+	// Usage-alias learning: the store learns its vocabulary from observed reformulations —
+	// weak match leaves a pending miss, the strong match that answers it
+	// records the evidence, the second observation promotes. Best-effort and
+	// off by default (StoreConfig.UsageAliasLearning); a learning write must
+	// never break a read.
+	s.learnFromRecall(ctx, agentID, query, p)
 
 	// Enrich with knowledge graph neighbors (optional; graph may be nil).
 	s.mu.RLock()
@@ -117,7 +150,7 @@ func (s *Store) Recall(ctx context.Context, agentID, query string, topK int) ([]
 	if s.cfg.OnRecall != nil {
 		s.cfg.OnRecall(agentID, query, len(result), time.Since(start))
 	}
-	return result, nil
+	return result, p.feedback, nil
 }
 
 // RecallExplain performs the same hybrid retrieval as Recall and returns one
@@ -169,11 +202,48 @@ func (s *Store) RecallExplain(ctx context.Context, agentID, query string, topK i
 // not an error; the OnRecall hook still fires on the live-but-all-tombstoned
 // path so observability sees the recall happened and returned nothing.
 func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, topK int) (*recallPipeline, error) {
+	if s.cfg.CandidateRetrieval {
+		p, err := s.runRecallPipelineIndexed(ctx, agentID, query, topK)
+		if err == nil {
+			return p, nil
+		}
+		// Only "this index cannot answer" falls through to the scan. A real
+		// storage error must surface, not be laundered into a slow success
+		// that hides a broken store.
+		if !errors.Is(err, errIndexUnusable) {
+			return nil, err
+		}
+	}
+	return s.runRecallPipelineScan(ctx, agentID, query, topK)
+}
+
+// runRecallPipelineScan is the original path: load every fact the agent owns,
+// score all of them, fuse. It is the reference implementation the indexed path
+// is tested against, and the fallback whenever the index cannot answer.
+func (s *Store) runRecallPipelineScan(ctx context.Context, agentID, query string, topK int) (*recallPipeline, error) {
 	start := time.Now()
 	stored, err := s.listLite(agentID)
 	if err != nil || len(stored) == 0 {
 		return nil, err
 	}
+
+	// Alias facts carry vocabulary mapping, not content: they never
+	// enter the ranking corpus, the document frequencies or any result set —
+	// non-injectable by construction. A superseded alias stops expanding and
+	// dies like any fact, inheriting memory_reflect's machinery.
+	var aliases []Fact
+	content := make([]Fact, 0, len(stored))
+	for _, f := range stored {
+		if f.Kind == KindAlias {
+			if !f.IsSuperseded() {
+				aliases = append(aliases, f)
+			}
+			continue
+		}
+		content = append(content, f)
+	}
+	aliasMap := parseAliasFacts(aliases)
+	effectiveQuery := expandQuery(query, aliasMap, s.cfg.StemKeywords)
 
 	// Drop superseded facts before anything is scored. Filtering here rather
 	// than at the end means a tombstoned fact cannot displace a live one from
@@ -182,14 +252,21 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 	// The vector index is deliberately not filtered: it can still return a
 	// superseded ID, but the fusion loop iterates over facts, so such an ID
 	// only ever contributes a rank nobody reads.
-	facts := make([]Fact, 0, len(stored))
+	facts := make([]Fact, 0, len(content))
 	var supersededTexts map[string]bool
-	for _, f := range stored {
+	var retiredBy map[string][]string
+	for _, f := range content {
 		if f.IsSuperseded() {
 			if supersededTexts == nil {
 				supersededTexts = make(map[string]bool)
+				retiredBy = make(map[string][]string)
 			}
 			supersededTexts[f.Text] = true
+			// SupersededByAgent means "retired with nothing in its place", so
+			// there is no replacement to hang the lineage off.
+			if f.SupersededBy != SupersededByAgent {
+				retiredBy[f.SupersededBy] = append(retiredBy[f.SupersededBy], f.ID)
+			}
 			continue
 		}
 		facts = append(facts, f)
@@ -202,8 +279,10 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 	}
 
 	factByID := make(map[string]*Fact, len(facts))
+	factIndex := make(map[string]int, len(facts))
 	for i := range facts {
 		factByID[facts[i].ID] = &facts[i]
+		factIndex[facts[i].ID] = i
 	}
 
 	// rankBefore is the total order every ranking below uses: score
@@ -234,7 +313,7 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 
 	// --- Signal 1: vector similarity ---
 	vectorRank := make(map[string]int, topK*2) // factID → rank (1-based)
-	vecResults, _ := s.vectorSearch(ctx, agentID, query, topK*2)
+	vecResults, _ := s.vectorSearch(ctx, agentID, effectiveQuery, topK*2)
 	// Impose the same total order rankBefore uses everywhere else — score
 	// descending, then ID ascending — before turning results into ranks. The
 	// backend's own ordering is unspecified for equal similarities (chromem
@@ -253,7 +332,12 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 	}
 
 	// --- Signal 2: keyword relevance ---
-	kwScores := keywordScore(query, facts)
+	//
+	// The detailed variant also returns the corpus statistics the weak-match
+	// trigger and the vocabulary neighbourhood read — the specification
+	// requires the trigger to cost no extra pass, so this is the same single
+	// pass with the same scores.
+	kwScores, df, perFactTf := keywordScoreDetailed(effectiveQuery, facts, s.cfg.StemKeywords)
 	type kwEntry struct {
 		id    string
 		score float64
@@ -352,6 +436,37 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 		allScored = allScored[:cut]
 	}
 
+	// The scan path answers the diagnostic's three questions from the arrays
+	// it already built; the candidate-set path answers them from the index.
+	// Same spec, one implementation.
+	feedback := weakMatchFeedback(weakMatchInput{
+		originalQuery:  query,
+		effectiveQuery: effectiveQuery,
+		doStem:         s.cfg.StemKeywords,
+		n:              len(facts),
+		df:             func(t string) int { return df[t] },
+		tf: func(id string) map[string]int {
+			if idx, ok := factIndex[id]; ok {
+				return perFactTf[idx]
+			}
+			return nil
+		},
+		seedDocs: func(seeds map[string]bool) []map[string]int {
+			out := make([]map[string]int, 0, len(perFactTf))
+			for _, tf := range perFactTf {
+				for t := range tf {
+					if seeds[t] {
+						out = append(out, tf)
+						break
+					}
+				}
+			}
+			return out
+		},
+		ranked: allScored,
+		topK:   topK,
+	})
+
 	return &recallPipeline{
 		facts:           facts,
 		factByID:        factByID,
@@ -362,7 +477,39 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 		k:               k,
 		nowT:            nowT,
 		supersededTexts: supersededTexts,
+		retiredBy:       retiredBy,
+		feedback:        feedback,
+		df:              df,
 	}, nil
+}
+
+// lineage returns every fact the given one replaced, oldest edge last, walking
+// the supersede chain transitively: when a value was corrected twice, the live
+// fact names both retired versions, not only the one it directly replaced.
+//
+// The walk carries its own visited set. A supersede cycle is already a doctor
+// finding rather than an impossibility, and a receipt is not the place to
+// discover it by hanging.
+func (p *recallPipeline) lineage(id string) []string {
+	if len(p.retiredBy) == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{id: true}
+	queue := []string{id}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, retired := range p.retiredBy[cur] {
+			if seen[retired] {
+				continue
+			}
+			seen[retired] = true
+			out = append(out, retired)
+			queue = append(queue, retired)
+		}
+	}
+	return out
 }
 
 // keywordScore returns a TF-IDF-like score for each fact against the query.
@@ -373,46 +520,62 @@ func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, to
 // two-pass version re-tokenized every fact (10k facts ≈ 11 ms per pass, which
 // showed up directly in the hook latency gate), with byte-identical scores.
 func keywordScore(query string, facts []Fact) map[string]float64 {
-	queryTerms := tokenize(query)
+	return keywordScoreStem(query, facts, false)
+}
+
+// keywordScoreStem retains the pre-feedback signature: the plain scores.
+func keywordScoreStem(query string, facts []Fact, doStem bool) map[string]float64 {
+	scores, _, _ := keywordScoreDetailed(query, facts, doStem)
+	return scores
+}
+
+// keywordScoreDetailed is keywordScoreStem plus the corpus statistics the
+// weak-match trigger and the vocabulary neighbourhood read: the document
+// frequency of every corpus term (not just the query's) and each fact's
+// token→frequency map. One tokenize pass per fact — the same pass the two-
+// pass comment above describes — so the feedback costs nothing extra over
+// the plain scorer, and the scores are byte-identical.
+func keywordScoreDetailed(query string, facts []Fact, doStem bool) (map[string]float64, map[string]int, []map[string]int) {
+	queryTerms := tokenizeStem(query, doStem)
 	if len(queryTerms) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 
-	type factTerms struct {
-		terms []string
-		tf    map[string]int
-	}
-	perFact := make([]factTerms, len(facts))
+	perFactTf := make([]map[string]int, len(facts))
+	factLen := make([]int, len(facts))
 	df := make(map[string]int, len(queryTerms)*8)
 	for i, f := range facts {
-		terms := tokenize(f.Text)
+		terms := tokenizeStem(f.Text, doStem)
 		tf := make(map[string]int, len(terms))
 		for _, t := range terms {
 			tf[t]++
 		}
 		// DF: how many facts contain each term — exactly the set of unique
-		// terms in the fact, which the tf map already holds.
+		// terms in the fact, which the tf map already holds. Computed for
+		// every corpus term, because the vocabulary neighbourhood's idf needs
+		// document frequencies for candidate terms the query never mentioned.
 		for t := range tf {
 			df[t]++
 		}
-		perFact[i] = factTerms{terms: terms, tf: tf}
+		perFactTf[i] = tf
+		factLen[i] = len(terms)
 	}
 
 	n := float64(len(facts))
 	scores := make(map[string]float64, len(facts))
-	for i, f := range facts {
+	for i := range facts {
 		var score float64
 		for _, qt := range queryTerms {
-			if count, ok := perFact[i].tf[qt]; ok {
+			if count, ok := perFactTf[i][qt]; ok {
 				idf := math.Log((n + 1) / (float64(df[qt]) + 1))
 				score += float64(count) * idf
 			}
 		}
 		if score > 0 {
-			scores[f.ID] = score / float64(len(perFact[i].terms)+1)
+			scores[facts[i].ID] = score / float64(factLen[i]+1)
 		}
 	}
-	return scores
+	return scores, df, perFactTf
 }
 
 // stopWordSet is allocated once at package init time and shared across all calls.
@@ -431,13 +594,22 @@ var stopWordSet = func() map[string]bool {
 }()
 
 // tokenize splits text into lowercase tokens, removing stop words.
-func tokenize(text string) []string {
+func tokenize(text string) []string { return tokenizeStem(text, false) }
+
+// tokenizeStem is tokenize with the morphology fold made explicit. Stopwords
+// are matched before stemming, against the word as written: the stop list is a
+// list of surface forms, and stemming it first would let "does" survive as
+// "doe" while "do" is dropped.
+func tokenizeStem(text string, doStem bool) []string {
 	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return !('a' <= r && r <= 'z') && !('0' <= r && r <= '9')
 	})
 	result := make([]string, 0, len(words))
 	for _, w := range words {
 		if len(w) > 1 && !stopWordSet[w] {
+			if doStem {
+				w = stem(w)
+			}
 			result = append(result, w)
 		}
 	}

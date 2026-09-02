@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // TestInitializeCarriesInstructions goes through HandleMessage so it asserts
@@ -51,6 +52,28 @@ func TestInitializeCarriesInstructions(t *testing.T) {
 	if !strings.Contains(resp.Result.Instructions, "memory_search") ||
 		!strings.Contains(resp.Result.Instructions, "memory_reflect") {
 		t.Error("instructions must name the tools they tell the model to call")
+	}
+	// The weak-match protocol rides the session briefing because two measured
+	// arms proved the block alone is not a teaching channel (217 recalls, 0
+	// aliases). If this pin fails, the affordance went dark again — the
+	// uninstructed arm will regress to 98-119 calls.
+	// The name is asserted as a LITERAL, not as memory.FeedbackAction.
+	// Reading the constant here looked stricter and was vacuous: the
+	// instructions are built by interpolating that same constant, so the
+	// comparison held whatever the constant said and the pin could never
+	// fail. A mutation run proved it — renaming the constant broke the
+	// block test and the CLI test and left this one green. A contract
+	// shared by a briefing, a command alias and an MCP tool name needs an
+	// independent witness, not a mirror.
+	const wantAction = "memory_alias"
+	if memory.FeedbackAction != wantAction {
+		t.Fatalf("the briefing now names %q: update the CLI alias, the MCP tool "+
+			"registration and the init block together, then this literal",
+			memory.FeedbackAction)
+	}
+	if !strings.Contains(resp.Result.Instructions, "weak-match") ||
+		!strings.Contains(resp.Result.Instructions, wantAction) {
+		t.Errorf("instructions must carry the weak-match protocol naming %q", wantAction)
 	}
 }
 

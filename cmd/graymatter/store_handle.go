@@ -32,6 +32,12 @@ type cliStore interface {
 	// RecallExplain is the Recall ranking with per-fact receipts (v0.17.0).
 	// TopK<=0 uses the store's configured default, like Recall.
 	RecallExplain(ctx context.Context, agentID, query string, topK int) ([]memory.RecallReceipt, error)
+	// RecallDetailed is the Recall ranking plus the weak-match vocabulary
+	// block (v0.18.0): identical facts, additive feedback text.
+	RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	// PutAlias teaches the store's vocabulary (v0.18.0): term ≡ equivalents.
+	// Alias facts are never injectable.
+	PutAlias(ctx context.Context, agentID, term string, equivalents []string) error
 	List(agentID string) ([]memory.Fact, error)
 	ListAgents() ([]string, error)
 	Stats(agentID string) (memory.MemoryStats, error)
@@ -225,6 +231,30 @@ func (d *directStore) RecallExplain(ctx context.Context, agentID, query string, 
 		return re.RecallExplain(ctx, agentID, query, topK)
 	}
 	return nil, fmt.Errorf("memory store does not expose RecallExplain")
+}
+
+// RecallDetailed reaches the concrete store the same way RecallExplain does.
+func (d *directStore) RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error) {
+	if topK <= 0 {
+		topK = d.mem.Config().TopK
+	}
+	if rd, ok := d.store.(interface {
+		RecallDetailed(ctx context.Context, agentID, query string, topK int) ([]string, string, error)
+	}); ok {
+		return rd.RecallDetailed(ctx, agentID, query, topK)
+	}
+	return nil, "", fmt.Errorf("memory store does not expose RecallDetailed")
+}
+
+// PutAlias writes an alias fact through the concrete store.
+func (d *directStore) PutAlias(ctx context.Context, agentID, term string, equivalents []string) error {
+	if pa, ok := d.store.(interface {
+		PutAlias(ctx context.Context, agentID, term string, equivalents []string) (memory.Fact, error)
+	}); ok {
+		_, err := pa.PutAlias(ctx, agentID, term, equivalents)
+		return err
+	}
+	return fmt.Errorf("memory store does not expose PutAlias")
 }
 
 func (d *directStore) List(agentID string) ([]memory.Fact, error) { return d.store.List(agentID) }
