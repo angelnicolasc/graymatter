@@ -40,6 +40,13 @@ GrayMatter is a general-purpose MCP server. The clients listed below are
 just the ones we auto-wire; any MCP-compatible client works over stdio
 (` + "`graymatter mcp serve`" + `) or HTTP (` + "`graymatter mcp serve --http 127.0.0.1:8080`" + `).
 
+--global does not replace the normal setup of the current project. It also
+writes the managed memory instructions to Claude Code and OpenCode's home
+files, so agents know when to call GrayMatter wherever its MCP tools are
+available. Project-scoped MCP configs remain per project and must be wired
+there by init or manual configuration; Codex is the exception because its MCP
+config is already home-scoped.
+
 On Windows, init appends the executable's directory to your user PATH
 (HKCU\Environment). Pass --no-path to skip that: a PATH entry pointing at a
 directory other people can write is a hijack vector for every process that
@@ -246,7 +253,7 @@ resolves a command through it.`,
 		"enable knowledge-graph auto-population: writes "+daemon.KGSentinelFile+" into the data dir so every future daemon extracts entities and co-mention edges (remove the file to turn off)")
 	cmd.Flags().BoolVar(&installHooks, "hooks", false,
 		"install Claude Code memory hooks into .claude/settings.json: automatic per-turn recall injection, instant-save via \"remember: ...\", checkpoints before /compact, detached consolidation at session end")
-	cmd.Flags().BoolVar(&global, "global", false, "also write the memory block into ~/.claude/CLAUDE.md and ~/.config/opencode/AGENTS.md, so agents use memory in every project")
+	cmd.Flags().BoolVar(&global, "global", false, "also install home-scoped agent instructions; current-project setup still runs and project-scoped MCP configs remain per project")
 	cmd.Flags().BoolVar(&noPath, "no-path", false,
 		"do not add the executable's directory to your user PATH")
 	cmd.Flags().StringVar(&only, "only", "", "CSV of writers to run (overrides skip flags, not --skip-instructions): claudecode,cursor,codex,opencode,antigravity")

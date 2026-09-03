@@ -23,7 +23,7 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent`, not `agent_id`", "memory_alias", "weak-match"} {
+	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent`, not `agent_id`", "memory_alias", "weak-match", "hook recall ran"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
 		}
@@ -124,11 +124,17 @@ func TestInstructionsBlock_IsProcedural(t *testing.T) {
 	block := instructionsBlock()
 
 	for _, want := range []string{
-		"Every session, without exception", // unconditional session protocol
-		"Before your first reply",          // concrete first action
-		"__shared__",                       // shared namespace is discoverable
-		"What triggers a call",             // trigger table, not prose
-		"root directory",                   // agent_id is derivable, not invented
+		"Every session, without exception",    // checkpoint/session protocol remains mandatory
+		"Before your first substantive reply", // concrete first action
+		"Hooks and MCP are\ncomplementary",    // neither integration is disabled
+		"hook recall ran",                     // describes the hook/MCP handshake
+		"session's initial turn",              // prior-turn markers do not count
+		"run both project and `__shared__`",   // namespace mismatch cannot hide deduped facts
+		"every missing section",               // empty scopes fall back to MCP
+		"focused, ad-hoc lookups",             // explicit searches remain available
+		"__shared__",                          // shared namespace is discoverable
+		"What triggers a call",                // trigger table, not prose
+		"root directory",                      // agent_id is derivable, not invented
 		"checkpoint_resume",
 		"checkpoint_save",
 		// --global puts this block in projects that may not have GrayMatter
@@ -155,6 +161,9 @@ func TestInstructionsBlock_IsProcedural(t *testing.T) {
 	if strings.Contains(block, "~") {
 		t.Error("block contains an unrendered ~ placeholder")
 	}
+	if strings.Contains(block, hookRecallMarkerPrefix) {
+		t.Error("static instructions reproduce the live hook-marker prefix")
+	}
 
 	// Guard against stray non-ASCII in the briefing the user actually reads,
 	// with an allowlist for the glyphs it uses on purpose. Scoped to the body:
@@ -164,6 +173,88 @@ func TestInstructionsBlock_IsProcedural(t *testing.T) {
 	for _, r := range strings.ReplaceAll(blockTmpl, "~", "`") {
 		if r > 127 && !strings.ContainsRune(allowed, r) {
 			t.Errorf("unexpected non-ASCII rune %q in generated block body", r)
+		}
+	}
+}
+
+// TestInitGlobalScopeContract prevents --global from drifting back into the
+// misleading promise that one invocation wires every repository. The command
+// still performs the normal current-project init; only agent instructions are
+// written home-wide, while project-scoped MCP configs remain per project.
+func TestInitGlobalScopeContract(t *testing.T) {
+	cmd := initCmd()
+	for _, want := range []string{
+		"does not replace the normal setup of the current project",
+		"Project-scoped MCP configs remain per project",
+		"init or manual configuration",
+		"Codex is the exception",
+	} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("init long help lost --global scope contract %q", want)
+		}
+	}
+	flag := cmd.Flags().Lookup("global")
+	if flag == nil {
+		t.Fatal("init has no --global flag")
+	}
+	for _, want := range []string{"current-project setup still runs", "remain per project"} {
+		if !strings.Contains(flag.Usage, want) {
+			t.Errorf("--global help lost scope contract %q: %q", want, flag.Usage)
+		}
+	}
+}
+
+func TestInitGlobal_PerformsLocalSetupAndOnlyGlobalizesInstructions(t *testing.T) {
+	base := t.TempDir()
+	project := filepath.Join(base, "current-project")
+	otherProject := filepath.Join(base, "other-project")
+	home := filepath.Join(base, "home")
+	for _, dir := range []string{project, otherProject, home} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldDataDir, oldHome, oldQuiet := dataDir, testHomeOverride, quiet
+	dataDir = filepath.Join(project, ".graymatter")
+	testHomeOverride = home
+	quiet = true
+	t.Cleanup(func() {
+		dataDir, testHomeOverride, quiet = oldDataDir, oldHome, oldQuiet
+		_ = os.Chdir(oldWD)
+	})
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := initCmd()
+	cmd.SetArgs([]string{"--global", "--only", "claudecode", "--no-path"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --global: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(project, ".graymatter", "MEMORY.md"),
+		filepath.Join(project, ".mcp.json"),
+		filepath.Join(project, "CLAUDE.md"),
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".config", "opencode", "AGENTS.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected init --global output %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(otherProject, ".mcp.json"),
+		filepath.Join(otherProject, "opencode.jsonc"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("init --global must not wire another project, stat %s: %v", path, err)
 		}
 	}
 }

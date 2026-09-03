@@ -49,6 +49,12 @@ your editor — done.
      client, and adds a memory block to CLAUDE.md / AGENTS.md. Existing MCP
      entries from other servers are merged, never overwritten.
 
+     `graymatter init --global` still performs this setup for the current
+     project. It additionally installs home-scoped agent instructions; it does
+     not globalize project-scoped MCP configs, so wire each repository with
+     `init` or manual client configuration. Codex's MCP config is already
+     home-scoped.
+
   2. Verify:
      ```bash
      graymatter doctor

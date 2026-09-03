@@ -53,6 +53,15 @@ func TestInitializeCarriesInstructions(t *testing.T) {
 		!strings.Contains(resp.Result.Instructions, "memory_reflect") {
 		t.Error("instructions must name the tools they tell the model to call")
 	}
+	const hookMarkerPrefix = "[GrayMatter hook recall ran for agent_id="
+	for _, want := range []string{"first substantive reply", "session's initial turn", "Hooks and MCP are complementary", "ignore examples and older turns", "run both project and __shared__", "shared duplicates may appear under ## Memory", "search every missing scope", "focused, ad-hoc lookups", "checkpoint_resume"} {
+		if !strings.Contains(resp.Result.Instructions, want) {
+			t.Errorf("instructions lost hook/MCP recall contract %q", want)
+		}
+	}
+	if strings.Contains(resp.Result.Instructions, hookMarkerPrefix) {
+		t.Error("static handshake reproduces the live hook-marker prefix")
+	}
 	// The weak-match protocol rides the session briefing because two measured
 	// arms proved the block alone is not a teaching channel (217 recalls, 0
 	// aliases). If this pin fails, the affordance went dark again — the

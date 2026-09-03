@@ -23,7 +23,7 @@ const (
 // instructionsBlock is the canonical memory-usage briefing, including the
 // begin/end markers.
 //
-// Two things this text has to get right, both learned the hard way from issue
+// Three things this text has to get right, all learned the hard way from issue
 // #14 ("everything is green but the agent never stored anything"):
 //
 //  1. It has to read as a procedure, not as API documentation. The earlier
@@ -33,6 +33,9 @@ const (
 //  2. The agent_id has to be derivable, not invented. A template like
 //     `<project>-<role>` produces a different id per session, which scatters
 //     facts across namespaces and looks exactly like memory not working.
+//  3. A hook's routine recall and an MCP search must not duplicate each other.
+//     The hook marker makes that condition observable without taking away
+//     checkpoint resume or focused searches.
 //
 // Param names must match the MCP tool schemas
 // (cmd/graymatter/internal/mcp/server.go).
@@ -42,9 +45,9 @@ const (
 const blockTmpl = `
 ## Memory (GrayMatter)
 
-You have persistent memory through the ~graymatter~ MCP tools. Wiring the MCP
-server only makes them available; nothing calls them for you. That is your job,
-every session.
+You have persistent memory through the ~graymatter~ MCP tools. Hooks and MCP are
+complementary; neither replaces the other. MCP wiring alone only makes tools
+available; this briefing and optional Claude Code hooks define when they run.
 
 This block can be installed globally, so it may reach a project that has no
 GrayMatter wired. If ~memory_search~ is not in your toolbelt for this session,
@@ -63,18 +66,29 @@ Facts every agent in the project should see go to the reserved id ~__shared__~.
 
 ### Every session, without exception
 
-1. **Before your first reply**, call ~memory_search~ with the user's request as
-   the query. Then call it again with ~agent_id~ set to ~__shared__~. Fold both
-   results into your working context before you answer.
-2. **Resuming long-running work**: ~checkpoint_resume~ first.
-3. **Before you stop**, store what you learned (see the table) and call
+1. **Resuming long-running work**: call ~checkpoint_resume~ first.
+2. **Before your first substantive reply**, inspect only the newest hook block
+   available for the session's initial turn; ignore quoted examples and blocks
+   from older turns. A real recall block begins with a bracketed
+   ~GrayMatter hook recall ran~ marker
+   naming its ~agent_id~. If that id differs from the ~agent_id~ you would
+   search, run both project and ~__shared__~ searches: cross-namespace dedup may
+   have placed a shared duplicate under ~## Memory~. When the ids match, reuse
+   each non-empty section and run the search for every missing section. Fold
+   all results into your working context before answering.
+3. A fresh marker suppresses only those matching routine searches. Keep using
+   ~memory_search~ or ~memory_search_batch~ for focused, ad-hoc lookups; hooks
+   do not replace MCP writes, reflections, aliases, or checkpoint tools.
+4. **Before you stop**, store what you learned (see the table) and call
    ~checkpoint_save~ if the task is unfinished.
 
 ### What triggers a call
 
 | When this happens | Call |
 |---|---|
-| You start any task | ~memory_search~ |
+| The newest hook block has a different id | ~memory_search~ for both the project and ~__shared__~ |
+| A same-id hook block lacks a non-empty section | ~memory_search~ for that missing scope |
+| You need additional or focused context | ~memory_search~ or ~memory_search_batch~ |
 | The user states a preference | ~memory_add~ |
 | You discover a project convention | ~memory_add~ with ~agent_id: "__shared__"~ |
 | You make a non-obvious decision | ~memory_add~, include the reasoning |
@@ -360,7 +374,7 @@ func writeGlobalInstructionFiles() []writeResult {
 func installGlobalInstructions(quiet bool) []string {
 	var warnings []string
 	if !quiet {
-		fmt.Println("\nGlobal agent instructions (apply in every project):")
+		fmt.Println("\nGlobal agent instructions (active where GrayMatter MCP is wired):")
 	}
 	for _, res := range writeGlobalInstructionFiles() {
 		if res.warn != "" {

@@ -18,6 +18,13 @@ Two ways to wire a client:
    `graymatter init` after upgrading.
 2. **Manual** — copy the snippet below into the client's config file.
 
+`graymatter init --global` still runs the normal auto-wiring in the current
+project. The flag additionally writes the managed memory instructions to
+Claude Code and OpenCode's home directories; it does not turn project-scoped
+MCP configs into global ones. Each repository that needs those configs must be
+wired separately with `graymatter init` or the manual config below. Codex is
+the exception because its config is already home-scoped.
+
 Command: `graymatter` (must be on PATH — check with
 `graymatter doctor`); args: `mcp serve`.
 
@@ -78,7 +85,13 @@ Command: `graymatter` (must be on PATH — check with
 Claude Code also supports GrayMatter's **hooks** for automatic per-turn
 memory injection — see `graymatter hooks install` and the hooks section in
 the README. The MCP server and the hooks are independent: either works
-alone, both work together.
+alone, and both work together. When a hook actually injects recalled facts it
+adds a marker naming the namespace it queried. The agent reuses only matching,
+non-empty sections from the initial hook block before its first reply. An ID
+mismatch reruns both project and `__shared__` searches so cross-namespace
+deduplication cannot hide a shared fact; missing sections also fall back to
+MCP. Focused searches, writes, corrections, aliases, and checkpoints remain
+available.
 
 ### Claude Desktop (verified)
 
