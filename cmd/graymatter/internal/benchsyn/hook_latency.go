@@ -146,6 +146,7 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 		// and the binary on Windows, which locks executing files — is
 		// releasable. Best-effort: no daemon is also fine.
 		stop := exec.Command(p.Binary, "--dir", storeDir, "daemon", "stop")
+		isolateHookBenchmarkProcess(stop)
 		stop.Stdout = io.Discard
 		stop.Stderr = io.Discard
 		_ = stop.Run()
@@ -253,6 +254,7 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 	}
 	report.Pass = breaches == 0
 
+	fmt.Fprintln(stdout, "Embedder: keyword (no LLM, no network, no API key)")
 	fmt.Fprintf(stdout, "hook latency: %d facts · %d warm-up + %d measured process runs per event\n\n", p.SeedFacts, p.Warmup, p.Runs)
 	fmt.Fprintf(stdout, "  %-12s internal p99 %7.1fms (machine baseline: spawn + connect + checkpoint)\n", "baseline", report.Rows[1].P99Ms)
 	for _, row := range report.Rows {
@@ -283,6 +285,7 @@ func hookScalingRatio(seedFacts int) (float64, float64, error) {
 	open := func(dataDir string, n int) (*graymatter.Memory, error) {
 		cfg := graymatter.DefaultConfig()
 		cfg.DataDir = dataDir
+		cfg.EmbeddingMode = graymatter.EmbeddingKeyword
 		cfg.VectorReconcileInterval = 0
 		cfg.AsyncConsolidate = false
 		mem, err := graymatter.NewWithConfig(cfg)
@@ -361,11 +364,24 @@ func scalingTopic(i int) string {
 
 const benchHookAgent = "hookbench"
 
+func isolateHookBenchmarkProcess(cmd *exec.Cmd) {
+	// Hook samples auto-start a daemon and session-end spawns consolidation;
+	// this environment keeps that entire process tree network-free. The invalid
+	// Ollama scheme makes auto-detection fail before any socket dial.
+	cmd.Env = append(cmd.Environ(),
+		"ANTHROPIC_API_KEY=",
+		"OPENAI_API_KEY=",
+		"VOYAGE_API_KEY=",
+		"GRAYMATTER_OLLAMA_URL=disabled://hook-latency-benchmark",
+	)
+}
+
 // execHookSample runs one hook event as a fresh process, stdin JSON from
 // Claude Code's contract, output drained.
 func execHookSample(binary, workDir, storeDir, event, payload string) (string, error) {
 	cmd := exec.Command(binary, "--dir", storeDir, "hooks", "run", event)
 	cmd.Dir = workDir
+	isolateHookBenchmarkProcess(cmd)
 	cmd.Stdin = strings.NewReader(payload)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -387,6 +403,7 @@ func hookSamplePayload(workDir, prompt string) string {
 func seedHookStore(dir string, n int) error {
 	cfg := graymatter.DefaultConfig()
 	cfg.DataDir = dir
+	cfg.EmbeddingMode = graymatter.EmbeddingKeyword
 	cfg.VectorReconcileInterval = 0
 	cfg.AsyncConsolidate = false
 	mem, err := graymatter.NewWithConfig(cfg)
