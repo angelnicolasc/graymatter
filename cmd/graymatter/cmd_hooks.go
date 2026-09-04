@@ -28,9 +28,9 @@ import (
 
 const (
 	// Markers distinguish current commands from legacy malformed entries.
-	hooksCommandMarker       = "--graymatter-managed-hook"
-	hooksRunCommandMarker    = " hooks run "
-	hooksNoCreateArg         = "--no-create"
+	hooksCommandMarker    = "--graymatter-managed-hook"
+	hooksRunCommandMarker = " hooks run "
+	hooksNoCreateArg      = "--no-create"
 
 	// hooksEventSessionStart is one of the four events this package manages.
 	// Claude Code fires SessionStart with source startup|resume|clear|compact;
@@ -83,7 +83,7 @@ func hooksInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install [--scope project|global] [--all]",
 		Short: "Write GrayMatter's hooks into Claude Code settings.json",
-		Long: `Upserts GrayMatter's hook groups into Claude Code's settings.json.
+		Long: `Upserts GrayMatter's hook groups using exec form (Claude Code 2.1.139 or later).
 
 Merge, never overwrite: hooks that are not GrayMatter's (formatters,
 guardrails, anything else) are preserved. If GrayMatter's own entries
@@ -169,9 +169,8 @@ func hooksUninstallCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveOwnBinary returns this executable as an absolute slash-normalised
-// path — the form the hook commands record, so the hook resolves no matter
-// which cwd Claude Code fires it from.
+// resolveOwnBinary returns this executable as an absolute native path — the
+// exact value exec-form hooks record, so it resolves from any working directory.
 func resolveOwnBinary() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -389,16 +388,10 @@ func rewriteHookEvent(existing any, want []any, install bool, expectedExe ...str
 		nextArr = append(nextArr, foreign...)
 		nextArr = append(nextArr, want...)
 		next = nextArr
-		if before, err1 := json.Marshal(oursBefore); err1 == nil {
-			if after, err2 := json.Marshal(want); err2 == nil {
-				drift = string(before) != string(after)
-			} else {
-				drift = true
-			}
-		} else {
-			drift = true
+		if len(oursBefore) > 0 {
+			drift = !hookGroupsEquivalent(oursBefore, want)
 		}
-		mutated = drift || len(oursBefore) != len(want)
+		mutated = !hookArraysEqual(oursBefore, want)
 		if !mutated {
 			// Same length and not drifted: could still differ in content order
 			// relative to foreign groups; a deep compare settles it.
@@ -426,6 +419,54 @@ func hookArraysEqual(a, b []any) bool {
 	return string(ab) == string(bb)
 }
 
+// hookGroupsEquivalent treats the two previous shell-command formats as the
+// canonical exec form for drift purposes. Reinstall still rewrites them, but a
+// format migration alone is not a hand edit. Every other field is compared.
+func hookGroupsEquivalent(existing, want []any) bool {
+	data, err := json.Marshal(existing)
+	if err != nil {
+		return false
+	}
+	var normalized []any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return false
+	}
+	for i := range normalized {
+		if i >= len(want) {
+			break
+		}
+		normalizeLegacyHookGroup(normalized[i], want[i])
+	}
+	return hookArraysEqual(normalized, want)
+}
+
+func normalizeLegacyHookGroup(existing, want any) {
+	eg, ok := existing.(map[string]any)
+	if !ok {
+		return
+	}
+	wg, ok := want.(map[string]any)
+	if !ok {
+		return
+	}
+	existingHooks, _ := eg["hooks"].([]any)
+	wantedHooks, _ := wg["hooks"].([]any)
+	for i := range existingHooks {
+		if i >= len(wantedHooks) {
+			break
+		}
+		oldHook, ok := existingHooks[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		newHook, ok := wantedHooks[i].(map[string]any)
+		if ok && legacyHookMatches(oldHook, newHook) {
+			oldHook["command"] = newHook["command"]
+			oldHook["args"] = newHook["args"]
+		}
+	}
+}
+
 // hookGroupIsOurs reports whether a matcher group belongs to GrayMatter.
 func hookGroupIsOurs(group any, expectedExe ...string) bool {
 	ours, _ := hookGroupGuardStatus(group, expectedExe...)
@@ -444,9 +485,9 @@ func hookGroupGuardStatus(group any, expectedExe ...string) (ours, guarded bool)
 		if !ok {
 			continue
 		}
-		if c, _ := hook["command"].(string); hookCommandIsOurs(c, expectedExe...) {
+		if hookEntryIsOurs(hook, expectedExe...) {
 			ours = true
-			guarded = guarded && hookCommandHasArg(c, hooksNoCreateArg)
+			guarded = guarded && hookEntryHasArg(hook, hooksNoCreateArg)
 		}
 	}
 	return ours, guarded
@@ -458,15 +499,19 @@ func hookEventNames() []string {
 }
 
 // hookGroupsFor builds the canonical matcher groups for one event and the
-// given executable. The recorded command carries the CLI event name (the
-// snake_case arg `hooks run` takes), not the settings event key.
+// given executable. The args carry the CLI event name (the snake_case value
+// `hooks run` takes), not the settings event key.
 func hookGroupsFor(exe, event string, scopes ...hookScope) []any {
 	scope := scopeProject
 	if len(scopes) > 0 {
 		scope = scopes[0]
 	}
 	group := func(matcher string, timeout int) map[string]any {
-		hook := map[string]any{"type": "command", "command": hookCommand(exe, hookRunArg(event), scope)}
+		args := []string{"hooks", "run", hookRunArg(event), hooksCommandMarker}
+		if scope == scopeGlobal {
+			args = append(args, hooksNoCreateArg)
+		}
+		hook := map[string]any{"type": "command", "command": exe, "args": args}
 		if timeout > 0 {
 			hook["timeout"] = timeout
 		}
@@ -509,9 +554,8 @@ func hookRunArg(event string) string {
 	return event
 }
 
-// hookCommand renders the command line Claude Code will execute. The binary
-// path is quoted when needed: hooks run through a shell, and installs under
-// paths with spaces are routine on every platform.
+// hookCommand renders the previous shell form. It remains solely so legacy
+// installations can be exercised against the compatibility parser.
 func hookCommand(exe, event string, scopes ...hookScope) string {
 	scope := scopeProject
 	if len(scopes) > 0 {
@@ -642,10 +686,10 @@ func runHooksDoctorChecks(path, exeAbs string, scope hookScope) []hookCheck {
 				if !ok {
 					continue
 				}
-				if c, _ := hook["command"].(string); hookCommandIsOurs(c, exeAbs) {
+				if hookEntryIsOurs(hook, exeAbs) {
 					found = true
 					if exePath == "" {
-						exePath = hookBinaryPath(c)
+						exePath = hookEntryBinaryPath(hook)
 					}
 				}
 			}
@@ -773,6 +817,127 @@ func globalHookGuardStatus(root map[string]any) (installed, guarded bool) {
 	return installed, guarded
 }
 
+func hookEntryArgs(hook map[string]any) ([]string, bool) {
+	raw, present := hook["args"]
+	if !present {
+		return nil, false
+	}
+	switch values := raw.(type) {
+	case []string:
+		return append([]string(nil), values...), true
+	case []any:
+		args := make([]string, len(values))
+		for i, value := range values {
+			arg, ok := value.(string)
+			if !ok {
+				return nil, false
+			}
+			args[i] = arg
+		}
+		return args, true
+	default:
+		return nil, false
+	}
+}
+
+func hookEntryHasArg(hook map[string]any, want string) bool {
+	if _, structured := hook["args"]; structured {
+		args, ok := hookEntryArgs(hook)
+		if !ok {
+			return false
+		}
+		for _, arg := range args {
+			if arg == want {
+				return true
+			}
+		}
+		return false
+	}
+	command, _ := hook["command"].(string)
+	return hookCommandHasArg(command, want)
+}
+
+func hookEntryIsOurs(hook map[string]any, expectedExe ...string) bool {
+	command, ok := hook["command"].(string)
+	if !ok {
+		return false
+	}
+	if _, structured := hook["args"]; !structured {
+		return hookCommandIsOurs(command, expectedExe...)
+	}
+	args, ok := hookEntryArgs(hook)
+	if !ok {
+		return false
+	}
+	if len(args) < 3 || args[0] != "hooks" || args[1] != "run" {
+		return false
+	}
+	if stringSliceContains(args, hooksCommandMarker) {
+		return true
+	}
+	if len(expectedExe) > 0 && filepath.Clean(command) == filepath.Clean(expectedExe[0]) {
+		return true
+	}
+	return strings.TrimSuffix(strings.ToLower(filepath.Base(command)), ".exe") == "graymatter"
+}
+
+func hookEntryBinaryPath(hook map[string]any) string {
+	command, _ := hook["command"].(string)
+	if _, structured := hook["args"]; structured {
+		return command
+	}
+	return hookBinaryPath(command)
+}
+
+func legacyHookMatches(existing, want map[string]any) bool {
+	if _, structured := existing["args"]; structured {
+		return false
+	}
+	command, ok := existing["command"].(string)
+	if !ok {
+		return false
+	}
+	wantCommand, ok := want["command"].(string)
+	if !ok || filepath.Clean(hookBinaryPath(command)) != filepath.Clean(wantCommand) {
+		return false
+	}
+	wantArgs, ok := hookEntryArgs(want)
+	if !ok || len(wantArgs) < 4 {
+		return false
+	}
+	idx := strings.LastIndex(command, hooksRunCommandMarker)
+	if idx < 0 {
+		return false
+	}
+	tail := strings.Fields(command[idx+len(hooksRunCommandMarker):])
+	prefix := strings.TrimSpace(command[:idx])
+	if strings.HasSuffix(prefix, " graymatter") {
+		return len(tail) == 1 && tail[0] == wantArgs[2]
+	}
+	return stringSlicesEqual(tail, wantArgs[2:])
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func hookCommandHasArg(command, want string) bool {
 	idx := strings.LastIndex(command, hooksRunCommandMarker)
 	if idx < 0 {
@@ -804,7 +969,11 @@ func hookBinaryPath(command string) string {
 	}
 	p := strings.TrimSpace(command[:idx])
 	p = strings.TrimSpace(strings.TrimSuffix(p, " graymatter"))
-	p = strings.Trim(p, `"'`)
+	if unquoted, err := strconv.Unquote(p); err == nil {
+		p = unquoted
+	} else {
+		p = strings.Trim(p, `"'`)
+	}
 	return filepath.FromSlash(p)
 }
 
