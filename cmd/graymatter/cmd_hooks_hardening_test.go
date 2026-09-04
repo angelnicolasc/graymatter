@@ -21,8 +21,8 @@ import (
 
 func TestHookPayload_AdversarialStdin(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
+		name       string
+		input      string
 		wantPrompt string // "" = prompt must come out empty
 	}{
 		{"empty object", `{}`, ""},
@@ -276,15 +276,12 @@ func FuzzRewriteHookEvent(f *testing.F) {
 	})
 }
 
-// TestHooksMerge_ForeignCommandContainingMarker: a foreign hook whose command
-// merely CONTAINS the marker text is treated as ours inside the four managed
-// events and is removed on uninstall — the documented cost of substring
-// ownership detection. Events we do not manage are never touched at all.
-// Pinned by a test so the tradeoff cannot silently change in either direction.
+// A foreign command that only mentions the legacy marker is never ours.
 func TestHooksMerge_ForeignCommandContainingMarker(t *testing.T) {
 	withHooksEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
+	foreignCommand := filepath.ToSlash(filepath.Join(dir, "echo")) + " graymatter hooks run user-prompt"
 
 	existing := map[string]any{
 		"hooks": map[string]any{
@@ -296,7 +293,7 @@ func TestHooksMerge_ForeignCommandContainingMarker(t *testing.T) {
 			// Managed event: a foreign entry that happens to carry the marker.
 			"UserPromptSubmit": []any{map[string]any{
 				"hooks": []any{map[string]any{"type": "command",
-					"command": "echo graymatter hooks run user-prompt"}},
+					"command": foreignCommand}},
 			}},
 		},
 	}
@@ -315,8 +312,6 @@ func TestHooksMerge_ForeignCommandContainingMarker(t *testing.T) {
 		t.Fatalf("unmanaged event must keep exactly its foreign group, got %d", len(pre))
 	}
 
-	// Uninstall: inside MANAGED events the marker is the ownership test — the
-	// foreign echo command is removed along with ours. Documented limitation.
 	if _, err := upsertHookSettings(path, "/opt/gm/graymatter", false); err != nil {
 		t.Fatal(err)
 	}
@@ -328,8 +323,9 @@ func TestHooksMerge_ForeignCommandContainingMarker(t *testing.T) {
 	if _, still := hooksAfter["PreToolUse"]; !still {
 		t.Error("unmanaged events must survive uninstall untouched")
 	}
-	if _, still := hooksAfter["UserPromptSubmit"]; still {
-		t.Error("a managed-event command carrying the marker is owned by uninstall (documented limitation)")
+	up := hookGroups(t, after, "UserPromptSubmit")
+	if len(up) != 1 || groupCommands(t, up[0])[0] != foreignCommand {
+		t.Error("foreign command mentioning the legacy marker did not survive")
 	}
 }
 
