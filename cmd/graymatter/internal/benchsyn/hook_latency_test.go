@@ -21,8 +21,15 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 		t.Skip("spawns real hook processes; skipped in -short")
 	}
 
-	// The runner executes a graymatter binary; build the current tree once.
-	bin := filepath.Join(t.TempDir(), "graymatter-under-test.exe")
+	// Detached session-end work may still hold the executable after the runner
+	// returns. This does not remove that race: an owned temp directory makes
+	// cleanup best-effort instead of a t.TempDir assertion.
+	binDir, err := os.MkdirTemp("", "graymatter-bench-hooks-binary-")
+	if err != nil {
+		t.Fatalf("create binary temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(binDir) }()
+	bin := filepath.Join(binDir, "graymatter-under-test.exe")
 	out, err := exec.Command("go", "build", "-o", bin, "github.com/angelnicolasc/graymatter/cmd/graymatter").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build test binary: %v: %s", err, out)
