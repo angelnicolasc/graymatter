@@ -87,10 +87,6 @@ type sample struct {
 	wall     time.Duration // process start to exit
 }
 
-// binaryPath is the built benchmark binary, set once run() has it; the
-// daemon-stop cleanup reads it.
-var binaryPath string
-
 func main() {
 	if err := run(os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "hook_latency: %v\n", err)
@@ -111,15 +107,22 @@ func run(stdout io.Writer) error {
 		return fmt.Errorf("work dir: %w", err)
 	}
 
-	// The samples run against the store daemon, which spawns from the built
-	// binary and outlives them. Stop it so the temp root is releasable
-	// (Windows locks executing files). Best-effort.
+	// Keep the dependent cleanup order explicit: stop the daemon while the
+	// built binary still exists, then remove the binary and the temp root.
+	// Every step is best-effort, including paths that fail before the build.
+	var binaryPath string
+	var cleanupBinary func()
 	defer func() {
-		stop := exec.Command(binaryPath, "--dir", storeDir, "daemon", "stop")
-		stop.Stdout = io.Discard
-		stop.Stderr = io.Discard
-		_ = stop.Run()
-		time.Sleep(500 * time.Millisecond)
+		if binaryPath != "" {
+			stop := exec.Command(binaryPath, "--dir", storeDir, "daemon", "stop")
+			stop.Stdout = io.Discard
+			stop.Stderr = io.Discard
+			_ = stop.Run()
+			time.Sleep(500 * time.Millisecond)
+		}
+		if cleanupBinary != nil {
+			cleanupBinary()
+		}
 		_ = os.RemoveAll(root)
 	}()
 
@@ -140,10 +143,8 @@ func run(stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	// The daemon-stop cleanup (deferred above) needs the built binary's path;
-	// it is only known now, after the build.
 	binaryPath = binary
+	cleanupBinary = cleanup
 
 	runHook := func(event, payload string) (sample, string) {
 		start := time.Now()
