@@ -141,10 +141,9 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 	}
 
 	defer func() {
-		// The samples run against the store daemon, which spawns from the
-		// binary under test and outlives them. Stop it so the temp root —
-		// and the binary on Windows, which locks executing files — is
-		// releasable. Best-effort: no daemon is also fine.
+		// Ask the known daemon to stop before best-effort root cleanup. Detached
+		// session-end work can still revive it after this request; this does not
+		// remove that race, and cleanup failure is not a benchmark failure.
 		stop := exec.Command(p.Binary, "--dir", storeDir, "daemon", "stop")
 		isolateHookBenchmarkProcess(stop)
 		stop.Stdout = io.Discard
