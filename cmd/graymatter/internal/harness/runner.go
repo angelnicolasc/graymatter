@@ -69,7 +69,7 @@ type RunConfig struct {
 	MaxRetries int
 
 	// ResumeID is a harness session ID or "latest". When non-empty, the prior
-	// message history is loaded from the latest checkpoint and prepended.
+	// message history is loaded from the selected checkpoint and prepended.
 	ResumeID string
 
 	// Stdout receives the final agent reply. Default: os.Stdout
@@ -97,6 +97,12 @@ type RunResult struct {
 	Messages   []session.Message
 	FinalReply string
 	Attempts   int
+}
+
+type resumeStore interface {
+	SessionResolve(agentID, sessionID string) (string, error)
+	SessionsList() ([]HarnessSession, error)
+	CheckpointLoad(agentID, checkpointID string) (*session.Checkpoint, error)
 }
 
 // Run executes the agent described by cfg.AgentFile.
@@ -149,12 +155,23 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 
 	// Load prior checkpoint message history when resuming.
 	var priorMessages []session.Message
-	if cfg.ResumeID != "" {
+	switch cfg.ResumeID {
+	case "":
+	case "latest":
+		// Preserve the established meaning of latest: the newest checkpoint for
+		// this agent, even if a newer failed session has no checkpoint.
 		cp, cpErr := store.CheckpointResume(def.Name)
 		if cpErr == nil && cp != nil {
 			priorMessages = cp.Messages
-			fmt.Fprintf(cfg.Stderr, "Resuming from checkpoint %s...\n", cp.ID)
+			fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", cfg.ResumeID, cp.ID)
 		}
+	default:
+		resolvedID, cp, cpErr := loadSessionCheckpoint(store, def.Name, cfg.ResumeID)
+		if cpErr != nil {
+			return nil, fmt.Errorf("resume session %q: %w", cfg.ResumeID, cpErr)
+		}
+		priorMessages = cp.Messages
+		fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", resolvedID, cp.ID)
 	}
 
 	// A background child identifies itself; unavailable start times make kills fail closed.
@@ -314,6 +331,45 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	writeFailedRun(cfg.DataDir, sessionID, hs, lastErr)
 
 	return nil, fmt.Errorf("run %q failed after %d attempt(s): %w", def.Name, cfg.MaxRetries, lastErr)
+}
+
+func loadSessionCheckpoint(store Store, agentID, requestedID string) (string, *session.Checkpoint, error) {
+	rs, ok := store.(resumeStore)
+	if !ok {
+		return "", nil, fmt.Errorf("persistence backend does not support session lookup")
+	}
+
+	resolvedID, err := rs.SessionResolve(agentID, requestedID)
+	if err != nil {
+		return "", nil, err
+	}
+	sessions, err := rs.SessionsList()
+	if err != nil {
+		return "", nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	var target *HarnessSession
+	for i := range sessions {
+		if sessions[i].ID == resolvedID {
+			target = &sessions[i]
+			break
+		}
+	}
+	if target == nil {
+		return "", nil, fmt.Errorf("resolved session %q not found", resolvedID)
+	}
+	if target.AgentID != agentID {
+		return "", nil, fmt.Errorf("session belongs to agent %q, not %q", target.AgentID, agentID)
+	}
+	if target.LastCPID == "" {
+		return "", nil, fmt.Errorf("session has no checkpoint")
+	}
+
+	cp, err := rs.CheckpointLoad(target.AgentID, target.LastCPID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load checkpoint %q: %w", target.LastCPID, err)
+	}
+	return resolvedID, cp, nil
 }
 
 // backoffDuration returns the wait duration before retry attempt n (1-based).
