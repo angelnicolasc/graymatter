@@ -747,6 +747,11 @@ func runHooksDoctorChecks(path, exeAbs string, scope hookScope) []hookCheck {
 // store cannot answer within it, per-turn injection is the wrong shape and
 // the doctor says so.
 func hooksStoreCheck() hookCheck {
+	if !hookStoreInitialized(dataDir) {
+		return hookCheck{
+			Name: "store", Status: "info", Detail: "store not initialised (no gray.db or MEMORY.md found)",
+		}
+	}
 	start := timeNow()
 	store, err := openStore()
 	if err != nil {

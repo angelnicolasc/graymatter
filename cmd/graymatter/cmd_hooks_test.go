@@ -159,6 +159,52 @@ func TestHooksInstallAll_RemainsRejected(t *testing.T) {
 	}
 }
 
+func TestHooksDoctor_MissingStoreDoesNotCreateState(t *testing.T) {
+	bin := buildE2EBinary(t)
+	for _, tc := range []struct {
+		name     string
+		wantCode int
+	}{
+		{name: "valid settings", wantCode: 0},
+		{name: "missing settings", wantCode: 1},
+		{name: "corrupt settings", wantCode: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			work := t.TempDir()
+			settings := filepath.Join(work, ".claude", "settings.json")
+			switch tc.name {
+			case "valid settings":
+				if out, code := runE2E(t, bin, work, "", "hooks", "install"); code != 0 {
+					t.Fatalf("hooks install: exit=%d out=%s", code, out)
+				}
+			case "corrupt settings":
+				if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(settings, []byte("{broken"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			before, err := os.ReadDir(work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, code := runE2E(t, bin, work, "", "hooks", "doctor")
+			after, err := os.ReadDir(work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != tc.wantCode || !strings.Contains(out, "store not initialised") {
+				t.Fatalf("hooks doctor: exit=%d out=%q, want exit %d and uninitialised report", code, out, tc.wantCode)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("doctor created state: before=%v after=%v", before, after)
+			}
+		})
+	}
+}
+
 // TestHooksInstall_WritesCanonicalContract pins the emitted settings shape:
 // four events, SessionStart split across a startup|resume|fork group and a
 // compact group, the user-prompt hook carrying a 10s timeout, and every
