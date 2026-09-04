@@ -25,6 +25,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **Claude Code hooks now launch GrayMatter with structured `command` + `args`.** Installed hooks no longer pass executable paths through a shell, so paths containing spaces or shell metacharacters work unchanged on every platform with Claude Code 2.1.139 or later. Reinstalling migrates both the prior string form and the pre-marker legacy form; uninstall and drift detection continue to recognize them.
 
+- **Hook scope management and diagnostics now match their public contract.** `hooks uninstall --all` and `hooks doctor --all` cover project and global settings, while the unsafe `hooks install --all` form is rejected to prevent duplicate hook execution. `hooks doctor` reports an uninitialised store without creating it, including when settings are missing or malformed.
+
 - **`run --resume <session-id>` now resumes the checkpoint belonging to that exact session.** The flag previously treated every non-empty value as `latest` and silently loaded the newest checkpoint for the agent, even when the requested ID was historical or nonexistent. Concrete IDs are now resolved through the session registry, unknown IDs fail with the requested session named, and `latest` retains its existing newest-checkpoint behavior.
 
 - **Installed Claude Code hooks now invoke the runnable `hooks run` path, and global hooks no longer create stores in unrelated working directories** ([#83](https://github.com/angelnicolasc/graymatter/issues/83)). Global commands persist a silent `--no-create` guard while project installs retain first-use creation; `doctor` identifies older global installs, and reinstalling replaces legacy malformed commands.

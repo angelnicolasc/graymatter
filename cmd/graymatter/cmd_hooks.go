@@ -92,9 +92,9 @@ the previous file as .bak.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
-				global = true
+				return fmt.Errorf("hooks install --all is not supported; install one scope explicitly to avoid duplicate hook execution")
 			}
-			scopes, err := parseHookScopes(scope, global)
+			scopes, err := parseHookScopes(scope, global, false)
 			if err != nil {
 				return err
 			}
@@ -118,7 +118,7 @@ the previous file as .bak.`,
 		},
 	}
 	cmd.Flags().StringVar(&scope, "scope", "project", "where to write: project (.claude/settings.json) or global (~/.claude/settings.json)")
-	cmd.Flags().BoolVar(&all, "all", false, "install into both project and global scope")
+	cmd.Flags().BoolVar(&all, "all", false, "unsupported: install one scope at a time to avoid duplicate hook execution")
 	cmd.Flags().BoolVar(&global, "global", false, "alias of --scope global")
 	_ = cmd.Flags().MarkHidden("global")
 	return cmd
@@ -135,10 +135,7 @@ func hooksUninstallCmd() *cobra.Command {
 		Short: "Remove GrayMatter's hooks from Claude Code settings.json",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
-				global = true
-			}
-			scopes, err := parseHookScopes(scope, global)
+			scopes, err := parseHookScopes(scope, global, all)
 			if err != nil {
 				return err
 			}
@@ -192,7 +189,13 @@ const (
 	scopeGlobal  hookScope = "global"
 )
 
-func parseHookScopes(scope string, global bool) ([]hookScope, error) {
+func parseHookScopes(scope string, global, all bool) ([]hookScope, error) {
+	if all {
+		if scope != "" && scope != string(scopeProject) && scope != string(scopeGlobal) {
+			return nil, fmt.Errorf("unknown scope %q (want project or global)", scope)
+		}
+		return []hookScope{scopeProject, scopeGlobal}, nil
+	}
 	if global {
 		if scope != "" && scope != string(scopeProject) && scope != string(scopeGlobal) {
 			return nil, fmt.Errorf("conflicting --scope %q and --global", scope)
@@ -592,10 +595,7 @@ func hooksDoctorCmd() *cobra.Command {
 Exits non-zero when any check fails, so scripts and CI can gate on it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if all {
-				global = true
-			}
-			scopes, err := parseHookScopes(scope, global)
+			scopes, err := parseHookScopes(scope, global, all)
 			if err != nil {
 				return err
 			}
@@ -747,6 +747,11 @@ func runHooksDoctorChecks(path, exeAbs string, scope hookScope) []hookCheck {
 // store cannot answer within it, per-turn injection is the wrong shape and
 // the doctor says so.
 func hooksStoreCheck() hookCheck {
+	if !hookStoreInitialized(dataDir) {
+		return hookCheck{
+			Name: "store", Status: "info", Detail: "store not initialised (no gray.db or MEMORY.md found)",
+		}
+	}
 	start := timeNow()
 	store, err := openStore()
 	if err != nil {

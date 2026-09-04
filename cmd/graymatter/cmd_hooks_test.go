@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -83,6 +84,125 @@ func groupCommands(t *testing.T, group map[string]any) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+func TestHooksUninstallAll_RemovesBothScopes(t *testing.T) {
+	withHooksEnv(t)
+	project, home := t.TempDir(), t.TempDir()
+	t.Chdir(project)
+	testHomeOverride = home
+	t.Cleanup(func() { testHomeOverride = "" })
+
+	exe := filepath.Join(t.TempDir(), "graymatter")
+	paths := []string{
+		filepath.Join(project, ".claude", "settings.json"),
+		filepath.Join(home, ".claude", "settings.json"),
+	}
+	for i, path := range paths {
+		scope := []hookScope{scopeProject, scopeGlobal}[i]
+		if _, err := upsertHookSettings(path, exe, true, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := hooksUninstallCmd()
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hooks uninstall --all: %v", err)
+	}
+	for _, path := range paths {
+		if hooks, ok := readSettings(t, path)["hooks"]; ok {
+			t.Errorf("%s still has hooks after --all: %#v", path, hooks)
+		}
+	}
+}
+
+func TestHooksDoctorAll_ReportsBothScopes(t *testing.T) {
+	withHooksEnv(t)
+	project, home := t.TempDir(), t.TempDir()
+	t.Chdir(project)
+	testHomeOverride = home
+	t.Cleanup(func() { testHomeOverride = "" })
+	exe, err := resolveOwnBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for scope, path := range map[hookScope]string{
+		scopeProject: filepath.Join(project, ".claude", "settings.json"),
+		scopeGlobal:  filepath.Join(home, ".claude", "settings.json"),
+	} {
+		if _, err := upsertHookSettings(path, exe, true, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := hooksDoctorCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hooks doctor --all: %v", err)
+	}
+	got := out.String()
+	for _, path := range []string{filepath.Join(".claude", "settings.json"), filepath.Join(home, ".claude", "settings.json")} {
+		if !strings.Contains(got, path) {
+			t.Errorf("doctor --all omitted %s:\n%s", path, got)
+		}
+	}
+}
+
+func TestHooksInstallAll_RemainsRejected(t *testing.T) {
+	cmd := hooksInstallCmd()
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("hooks install --all error = %v, want explicit rejection", err)
+	}
+}
+
+func TestHooksDoctor_MissingStoreDoesNotCreateState(t *testing.T) {
+	bin := buildE2EBinary(t)
+	for _, tc := range []struct {
+		name     string
+		wantCode int
+	}{
+		{name: "valid settings", wantCode: 0},
+		{name: "missing settings", wantCode: 1},
+		{name: "corrupt settings", wantCode: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			work := t.TempDir()
+			settings := filepath.Join(work, ".claude", "settings.json")
+			switch tc.name {
+			case "valid settings":
+				if out, code := runE2E(t, bin, work, "", "hooks", "install"); code != 0 {
+					t.Fatalf("hooks install: exit=%d out=%s", code, out)
+				}
+			case "corrupt settings":
+				if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(settings, []byte("{broken"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			before, err := os.ReadDir(work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, code := runE2E(t, bin, work, "", "hooks", "doctor")
+			after, err := os.ReadDir(work)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != tc.wantCode || !strings.Contains(out, "store not initialised") {
+				t.Fatalf("hooks doctor: exit=%d out=%q, want exit %d and uninitialised report", code, out, tc.wantCode)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("doctor created state: before=%v after=%v", before, after)
+			}
+		})
+	}
 }
 
 // TestHooksInstall_WritesCanonicalContract pins the emitted settings shape:
