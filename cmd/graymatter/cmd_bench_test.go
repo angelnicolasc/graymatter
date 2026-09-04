@@ -94,3 +94,22 @@ func TestBench_SyntheticHuman(t *testing.T) {
 		t.Errorf("renderer must start with the same leading newline as the historical output")
 	}
 }
+
+func TestBenchHooks_HelpDescribesRealGates(t *testing.T) {
+	help := strings.Join(strings.Fields(benchCmd().Long), " ")
+	for _, want := range []string{
+		"median deltas",
+		"budgets ≤ 200ms and ≤ 200ms",
+		"normalized recall scaling (≤ 2.5x)",
+		"Pre-compact is the baseline and has no absolute gate",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help missing %q", want)
+		}
+	}
+	for _, stale := range []string{"user-prompt <", "pre-compact <", "session-end <"} {
+		if strings.Contains(help, stale) {
+			t.Errorf("help still advertises stale absolute gate %q", stale)
+		}
+	}
+}

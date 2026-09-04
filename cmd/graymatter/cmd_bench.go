@@ -188,7 +188,7 @@ func benchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bench",
 		Short: "Run the published measurement suites",
-		Long: `Run GrayMatter's published benchmarks and print what they measure today.
+		Long: fmt.Sprintf(`Run GrayMatter's published benchmarks and print what they measure today.
 
 Three modes:
 
@@ -198,8 +198,9 @@ suites that gate README.md and docs/benchmarks.md in CI.
 
 --hooks — the Claude Code hook budgets: seeds a 10k-fact store, fires the hook
 runners as fresh processes (the shape Claude Code uses — this binary itself is
-the hook binary), and gates the published budgets (user-prompt < 150 ms,
-pre-compact < 200 ms, session-end < 500 ms) against the hook-internal time.
+the hook binary), and gates the user-prompt and session-end median deltas from
+the pre-compact baseline (budgets ≤ %v and ≤ %v), plus normalized recall
+scaling (≤ %.1fx). Pre-compact is the baseline and has no absolute gate.
 Methodology identical to benchmarks/hook_latency, the CI gate.
 
 --store — your memory: reads the actual store (through the daemon when one is
@@ -209,7 +210,8 @@ which issues real recalls to measure them and says so.
 
 What the token-count suite does NOT measure: relevance. A system returning
 eight facts at random would score the same reduction. See docs/benchmarks.md
-for the retrieval-quality suite and its results.`,
+for the retrieval-quality suite and its results.`, benchsyn.HookRecallDeltaBudget,
+			benchsyn.HookSessionEndDeltaBudget, benchsyn.HookScalingMaxNormalized),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case hookLatency:
