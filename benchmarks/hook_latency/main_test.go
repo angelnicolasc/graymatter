@@ -32,6 +32,9 @@ func TestHookLatencyBudgets(t *testing.T) {
 	// The report must name every gated event — a gate that silently stops
 	// measuring one of them is worse than a failing one.
 	out := buf.String()
+	if !strings.Contains(out, "Embedder: keyword (no LLM, no network, no API key)") {
+		t.Error("report missing the explicit keyword embedder")
+	}
 	for _, event := range []string{"user-prompt", "pre-compact", "session-end"} {
 		if !strings.Contains(out, event) {
 			t.Errorf("report missing the %s row", event)
