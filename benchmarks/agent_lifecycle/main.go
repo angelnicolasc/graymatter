@@ -263,6 +263,10 @@ type metrics struct {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	binary := flag.String("binary", "", "path to the compiled graymatter binary")
 	out := flag.String("out", "", "optional path for the markdown report")
 	keep := flag.Bool("keep", false, "keep the store directory after the run (forensics)")
@@ -275,7 +279,7 @@ func main() {
 			build.Stderr = os.Stderr
 			if err := build.Run(); err != nil {
 				fmt.Fprintln(os.Stderr, "build failed:", err)
-				os.Exit(1)
+				return 1
 			}
 		}
 	}
@@ -283,7 +287,7 @@ func main() {
 	dir, err := os.MkdirTemp("", "gm-lifecycle")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 
 	rng := rand.New(rand.NewSource(42)) // deterministic corpus
@@ -296,7 +300,7 @@ func main() {
 		s, err := startSession(*binary, dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "session %d: start failed: %v\n", sess, err)
-			os.Exit(1)
+			return 1
 		}
 
 		// resume continuity: every session after the first must recover state
@@ -332,7 +336,7 @@ func main() {
 			if _, err := s.call("memory_add", map[string]any{
 				"agent_id": emptyAgentName, "text": probes[idx].fact,
 			}); err != nil {
-				fail(sess, "plant probe", err)
+				return fail(sess, "plant probe", err)
 			}
 			storedTexts[probes[idx].fact] = true
 			m.totalFacts++
@@ -341,7 +345,7 @@ func main() {
 			if _, err := s.call("memory_add", map[string]any{
 				"agent_id": emptyAgentName, "text": supersededV1,
 			}); err != nil {
-				fail(sess, "plant v1", err)
+				return fail(sess, "plant v1", err)
 			}
 			storedTexts[supersededV1] = true
 			m.totalFacts++
@@ -350,7 +354,7 @@ func main() {
 			if _, err := s.call("memory_add", map[string]any{
 				"agent_id": emptyAgentName, "text": paraphrase.fact,
 			}); err != nil {
-				fail(sess, "plant paraphrase", err)
+				return fail(sess, "plant paraphrase", err)
 			}
 			storedTexts[paraphrase.fact] = true
 			m.totalFacts++
@@ -365,7 +369,7 @@ func main() {
 				if _, err := s.call("memory_add", map[string]any{
 					"agent_id": "__shared__", "text": sh,
 				}); err != nil {
-					fail(sess, "plant shared", err)
+					return fail(sess, "plant shared", err)
 				}
 				storedTexts[sh] = true
 				m.totalFacts++
@@ -377,7 +381,7 @@ func main() {
 			if _, err := s.call("memory_add", map[string]any{
 				"agent_id": emptyAgentName, "text": f,
 			}); err != nil {
-				fail(sess, "add", err)
+				return fail(sess, "add", err)
 			}
 			storedTexts[f] = true
 			m.totalFacts++
@@ -392,7 +396,7 @@ func main() {
 				"text":   replacementV2,
 				"target": supersededV1,
 			}); err != nil {
-				fail(sess, "supersede", err)
+				return fail(sess, "supersede", err)
 			}
 			storedTexts[replacementV2] = true
 			m.totalFacts++
@@ -402,7 +406,7 @@ func main() {
 		if _, err := s.call("checkpoint_save", map[string]any{
 			"agent_id": emptyAgentName, "state": checkpointState(sess),
 		}); err != nil {
-			fail(sess, "checkpoint_save", err)
+			return fail(sess, "checkpoint_save", err)
 		}
 
 		// window narrowing for the tombstone finding: probe v1 immediately
@@ -424,7 +428,7 @@ func main() {
 	s, err := startSession(*binary, dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "final session: start failed:", err)
-		os.Exit(1)
+		return 1
 	}
 	defer s.kill()
 
@@ -455,7 +459,7 @@ func main() {
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "probe query failed: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		text := firstText(res)
 		m.tokensRecall += countTokens(text)
@@ -511,7 +515,7 @@ func main() {
 		reduction = 1 - avgRecall/float64(fullHistoryTokens)
 	}
 
-	printReport(*binary, dir, m, fullHistoryTokens, reduction, elapsed)
+	passed := printReport(*binary, dir, m, fullHistoryTokens, reduction, elapsed)
 	if *out != "" {
 		writeReport(*out, m, fullHistoryTokens, reduction, elapsed)
 	}
@@ -520,6 +524,10 @@ func main() {
 	} else {
 		fmt.Printf("store kept at: %s\n", dir)
 	}
+	if !passed {
+		return 1
+	}
+	return 0
 }
 
 // checkDead counts a superseded fact as returned only when it appears as a
@@ -551,25 +559,29 @@ func countTokens(s string) int {
 	return int(float64(wordCount(s)) * tokenPerWord)
 }
 
-func fail(sess int, what string, err error) {
+func fail(sess int, what string, err error) int {
 	fmt.Fprintf(os.Stderr, "session %d: %s failed: %v\n", sess, what, err)
-	os.Exit(1)
+	return 1
 }
 
-func printReport(binary, dir string, m *metrics, fullHistoryTokens int, reduction float64, elapsed time.Duration) {
-	fmt.Print(reportString(binary, dir, m, fullHistoryTokens, reduction, elapsed))
+func printReport(binary, dir string, m *metrics, fullHistoryTokens int, reduction float64, elapsed time.Duration) bool {
+	report, passed := reportString(binary, dir, m, fullHistoryTokens, reduction, elapsed)
+	fmt.Print(report)
 	fmt.Printf("\nMarkdown report: pass -out <path>\n")
+	return passed
 }
 
 func writeReport(path string, m *metrics, fullHistoryTokens int, reduction float64, elapsed time.Duration) {
-	if err := os.WriteFile(path, []byte(reportString("", "", m, fullHistoryTokens, reduction, elapsed)), 0o644); err != nil {
+	report, _ := reportString("", "", m, fullHistoryTokens, reduction, elapsed)
+	if err := os.WriteFile(path, []byte(report), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "write report:", err)
 	}
 }
 
-func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reduction float64, elapsed time.Duration) string {
+func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reduction float64, elapsed time.Duration) (string, bool) {
 	var b strings.Builder
 	w := func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }
+	passed := true
 
 	w("# Agent lifecycle simulation — 100 real sessions\n\n")
 	w("Protocol: one fresh `graymatter mcp serve` process per session (JSON-RPC over stdio); the process dies at every session end — durability across restarts is under test, not simulated. Corpus is realistic and adversarial: distractor families sharing vocabulary, a supersede pair, paraphrase probe, shared namespace. Deterministic seed.\n\n")
@@ -580,6 +592,7 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	verdict := "PASS"
 	if hitRate < 70 {
 		verdict = "FAIL"
+		passed = false
 	}
 	w("| Probe recall after ~96 sessions + %d process deaths | 83%% (band ≥70%%) | %.0f%% (%d/%d) | %s |\n",
 		sessions-4, hitRate, m.probeHits, m.probeTotal, verdict)
@@ -587,24 +600,28 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	deadVerdict := "PASS"
 	if m.deadReturned > 0 {
 		deadVerdict = "FAIL"
+		passed = false
 	}
 	w("| Superseded facts returned | 0%% | %d occurrences | %s |\n", m.deadReturned, deadVerdict)
 
 	redVerdict := "PASS"
 	if reduction < 0.85 {
 		redVerdict = "FAIL"
+		passed = false
 	}
 	w("| Token reduction vs full-history | ~90%% (band ≥85%%) | %.0f%% | %s |\n", reduction*100, redVerdict)
 
 	resumeVerdict := "PASS"
 	if m.resumeOK != m.resumeTried {
 		resumeVerdict = "FAIL"
+		passed = false
 	}
 	w("| Checkpoint resume across process death | every session | %d/%d | %s |\n", m.resumeOK, m.resumeTried, resumeVerdict)
 
 	sharedVerdict := "PASS"
 	if m.sharedOK < 3 {
 		sharedVerdict = "FAIL"
+		passed = false
 	}
 	w("| Shared namespace from a foreign agent_id | 3/3 conventions visible | %d/3 | %s |\n", m.sharedOK, sharedVerdict)
 
@@ -626,7 +643,7 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 	if dir != "" {
 		w("| Store dir | %s (deleted after run) |\n", dir)
 	}
-	return b.String()
+	return b.String(), passed
 }
 
 func max(a, b int) int {
