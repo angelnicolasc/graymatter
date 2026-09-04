@@ -27,6 +27,15 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build test binary: %v: %s", err, out)
 	}
+	// Ambient credentials must not affect in-process seeding or child hooks.
+	// A closed local proxy turns any regression into a fast failure, not egress.
+	t.Setenv("OPENAI_API_KEY", "poison-openai-key")
+	t.Setenv("ANTHROPIC_API_KEY", "poison-anthropic-key")
+	t.Setenv("VOYAGE_API_KEY", "poison-voyage-key")
+	t.Setenv("GRAYMATTER_OLLAMA_URL", "http://127.0.0.1:1")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "")
 
 	var buf bytes.Buffer
 	report, err := RunHookLatency(HookLatencyParams{
@@ -59,6 +68,9 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 	if !strings.Contains(buf.String(), "all hook gates hold") {
 		t.Errorf("report text missing the pass line:\n%s", buf.String())
 	}
+	if !strings.Contains(buf.String(), "Embedder: keyword (no LLM, no network, no API key)") {
+		t.Errorf("report text missing the explicit keyword embedder:\n%s", buf.String())
+	}
 
 	for _, row := range report.Rows {
 		if row.Event == "" {
@@ -68,6 +80,22 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 	if report.Rows[0].Event != "user-prompt" || report.Rows[2].Event != "session-end" {
 		t.Errorf("row order = %s..%s, want user-prompt first, session-end last",
 			report.Rows[0].Event, report.Rows[2].Event)
+	}
+}
+
+func TestHookBenchmarkProcessEnvironmentIsNetworkFree(t *testing.T) {
+	cmd := &exec.Cmd{Env: []string{
+		"ANTHROPIC_API_KEY=ambient", "OPENAI_API_KEY=ambient", "VOYAGE_API_KEY=ambient",
+		"GRAYMATTER_OLLAMA_URL=http://127.0.0.1:11434",
+	}}
+	isolateHookBenchmarkProcess(cmd)
+	want := []string{
+		"ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "VOYAGE_API_KEY=",
+		"GRAYMATTER_OLLAMA_URL=disabled://hook-latency-benchmark",
+	}
+	got := cmd.Env[len(cmd.Env)-len(want):]
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("provider environment suffix = %q, want %q", got, want)
 	}
 }
 
