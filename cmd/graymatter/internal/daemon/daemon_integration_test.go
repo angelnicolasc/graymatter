@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -13,20 +14,49 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
-// buildBinary compiles the graymatter binary once per test run and returns
-// its path. Spawn-on-connect re-invokes this binary as `daemon run`.
+var (
+	testBinaryOnce sync.Once
+	testBinaryDir  string
+	testBinaryPath string
+	testBinaryErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	// Shutdown acknowledges before the daemon necessarily exits, so Windows
+	// may still hold the executable here. This does not remove that race: it
+	// defers cleanup until after all package tests and makes it best-effort
+	// instead of a mandatory t.TempDir cleanup assertion.
+	if testBinaryDir != "" {
+		_ = os.RemoveAll(testBinaryDir)
+	}
+	os.Exit(code)
+}
+
+// buildBinary lazily compiles one graymatter binary for the package. Keeping
+// it outside t.TempDir prevents a transient Windows image lock from failing
+// an otherwise successful test during that test's mandatory cleanup.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "graymatter")
-	if runtime.GOOS == "windows" {
-		out += ".exe"
+	testBinaryOnce.Do(func() {
+		testBinaryDir, testBinaryErr = os.MkdirTemp("", "graymatter-daemon-test-")
+		if testBinaryErr != nil {
+			return
+		}
+		testBinaryPath = filepath.Join(testBinaryDir, "graymatter")
+		if runtime.GOOS == "windows" {
+			testBinaryPath += ".exe"
+		}
+		cmd := exec.Command("go", "build", "-o", testBinaryPath,
+			"github.com/angelnicolasc/graymatter/cmd/graymatter")
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			testBinaryErr = fmt.Errorf("go build graymatter: %w\n%s", err, combined)
+		}
+	})
+	if testBinaryErr != nil {
+		t.Fatal(testBinaryErr)
 	}
-	cmd := exec.Command("go", "build", "-o", out,
-		"github.com/angelnicolasc/graymatter/cmd/graymatter")
-	if combined, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build graymatter: %v\n%s", err, combined)
-	}
-	return out
+	return testBinaryPath
 }
 
 // withBuiltDaemon points spawn-on-connect at a freshly built binary for the
