@@ -27,10 +27,10 @@ import (
 //     a broken memory must degrade silently, never break the user's session.
 
 const (
-	// hooksCommandMarker identifies GrayMatter's own entries inside a
-	// settings.json that may contain any number of foreign hooks. Substring
-	// match on the command the hook runs.
-	hooksCommandMarker = "graymatter hooks run"
+	// Markers distinguish current commands from legacy malformed entries.
+	hooksCommandMarker       = "--graymatter-managed-hook"
+	hooksRunCommandMarker    = " hooks run "
+	hooksNoCreateArg         = "--no-create"
 
 	// hooksEventSessionStart is one of the four events this package manages.
 	// Claude Code fires SessionStart with source startup|resume|clear|compact;
@@ -108,7 +108,7 @@ the previous file as .bak.`,
 				if err != nil {
 					return err
 				}
-				res, err := upsertHookSettings(path, exe, true)
+				res, err := upsertHookSettings(path, exe, true, sc)
 				if err != nil {
 					return err
 				}
@@ -153,7 +153,7 @@ func hooksUninstallCmd() *cobra.Command {
 				}
 				// exe is unused on uninstall (no canonical groups are written)
 				// but is threaded through so the upsert signature stays single.
-				res, err := upsertHookSettings(path, exe, false)
+				res, err := upsertHookSettings(path, exe, false, sc)
 				if err != nil {
 					return err
 				}
@@ -248,7 +248,11 @@ type hookSettingsResult struct {
 // An unparseable settings file is never clobbered — the caller gets a warning
 // and the file is left exactly as it was. A file whose "hooks" value is not
 // an object is likewise left alone.
-func upsertHookSettings(path, exe string, install bool) (hookSettingsResult, error) {
+func upsertHookSettings(path, exe string, install bool, scopes ...hookScope) (hookSettingsResult, error) {
+	scope := scopeProject
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	res := hookSettingsResult{Path: path}
 
 	data, err := os.ReadFile(path)
@@ -289,11 +293,11 @@ func upsertHookSettings(path, exe string, install bool) (hookSettingsResult, err
 	drifted := false
 	unmanaged := []string{}
 	for _, event := range hookEventNames() {
-		want := hookGroupsFor(exe, event)
+		want := hookGroupsFor(exe, event, scope)
 		if !install {
 			want = nil
 		}
-		next, mutated, drift, managed := rewriteHookEvent(hooks[event], want, install)
+		next, mutated, drift, managed := rewriteHookEvent(hooks[event], want, install, exe)
 		if !managed {
 			unmanaged = append(unmanaged, event)
 			continue
@@ -353,7 +357,7 @@ func upsertHookSettings(path, exe string, install bool) (hookSettingsResult, err
 }
 
 // rewriteHookEvent applies our upsert to one event's array. Ours are entries
-// whose matcher group carries a command with the GrayMatter marker; they are
+// whose matcher group carries a GrayMatter-owned command; they are
 // removed and, on install, replaced by the canonical groups appended after
 // the foreign ones. Foreign groups keep their original order and content.
 //
@@ -361,7 +365,7 @@ func upsertHookSettings(path, exe string, install bool) (hookSettingsResult, err
 // we can parse), whether anything actually changed, whether the removed
 // entries had drifted from what we would write, and whether the existing
 // value was manageable at all.
-func rewriteHookEvent(existing any, want []any, install bool) (next any, mutated, drift, managed bool) {
+func rewriteHookEvent(existing any, want []any, install bool, expectedExe ...string) (next any, mutated, drift, managed bool) {
 	if existing == nil {
 		return want, len(want) > 0, false, true
 	}
@@ -373,7 +377,7 @@ func rewriteHookEvent(existing any, want []any, install bool) (next any, mutated
 	oursBefore := make([]any, 0, len(arr))
 	foreign := make([]any, 0, len(arr))
 	for _, group := range arr {
-		if hookGroupIsOurs(group) {
+		if hookGroupIsOurs(group, expectedExe...) {
 			oursBefore = append(oursBefore, group)
 			continue
 		}
@@ -422,12 +426,17 @@ func hookArraysEqual(a, b []any) bool {
 	return string(ab) == string(bb)
 }
 
-// hookGroupIsOurs reports whether a matcher group is GrayMatter's: any hook
-// command inside it carrying the marker.
-func hookGroupIsOurs(group any) bool {
+// hookGroupIsOurs reports whether a matcher group belongs to GrayMatter.
+func hookGroupIsOurs(group any, expectedExe ...string) bool {
+	ours, _ := hookGroupGuardStatus(group, expectedExe...)
+	return ours
+}
+
+func hookGroupGuardStatus(group any, expectedExe ...string) (ours, guarded bool) {
+	guarded = true
 	g, ok := group.(map[string]any)
 	if !ok {
-		return false
+		return false, true
 	}
 	list, _ := g["hooks"].([]any)
 	for _, h := range list {
@@ -435,11 +444,12 @@ func hookGroupIsOurs(group any) bool {
 		if !ok {
 			continue
 		}
-		if c, _ := hook["command"].(string); strings.Contains(c, hooksCommandMarker) {
-			return true
+		if c, _ := hook["command"].(string); hookCommandIsOurs(c, expectedExe...) {
+			ours = true
+			guarded = guarded && hookCommandHasArg(c, hooksNoCreateArg)
 		}
 	}
-	return false
+	return ours, guarded
 }
 
 // hookEventNames returns the events GrayMatter manages, in canonical order.
@@ -450,9 +460,13 @@ func hookEventNames() []string {
 // hookGroupsFor builds the canonical matcher groups for one event and the
 // given executable. The recorded command carries the CLI event name (the
 // snake_case arg `hooks run` takes), not the settings event key.
-func hookGroupsFor(exe, event string) []any {
+func hookGroupsFor(exe, event string, scopes ...hookScope) []any {
+	scope := scopeProject
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	group := func(matcher string, timeout int) map[string]any {
-		hook := map[string]any{"type": "command", "command": hookCommand(exe, hookRunArg(event))}
+		hook := map[string]any{"type": "command", "command": hookCommand(exe, hookRunArg(event), scope)}
 		if timeout > 0 {
 			hook["timeout"] = timeout
 		}
@@ -498,9 +512,16 @@ func hookRunArg(event string) string {
 // hookCommand renders the command line Claude Code will execute. The binary
 // path is quoted when needed: hooks run through a shell, and installs under
 // paths with spaces are routine on every platform.
-func hookCommand(exe, event string) string {
+func hookCommand(exe, event string, scopes ...hookScope) string {
+	scope := scopeProject
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	exe = filepath.ToSlash(exe)
-	trailer := " " + hooksCommandMarker + " " + event
+	trailer := hooksRunCommandMarker + event + " " + hooksCommandMarker
+	if scope == scopeGlobal {
+		trailer += " " + hooksNoCreateArg
+	}
 	if strings.ContainsAny(exe, " '\"") {
 		return strconv.Quote(exe) + trailer
 	}
@@ -621,7 +642,7 @@ func runHooksDoctorChecks(path, exeAbs string, scope hookScope) []hookCheck {
 				if !ok {
 					continue
 				}
-				if c, _ := hook["command"].(string); strings.Contains(c, hooksCommandMarker) {
+				if c, _ := hook["command"].(string); hookCommandIsOurs(c, exeAbs) {
 					found = true
 					if exePath == "" {
 						exePath = hookBinaryPath(c)
@@ -648,12 +669,18 @@ func runHooksDoctorChecks(path, exeAbs string, scope hookScope) []hookCheck {
 		})
 	default:
 		detail := fmt.Sprintf("all 4 events registered in %s", path)
-		if drift, _ := hookSettingsDrift(path, exeAbs); drift {
+		if drift, _ := hookSettingsDrift(path, exeAbs, scope); drift {
 			detail += " (entries differ from what this version writes)"
 		}
 		checks = append(checks, hookCheck{Name: "settings", Status: "ok", Detail: detail})
 	}
-
+	if installed, guarded := globalHookGuardStatus(root); scope == scopeGlobal && installed && !guarded {
+		checks = append(checks, hookCheck{
+			Name: "scope guard", Status: "warn",
+			Detail: "global hooks predate the no-create guard and can initialize stores in unrelated directories",
+			Hint:   "re-run `graymatter hooks install --scope global`",
+		})
+	}
 	// Binary check: does the recorded command point at something that exists,
 	// and is it this binary?
 	binCheck := hookCheck{Name: "binary", Status: "ok", Detail: exeAbs}
@@ -709,7 +736,11 @@ func hooksStoreCheck() hookCheck {
 
 // hookSettingsDrift reports whether the installed entries differ from what
 // this binary would write. Best-effort: any parse problem means "no drift".
-func hookSettingsDrift(path, exeAbs string) (bool, error) {
+func hookSettingsDrift(path, exeAbs string, scopes ...hookScope) (bool, error) {
+	scope := scopeProject
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
@@ -721,20 +752,58 @@ func hookSettingsDrift(path, exeAbs string) (bool, error) {
 	hooks, _ := root["hooks"].(map[string]any)
 	drift := false
 	for _, event := range hookEventNames() {
-		_, _, d, managed := rewriteHookEvent(hooks[event], hookGroupsFor(exeAbs, event), true)
+		_, _, d, managed := rewriteHookEvent(hooks[event], hookGroupsFor(exeAbs, event, scope), true, exeAbs)
 		drift = drift || (managed && d)
 	}
 	return drift, nil
 }
 
-// hookBinaryPath extracts the executable path from a recorded hook command:
-// everything before the "graymatter hooks run" marker, unquoted.
+func globalHookGuardStatus(root map[string]any) (installed, guarded bool) {
+	guarded = true
+	hooks, _ := root["hooks"].(map[string]any)
+	for _, event := range hookEventNames() {
+		arr, _ := hooks[event].([]any)
+		for _, group := range arr {
+			ours, safe := hookGroupGuardStatus(group)
+			if ours {
+				installed, guarded = true, guarded && safe
+			}
+		}
+	}
+	return installed, guarded
+}
+
+func hookCommandHasArg(command, want string) bool {
+	idx := strings.LastIndex(command, hooksRunCommandMarker)
+	if idx < 0 {
+		return false
+	}
+	for _, arg := range strings.Fields(command[idx+len(hooksRunCommandMarker):]) {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hookCommandIsOurs(command string, expectedExe ...string) bool {
+	if hookCommandHasArg(command, hooksCommandMarker) {
+		return true
+	}
+	got := hookBinaryPath(command)
+	if len(expectedExe) > 0 && filepath.Clean(got) == filepath.Clean(filepath.FromSlash(expectedExe[0])) {
+		return true
+	}
+	return strings.TrimSuffix(strings.ToLower(filepath.Base(got)), ".exe") == "graymatter"
+}
+
 func hookBinaryPath(command string) string {
-	idx := strings.Index(command, hooksCommandMarker)
+	idx := strings.LastIndex(command, hooksRunCommandMarker)
 	if idx < 0 {
 		return ""
 	}
 	p := strings.TrimSpace(command[:idx])
+	p = strings.TrimSpace(strings.TrimSuffix(p, " graymatter"))
 	p = strings.Trim(p, `"'`)
 	return filepath.FromSlash(p)
 }

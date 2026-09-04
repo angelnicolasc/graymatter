@@ -55,9 +55,16 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # 600s, not the 300s the other suites use: pkg/memory under -race is the
+      # slowest gated suite on a Windows runner, measuring 119-173s across green
+      # runs (162s on run 33846765301). That is under 2x headroom, and a loaded
+      # runner has twice crossed it with nothing wrong - run 33842978778 (PR #90)
+      # and run 33899489378 (main at 5e79f7b), both windows-latest/go1.25, both
+      # timing out at exactly 300.1s with the package still progressing. The
+      # remaining 300s suites keep theirs: they measure 4-37s, an 8-75x margin.
       - name: Test core library with coverage
         shell: bash
-        run: go test -race -count=1 -timeout=300s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
+        run: go test -race -count=1 -timeout=600s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
 
       - name: Test CLI module with coverage
         working-directory: cmd/graymatter

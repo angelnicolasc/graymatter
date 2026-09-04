@@ -81,7 +81,7 @@ func groupCommands(t *testing.T, group map[string]any) []string {
 // TestHooksInstall_WritesCanonicalContract pins the emitted settings shape:
 // four events, SessionStart split across a startup|resume|fork group and a
 // compact group, the user-prompt hook carrying a 10s timeout, and every
-// command an absolute path ending in the documented form.
+// command an absolute path carrying the documented invocation.
 func TestHooksInstall_WritesCanonicalContract(t *testing.T) {
 	withHooksEnv(t)
 	dir := t.TempDir()
@@ -125,8 +125,8 @@ func TestHooksInstall_WritesCanonicalContract(t *testing.T) {
 				if !strings.Contains(c, hooksCommandMarker) {
 					t.Errorf("%s command %q lacks the marker", event, c)
 				}
-				if !strings.HasSuffix(c, hookRunArg(event)) {
-					t.Errorf("command %q must end with the run event name %q", c, hookRunArg(event))
+				if !strings.Contains(c, hooksRunCommandMarker+hookRunArg(event)+" "+hooksCommandMarker) {
+					t.Errorf("command %q must invoke the run event %q", c, hookRunArg(event))
 				}
 				if !filepath.IsAbs(hookBinaryPath(c)) {
 					t.Errorf("command %q must record an absolute binary path", c)
@@ -367,7 +367,7 @@ func TestHooksSettings_NonObjectHooksLeftUntouched(t *testing.T) {
 // TestHookCommand_Quoting: binaries under paths with spaces must record a
 // quoted command, and hookBinaryPath must round-trip it.
 func TestHookCommand_Quoting(t *testing.T) {
-	withSpaces := `/c/Program Files/graymatter/graymatter`
+	withSpaces := `/c/Program Files/hooks run/graymatter`
 	cmd := hookCommand(withSpaces, "user-prompt")
 	if !strings.HasPrefix(cmd, `"`) {
 		t.Errorf("command %q must quote a path containing spaces", cmd)

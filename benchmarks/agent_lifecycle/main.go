@@ -158,6 +158,12 @@ type ioWriteCloser interface {
 func startSession(binary, workdir string) (*session, error) {
 	cmd := exec.Command(binary, "mcp", "serve")
 	cmd.Dir = workdir // the server opens <cwd>/.graymatter — pin it so the run's store is isolated from whatever the parent directory happens to contain
+	cmd.Env = append(cmd.Environ(),
+		"ANTHROPIC_API_KEY=",
+		"OPENAI_API_KEY=",
+		"VOYAGE_API_KEY=",
+		"GRAYMATTER_OLLAMA_URL=disabled://agent-lifecycle-benchmark",
+	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -566,6 +572,7 @@ func reportString(binary, dir string, m *metrics, fullHistoryTokens int, reducti
 
 	w("# Agent lifecycle simulation — 100 real sessions\n\n")
 	w("Protocol: one fresh `graymatter mcp serve` process per session (JSON-RPC over stdio); the process dies at every session end — durability across restarts is under test, not simulated. Corpus is realistic and adversarial: distractor families sharing vocabulary, a supersede pair, paraphrase probe, shared namespace. Deterministic seed.\n\n")
+	w("Embedder: keyword (no LLM, no network, no API key)\n\n")
 	w("| Metric | Claim under test | Measured | Verdict |\n|---|---|---|\n")
 
 	hitRate := 100 * float64(m.probeHits) / float64(max(1, m.probeTotal))

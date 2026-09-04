@@ -22,6 +22,7 @@ func main() {
 	cfg.DecayHalfLife = 2 * time.Second // 30 days compressed to 2 seconds
 	cfg.AsyncConsolidate = false        // drive consolidation by hand
 	cfg.ConsolidateThreshold = 1000     // never auto-trigger
+	cfg.EmbeddingMode = graymatter.EmbeddingKeyword
 
 	mem, err := graymatter.NewWithConfig(cfg)
 	if err != nil {
@@ -29,6 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 	ctx := context.Background()
+	fmt.Println("Embedder: keyword (no LLM, no network, no API key)")
 
 	const agent = "decay-agent"
 	for _, f := range []string{"untouched A", "untouched B", "untouched C", "untouched D", "untouched E", "untouched F", "untouched G", "untouched H", "untouched I", "untouched J"} {

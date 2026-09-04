@@ -1,9 +1,13 @@
 package harness
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,49 +166,145 @@ func TestRun_MaxRetriesExceeded(t *testing.T) {
 	}
 }
 
-func TestRun_Resume(t *testing.T) {
-	dir := t.TempDir()
-	af := agentFile(t, simpleAgentContent)
-
-	// First run — creates a checkpoint.
-	firstReply := "First reply from agent."
-	cfg := RunConfig{
+func runTestReply(t *testing.T, dir, af, reply string) *RunResult {
+	t.Helper()
+	result, err := Run(context.Background(), RunConfig{
 		AgentFile:  af,
 		DataDir:    dir,
 		MaxRetries: 1,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
+		Stdout:     io.Discard,
+		Stderr:     io.Discard,
 		llmDoer: func(_ context.Context, _ anthropic.MessageNewParams) (*anthropic.Message, error) {
-			return cannedMessage(firstReply), nil
+			return cannedMessage(reply), nil
 		},
-	}
-	_, err := Run(context.Background(), cfg)
+	})
 	if err != nil {
-		t.Fatalf("first Run: %v", err)
+		t.Fatalf("Run reply %q: %v", reply, err)
 	}
+	return result
+}
 
-	// Second run — resume: must include prior messages in params.
+func messageHistoryJSON(t *testing.T, params anthropic.MessageNewParams) string {
+	t.Helper()
+	b, err := json.Marshal(params.Messages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	return string(b)
+}
+
+func TestRun_ResumeConcreteSession(t *testing.T) {
+	dir := t.TempDir()
+	af := agentFile(t, simpleAgentContent)
+
+	first := runTestReply(t, dir, af, "first-session-context")
+	runTestReply(t, dir, af, "newer-session-context")
+
 	var capturedParams anthropic.MessageNewParams
+	var stderr bytes.Buffer
 	cfg2 := RunConfig{
 		AgentFile:  af,
 		DataDir:    dir,
 		MaxRetries: 1,
-		ResumeID:   "latest",
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
+		ResumeID:   first.SessionID,
+		Stdout:     io.Discard,
+		Stderr:     &stderr,
 		llmDoer: func(_ context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
 			capturedParams = params
-			return cannedMessage("Second reply."), nil
+			return cannedMessage("resumed"), nil
 		},
 	}
-	_, err = Run(context.Background(), cfg2)
+	_, err := Run(context.Background(), cfg2)
 	if err != nil {
 		t.Fatalf("resume Run: %v", err)
 	}
 
-	// The prior assistant message should appear in the messages sent to the API.
-	if len(capturedParams.Messages) < 2 {
-		t.Errorf("expected at least 2 messages on resume, got %d", len(capturedParams.Messages))
+	history := messageHistoryJSON(t, capturedParams)
+	if !strings.Contains(history, "first-session-context") {
+		t.Errorf("requested session context missing: %s", history)
+	}
+	if strings.Contains(history, "newer-session-context") {
+		t.Errorf("newer session context was loaded instead: %s", history)
+	}
+	if !strings.Contains(stderr.String(), first.SessionID) {
+		t.Errorf("resume diagnostic does not name session %q: %s", first.SessionID, stderr.String())
+	}
+}
+
+func TestRun_ResumeUnknownSessionFailsBeforeRun(t *testing.T) {
+	dir := t.TempDir()
+	af := agentFile(t, simpleAgentContent)
+	runTestReply(t, dir, af, "seed")
+
+	_, err := Run(context.Background(), RunConfig{
+		AgentFile: af, DataDir: dir, ResumeID: "missing-session",
+		Stdout: io.Discard, Stderr: io.Discard,
+		llmDoer: func(_ context.Context, _ anthropic.MessageNewParams) (*anthropic.Message, error) {
+			return cannedMessage("unexpected"), nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing-session") {
+		t.Fatalf("Run error = %v, want requested session ID", err)
+	}
+	sessions, listErr := ListSessions(dir)
+	if listErr != nil || len(sessions) != 1 {
+		t.Fatalf("unknown resume persisted a run: sessions=%d err=%v", len(sessions), listErr)
+	}
+}
+
+func TestRun_ResumeLatestKeepsLatestCheckpointSemantics(t *testing.T) {
+	dir := t.TempDir()
+	af := agentFile(t, simpleAgentContent)
+	runTestReply(t, dir, af, "older-context")
+	time.Sleep(2 * time.Millisecond)
+	runTestReply(t, dir, af, "latest-checkpoint-context")
+
+	store, err := OpenLocalStore(dir, "")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := store.SessionSave(HarnessSession{
+		ID: "newer-failed-session", AgentID: "test-runner-agent",
+		AgentFile: af, StartedAt: time.Now().UTC().Add(time.Hour), Status: "failed",
+	}); err != nil {
+		t.Fatalf("save failed session: %v", err)
+	}
+	_ = store.Close()
+
+	var capturedParams anthropic.MessageNewParams
+	_, err = Run(context.Background(), RunConfig{
+		AgentFile: af, DataDir: dir, ResumeID: "latest",
+		Stdout: io.Discard, Stderr: io.Discard,
+		llmDoer: func(_ context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+			capturedParams = params
+			return cannedMessage("resumed"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("resume latest: %v", err)
+	}
+	history := messageHistoryJSON(t, capturedParams)
+	if !strings.Contains(history, "latest-checkpoint-context") {
+		t.Errorf("latest checkpoint context missing: %s", history)
+	}
+}
+
+func TestRun_ResumeRejectsDifferentAgent(t *testing.T) {
+	dir := t.TempDir()
+	other := agentFile(t, strings.Replace(simpleAgentContent,
+		"name: test-runner-agent", "name: other-agent", 1))
+	target := runTestReply(t, dir, other, "other-context")
+
+	_, err := Run(context.Background(), RunConfig{
+		AgentFile: agentFile(t, simpleAgentContent), DataDir: dir, ResumeID: target.SessionID,
+		Stdout: io.Discard, Stderr: io.Discard,
+		llmDoer: func(_ context.Context, _ anthropic.MessageNewParams) (*anthropic.Message, error) {
+			return cannedMessage("unexpected"), nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), target.SessionID) ||
+		!strings.Contains(err.Error(), "other-agent") || !strings.Contains(err.Error(), "test-runner-agent") {
+		t.Fatalf("Run error = %v, want session and both agent IDs", err)
 	}
 }
 

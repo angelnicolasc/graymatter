@@ -23,6 +23,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`run --resume <session-id>` now resumes the checkpoint belonging to that exact session.** The flag previously treated every non-empty value as `latest` and silently loaded the newest checkpoint for the agent, even when the requested ID was historical or nonexistent. Concrete IDs are now resolved through the session registry, unknown IDs fail with the requested session named, and `latest` retains its existing newest-checkpoint behavior.
+
+- **Installed Claude Code hooks now invoke the runnable `hooks run` path, and global hooks no longer create stores in unrelated working directories** ([#83](https://github.com/angelnicolasc/graymatter/issues/83)). Global commands persist a silent `--no-create` guard while project installs retain first-use creation; `doctor` identifies older global installs, and reinstalling replaces legacy malformed commands.
+
 - **`bench --hooks` now documents and enforces one CLI contract in human and JSON modes.** Help names the two 200 ms median-delta gates and the normalized-scaling gate, and states that pre-compact is an ungated baseline. `--json` suppresses the human report so stdout is one valid JSON document, while failed gates now exit non-zero in both modes.
 
 - **Hooks and MCP no longer duplicate matching startup recall, and `init --global` now says exactly what it scopes** ([#81](https://github.com/angelnicolasc/graymatter/issues/81)). A non-empty Claude Code hook block names the namespace it actually queried; before the first reply, same-ID non-empty sections replace matching MCP startup searches. A different ID reruns both project and `__shared__` so cross-namespace dedup cannot hide shared facts, while missing sections safely fall back. Focused/batch searches, writes, corrections, aliases, and checkpoints remain available. `init --global` still initializes the current project and additionally installs home-scoped agent instructions — it does not globalize project-scoped MCP configs (Codex's config is already home-scoped).

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -160,12 +161,24 @@ func ResolveSessionIDDB(db *bolt.DB, agentID, sessionID string) (string, error) 
 	return resolveSessionID(db, agentID, sessionID)
 }
 
+func (s *LocalStore) CheckpointLoad(agentID, checkpointID string) (*session.Checkpoint, error) {
+	return session.Load(s.mem.Advanced().DB(), agentID, checkpointID)
+}
+
+func (s *LocalStore) SessionsList() ([]HarnessSession, error) {
+	return listHarnessSessions(s.mem.Advanced().DB())
+}
+
+func (s *LocalStore) SessionResolve(agentID, sessionID string) (string, error) {
+	return resolveSessionID(s.mem.Advanced().DB(), agentID, sessionID)
+}
+
 // Resume looks up the HarnessSession for sessionID (or "latest" for the most
 // recent session), reads its AgentFile and Inputs, and returns a RunConfig
 // ready to pass to Run. The caller is responsible for calling Run.
 //
-// This is the primary entry point for resuming a session that was interrupted
-// by a machine restart — no in-memory state is assumed.
+// Library callers may use this entry point after a restart. Run's CLI path uses
+// its already-open Store to resolve the target HarnessSession.LastCPID.
 func Resume(_ context.Context, sessionID, dataDir string) (*RunConfig, error) {
 	db, err := openReadOnly(dataDir)
 	if err != nil {
