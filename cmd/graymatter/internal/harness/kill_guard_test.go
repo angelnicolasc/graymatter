@@ -30,14 +30,83 @@ func killTestDB(t *testing.T, dataDir string) *bolt.DB {
 
 func saveRunning(t *testing.T, db *bolt.DB, id string, pid int) {
 	t.Helper()
+	started, err := processStartTime(pid)
+	if err != nil {
+		t.Fatalf("process start time: %v", err)
+	}
 	if err := SaveSessionDB(db, HarnessSession{
 		ID:        id,
 		AgentID:   "victim-agent",
 		Status:    "running",
 		PID:       pid,
+		PIDStart:  started,
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
+	}
+}
+
+func TestProcessIdentityTokenIncludesBoot(t *testing.T) {
+	if processIdentityToken("boot-a", 42) == processIdentityToken("boot-b", 42) {
+		t.Fatal("process identity token ignores the Linux boot ID")
+	}
+}
+
+func TestKillSessionDB_RefusesRecycledPID(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), ".graymatter")
+	db := killTestDB(t, dataDir)
+
+	victim := startSleeper(t)
+	started, err := processStartTime(victim)
+	if err != nil {
+		t.Fatalf("process start time: %v", err)
+	}
+	if err := SaveSessionDB(db, HarnessSession{
+		ID: "01RECYCLED", AgentID: "old-agent", Status: "running", PID: victim,
+		PIDStart: started + 1, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save stale session: %v", err)
+	}
+	writePIDFile(t, dataDir, "01RECYCLED", victim)
+
+	err = KillSessionDB(db, "01RECYCLED")
+	if err == nil || !strings.Contains(err.Error(), "was recycled") {
+		t.Fatalf("error = %v, want recycled-PID rejection", err)
+	}
+	if !processAlive(victim) {
+		t.Errorf("the unrelated process (pid %d) was terminated", victim)
+	}
+}
+
+func TestKillSessionDB_RefusesUnverifiableProcessStartTime(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, want string
+		started        int64
+	}{
+		{"legacy record", "01LEGACY", "predates process-identity hardening", 0},
+		{"capture failure", "01UNVERIFIED", "could not record", processStartUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), ".graymatter")
+			db := killTestDB(t, dataDir)
+			victim := startSleeper(t)
+			if err := SaveSessionDB(db, HarnessSession{
+				ID: tc.id, AgentID: "old-agent", Status: "running", PID: victim,
+				PIDStart: tc.started, StartedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("save unverifiable session: %v", err)
+			}
+			writePIDFile(t, dataDir, tc.id, victim)
+
+			err := KillSessionDB(db, tc.id)
+			if err == nil || !strings.Contains(err.Error(), tc.want) ||
+				!strings.Contains(err.Error(), "manually") {
+				t.Fatalf("error = %v, want %q rejection with manual alternative", err, tc.want)
+			}
+			if !processAlive(victim) {
+				t.Errorf("the unrelated process (pid %d) was terminated", victim)
+			}
+		})
 	}
 }
 
