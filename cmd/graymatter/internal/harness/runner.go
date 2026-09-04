@@ -49,6 +49,12 @@ type RunConfig struct {
 	// DataDir is the GrayMatter data directory. Default: ".graymatter"
 	DataDir string
 
+	// SessionID, PID, and LogFile identify a parent-spawned background run.
+	// SessionID defaults to a new ULID when omitted.
+	SessionID string
+	PID       int
+	LogFile   string
+
 	// MaxRetries is the maximum number of LLM call attempts. Default: 3
 	MaxRetries int
 
@@ -125,8 +131,11 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		store = ls
 	}
 
-	// Allocate a new session ID for this run.
-	sessionID := ulid.Make().String()
+	// Allocate a new session ID unless the background parent supplied one.
+	sessionID := cfg.SessionID
+	if sessionID == "" {
+		sessionID = ulid.Make().String()
+	}
 
 	// Load prior checkpoint message history when resuming.
 	var priorMessages []session.Message
@@ -145,6 +154,8 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		AgentFile: cfg.AgentFile,
 		StartedAt: time.Now().UTC(),
 		Status:    "running",
+		PID:       cfg.PID,
+		LogFile:   cfg.LogFile,
 		Inputs:    cfg.Inputs,
 	}
 	if err := store.SessionSave(hs); err != nil {

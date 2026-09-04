@@ -17,12 +17,12 @@ import (
 
 func runCmd() *cobra.Command {
 	var (
-		background     bool
-		resumeID       string
-		maxRetries     int
-		inputs         []string
+		background      bool
+		resumeID        string
+		maxRetries      int
+		inputs          []string
 		backgroundChild bool
-		sessionIDFlag  string
+		sessionIDFlag   string
 	)
 
 	cmd := &cobra.Command{
@@ -68,6 +68,11 @@ Examples:
 				Stdout:     cmd.OutOrStdout(),
 				Stderr:     cmd.ErrOrStderr(),
 				Store:      store,
+			}
+			if backgroundChild {
+				cfg.SessionID = sessionIDFlag
+				cfg.PID = os.Getpid()
+				cfg.LogFile = harness.LogFilePath(dataDir, sessionIDFlag)
 			}
 			result, err := harness.Run(context.Background(), cfg)
 			if err != nil {
