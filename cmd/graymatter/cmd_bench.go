@@ -238,15 +238,27 @@ for the retrieval-quality suite and its results.`, benchsyn.HookRecallDeltaBudge
 // this binary against itself. Every published number is machine-checked; this
 // is the hook budgets' turn.
 func runBenchHooks(cmd *cobra.Command) error {
-	report, err := benchsyn.RunHookLatency(benchsyn.HookLatencyParams{}, cmd.OutOrStdout())
+	return runBenchHooksWith(cmd, benchsyn.RunHookLatency, os.Exit)
+}
+
+type hookLatencyRunner func(benchsyn.HookLatencyParams, io.Writer) (benchsyn.HookLatencyReport, error)
+
+func runBenchHooksWith(cmd *cobra.Command, run hookLatencyRunner, exit func(int)) error {
+	humanOut := cmd.OutOrStdout()
+	if jsonOut {
+		humanOut = io.Discard
+	}
+	report, err := run(benchsyn.HookLatencyParams{}, humanOut)
 	if err != nil {
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(report); err != nil {
+			return err
+		}
 	}
 	if !report.Pass {
-		os.Exit(1)
+		exit(1)
 	}
 	return nil
 }

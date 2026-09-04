@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -112,4 +113,50 @@ func TestBenchHooks_HelpDescribesRealGates(t *testing.T) {
 			t.Errorf("help still advertises stale absolute gate %q", stale)
 		}
 	}
+}
+
+func TestBenchHooks_OutputAndExitContract(t *testing.T) {
+	report := benchsyn.HookLatencyReport{SeedFacts: 42, Pass: false}
+	run := func(_ benchsyn.HookLatencyParams, out io.Writer) (benchsyn.HookLatencyReport, error) {
+		_, _ = io.WriteString(out, "human report\n")
+		return report, nil
+	}
+
+	t.Run("json is the only stdout document", func(t *testing.T) {
+		jsonOut = true
+		defer func() { jsonOut = false }()
+		var out bytes.Buffer
+		cmd := benchCmd()
+		cmd.SetOut(&out)
+		exitCode := 0
+		if err := runBenchHooksWith(cmd, run, func(code int) { exitCode = code }); err != nil {
+			t.Fatalf("run bench hooks: %v", err)
+		}
+		var got benchsyn.HookLatencyReport
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
+		}
+		if got.SeedFacts != report.SeedFacts || got.Pass {
+			t.Fatalf("decoded report = %+v, want fabricated failed report", got)
+		}
+		if exitCode != 1 {
+			t.Fatalf("exit code = %d, want 1", exitCode)
+		}
+	})
+
+	t.Run("human report is unchanged", func(t *testing.T) {
+		var out bytes.Buffer
+		cmd := benchCmd()
+		cmd.SetOut(&out)
+		exitCode := 0
+		if err := runBenchHooksWith(cmd, run, func(code int) { exitCode = code }); err != nil {
+			t.Fatalf("run bench hooks: %v", err)
+		}
+		if got := out.String(); got != "human report\n" {
+			t.Fatalf("human stdout = %q", got)
+		}
+		if exitCode != 1 {
+			t.Fatalf("exit code = %d, want 1", exitCode)
+		}
+	})
 }
