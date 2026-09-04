@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -83,6 +84,79 @@ func groupCommands(t *testing.T, group map[string]any) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+func TestHooksUninstallAll_RemovesBothScopes(t *testing.T) {
+	withHooksEnv(t)
+	project, home := t.TempDir(), t.TempDir()
+	t.Chdir(project)
+	testHomeOverride = home
+	t.Cleanup(func() { testHomeOverride = "" })
+
+	exe := filepath.Join(t.TempDir(), "graymatter")
+	paths := []string{
+		filepath.Join(project, ".claude", "settings.json"),
+		filepath.Join(home, ".claude", "settings.json"),
+	}
+	for i, path := range paths {
+		scope := []hookScope{scopeProject, scopeGlobal}[i]
+		if _, err := upsertHookSettings(path, exe, true, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := hooksUninstallCmd()
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hooks uninstall --all: %v", err)
+	}
+	for _, path := range paths {
+		if hooks, ok := readSettings(t, path)["hooks"]; ok {
+			t.Errorf("%s still has hooks after --all: %#v", path, hooks)
+		}
+	}
+}
+
+func TestHooksDoctorAll_ReportsBothScopes(t *testing.T) {
+	withHooksEnv(t)
+	project, home := t.TempDir(), t.TempDir()
+	t.Chdir(project)
+	testHomeOverride = home
+	t.Cleanup(func() { testHomeOverride = "" })
+	exe, err := resolveOwnBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for scope, path := range map[hookScope]string{
+		scopeProject: filepath.Join(project, ".claude", "settings.json"),
+		scopeGlobal:  filepath.Join(home, ".claude", "settings.json"),
+	} {
+		if _, err := upsertHookSettings(path, exe, true, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd := hooksDoctorCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hooks doctor --all: %v", err)
+	}
+	got := out.String()
+	for _, path := range []string{filepath.Join(".claude", "settings.json"), filepath.Join(home, ".claude", "settings.json")} {
+		if !strings.Contains(got, path) {
+			t.Errorf("doctor --all omitted %s:\n%s", path, got)
+		}
+	}
+}
+
+func TestHooksInstallAll_RemainsRejected(t *testing.T) {
+	cmd := hooksInstallCmd()
+	cmd.SetArgs([]string{"--all"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("hooks install --all error = %v, want explicit rejection", err)
+	}
 }
 
 // TestHooksInstall_WritesCanonicalContract pins the emitted settings shape:
