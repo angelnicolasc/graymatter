@@ -289,6 +289,23 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	storeDir := filepath.Join(dir, ".graymatter")
+	var activeSession *session
+	defer func() {
+		if activeSession != nil {
+			activeSession.kill()
+		}
+		// Ask the known daemon to stop before best-effort removal. Detached work
+		// can still revive it after this request; this narrows, not removes, the race.
+		stop := exec.Command(*binary, "--dir", storeDir, "daemon", "stop")
+		_ = stop.Run()
+		time.Sleep(500 * time.Millisecond)
+		if !*keep {
+			if err := os.RemoveAll(dir); err != nil {
+				fmt.Fprintf(os.Stderr, "cleanup %s: %v\n", dir, err)
+			}
+		}
+	}()
 
 	rng := rand.New(rand.NewSource(42)) // deterministic corpus
 	m := &metrics{liveFactsSeen: map[string]bool{}}
@@ -302,6 +319,7 @@ func run() int {
 			fmt.Fprintf(os.Stderr, "session %d: start failed: %v\n", sess, err)
 			return 1
 		}
+		activeSession = s
 
 		// resume continuity: every session after the first must recover state
 		if sess > 1 {
@@ -422,6 +440,7 @@ func run() int {
 		}
 
 		s.kill() // the process dies: this is the cross-session durability claim
+		activeSession = nil
 	}
 
 	// ---- final verification session: the probes fire here ----
@@ -430,7 +449,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "final session: start failed:", err)
 		return 1
 	}
-	defer s.kill()
+	activeSession = s
 
 	probeQueries := []struct {
 		query string
@@ -519,9 +538,7 @@ func run() int {
 	if *out != "" {
 		writeReport(*out, m, fullHistoryTokens, reduction, elapsed)
 	}
-	if !*keep {
-		os.RemoveAll(dir)
-	} else {
+	if *keep {
 		fmt.Printf("store kept at: %s\n", dir)
 	}
 	if !passed {
