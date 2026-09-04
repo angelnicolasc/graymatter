@@ -188,7 +188,7 @@ func benchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bench",
 		Short: "Run the published measurement suites",
-		Long: `Run GrayMatter's published benchmarks and print what they measure today.
+		Long: fmt.Sprintf(`Run GrayMatter's published benchmarks and print what they measure today.
 
 Three modes:
 
@@ -198,8 +198,9 @@ suites that gate README.md and docs/benchmarks.md in CI.
 
 --hooks — the Claude Code hook budgets: seeds a 10k-fact store, fires the hook
 runners as fresh processes (the shape Claude Code uses — this binary itself is
-the hook binary), and gates the published budgets (user-prompt < 150 ms,
-pre-compact < 200 ms, session-end < 500 ms) against the hook-internal time.
+the hook binary), and gates the user-prompt and session-end median deltas from
+the pre-compact baseline (budgets ≤ %v and ≤ %v), plus normalized recall
+scaling (≤ %.1fx). Pre-compact is the baseline and has no absolute gate.
 Methodology identical to benchmarks/hook_latency, the CI gate.
 
 --store — your memory: reads the actual store (through the daemon when one is
@@ -209,7 +210,8 @@ which issues real recalls to measure them and says so.
 
 What the token-count suite does NOT measure: relevance. A system returning
 eight facts at random would score the same reduction. See docs/benchmarks.md
-for the retrieval-quality suite and its results.`,
+for the retrieval-quality suite and its results.`, benchsyn.HookRecallDeltaBudget,
+			benchsyn.HookSessionEndDeltaBudget, benchsyn.HookScalingMaxNormalized),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case hookLatency:
@@ -236,15 +238,27 @@ for the retrieval-quality suite and its results.`,
 // this binary against itself. Every published number is machine-checked; this
 // is the hook budgets' turn.
 func runBenchHooks(cmd *cobra.Command) error {
-	report, err := benchsyn.RunHookLatency(benchsyn.HookLatencyParams{}, cmd.OutOrStdout())
+	return runBenchHooksWith(cmd, benchsyn.RunHookLatency, os.Exit)
+}
+
+type hookLatencyRunner func(benchsyn.HookLatencyParams, io.Writer) (benchsyn.HookLatencyReport, error)
+
+func runBenchHooksWith(cmd *cobra.Command, run hookLatencyRunner, exit func(int)) error {
+	humanOut := cmd.OutOrStdout()
+	if jsonOut {
+		humanOut = io.Discard
+	}
+	report, err := run(benchsyn.HookLatencyParams{}, humanOut)
 	if err != nil {
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(report); err != nil {
+			return err
+		}
 	}
 	if !report.Pass {
-		os.Exit(1)
+		exit(1)
 	}
 	return nil
 }
