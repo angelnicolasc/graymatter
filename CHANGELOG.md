@@ -23,6 +23,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`sessions kill` now verifies a background process's exact process-start identity before terminating it.** A stale running-session record and PID file could previously match an unrelated process after the operating system recycled the PID; kills now require both the recorded PID and its platform-derived start identity (including the Linux boot ID) to match, and older unverifiable records fail closed with a manual-stop instruction.
 - **Hooks and MCP no longer duplicate matching startup recall, and `init --global` now says exactly what it scopes** ([#81](https://github.com/angelnicolasc/graymatter/issues/81)). A non-empty Claude Code hook block names the namespace it actually queried; before the first reply, same-ID non-empty sections replace matching MCP startup searches. A different ID reruns both project and `__shared__` so cross-namespace dedup cannot hide shared facts, while missing sections safely fall back. Focused/batch searches, writes, corrections, aliases, and checkpoints remain available. `init --global` still initializes the current project and additionally installs home-scoped agent instructions — it does not globalize project-scoped MCP configs (Codex's config is already home-scoped).
 - **Background agent runs now persist the exact session ID, PID, and log path announced by the parent process.** `sessions list`, `sessions logs`, and `sessions kill` therefore address the same detached run instead of an unreachable duplicate session record.
 

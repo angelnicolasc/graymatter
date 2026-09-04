@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +23,13 @@ import (
 
 var bucketHarness = []byte("harness_sessions")
 
+const processStartUnavailable int64 = -1
+
+func processIdentityToken(bootID string, start uint64) int64 {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", bootID, start)))
+	return int64(binary.BigEndian.Uint64(sum[:8]) >> 1)
+}
+
 // HarnessSession is the canonical run-metadata record persisted in the
 // harness_sessions bbolt bucket. One record per agent run.
 type HarnessSession struct {
@@ -31,6 +40,7 @@ type HarnessSession struct {
 	FinishedAt *time.Time        `json:"finished_at,omitempty"`
 	Status     string            `json:"status"` // running|done|failed|killed
 	PID        int               `json:"pid,omitempty"`
+	PIDStart   int64             `json:"process_start_time,omitempty"`
 	LogFile    string            `json:"log_file,omitempty"`
 	Inputs     map[string]string `json:"inputs,omitempty"`
 	LastCPID   string            `json:"last_checkpoint_id,omitempty"`
@@ -147,6 +157,19 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		}
 	}
 
+	// A background child identifies itself; unavailable start times make kills fail closed.
+	var processStart int64
+	if cfg.PID != 0 {
+		started, startErr := processStartTime(os.Getpid())
+		if startErr != nil {
+			processStart = processStartUnavailable
+			fmt.Fprintf(cfg.Stderr,
+				"graymatter run: process start time unavailable; sessions kill will refuse this run: %v\n", startErr)
+		} else {
+			processStart = started
+		}
+	}
+
 	// Create and persist the harness session record.
 	hs := HarnessSession{
 		ID:        sessionID,
@@ -155,6 +178,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		StartedAt: time.Now().UTC(),
 		Status:    "running",
 		PID:       cfg.PID,
+		PIDStart:  processStart,
 		LogFile:   cfg.LogFile,
 		Inputs:    cfg.Inputs,
 	}

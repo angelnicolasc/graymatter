@@ -70,7 +70,7 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 	if hs.PID == 0 {
 		return fmt.Errorf("session %q has no PID — it was not started in background mode", sessionID)
 	}
-	if err := confirmOurProcess(db, sessionID, hs.PID); err != nil {
+	if err := confirmOurProcess(db, sessionID, hs.PID, hs.PIDStart); err != nil {
 		return err
 	}
 
@@ -86,20 +86,33 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 }
 
 // confirmOurProcess checks that pid is one graymatter actually spawned for
-// sessionID, by matching it against the PID file written at spawn time.
+// sessionID, by matching its PID file and platform-derived process-start identity.
 //
 // Without this, the kill target is whatever number happens to sit in a session
 // record — and session records can be written through the authenticated RPC
 // surface (SessionSave). Save a record with someone else's PID and status
 // "running", call SessionKill, and the daemon terminates that process on your
 // behalf. The PID file narrows the primitive to processes this tool started.
+// The start identity also rejects stale records after the OS recycles a PID.
 //
 // It is not a defence against a process already running as the same user: that
 // process can write both the record and the file. It is a defence against the
 // RPC surface being a kill primitive on its own, which is a different thing.
-func confirmOurProcess(db *bolt.DB, sessionID string, pid int) error {
+func confirmOurProcess(db *bolt.DB, sessionID string, pid int, recordedStart int64) error {
 	if pid == os.Getpid() {
 		return fmt.Errorf("session %q names this process (pid %d); refusing to kill it", sessionID, pid)
+	}
+	if recordedStart == 0 {
+		return fmt.Errorf(
+			"session %q predates process-identity hardening and has no process start time; "+
+				"refusing to kill pid %d: stop it manually only after verifying its identity",
+			sessionID, pid)
+	}
+	if recordedStart < 0 {
+		return fmt.Errorf(
+			"session %q could not record a process start time; refusing to kill pid %d: "+
+				"stop it manually only after verifying its identity",
+			sessionID, pid)
 	}
 
 	// gray.db sits at the root of the data dir, which is where run/ lives too.
@@ -117,6 +130,17 @@ func confirmOurProcess(db *bolt.DB, sessionID string, pid int) error {
 		return fmt.Errorf(
 			"session %q: the database says pid %d but %s says %d; refusing to kill either",
 			sessionID, pid, pidPath, onDisk)
+	}
+	liveStart, err := processStartTime(pid)
+	if err != nil {
+		return fmt.Errorf(
+			"session %q: cannot verify the start time of pid %d; refusing to kill it: %w",
+			sessionID, pid, err)
+	}
+	if liveStart != recordedStart {
+		return fmt.Errorf(
+			"session %q: pid %d was recycled (recorded start time %d, live start time %d); refusing to kill it",
+			sessionID, pid, recordedStart, liveStart)
 	}
 	return nil
 }
