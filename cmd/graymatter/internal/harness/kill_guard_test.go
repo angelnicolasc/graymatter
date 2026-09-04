@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,17 +41,20 @@ func saveRunning(t *testing.T, db *bolt.DB, id string, pid int) {
 	}
 }
 
+func TestKillGuardSleeperProcess(t *testing.T) {
+	if os.Getenv("GRAYMATTER_TEST_SLEEP_HELPER") != "1" {
+		return
+	}
+	time.Sleep(30 * time.Second)
+}
+
 // startSleeper launches a real, harmless child process and returns its PID.
 // It is the stand-in for "some other process on this machine".
 func startSleeper(t *testing.T) int {
 	t.Helper()
 
-	var c *exec.Cmd
-	if runtime.GOOS == "windows" {
-		c = exec.Command("cmd.exe", "/c", "ping -n 30 127.0.0.1 > NUL")
-	} else {
-		c = exec.Command("sleep", "30")
-	}
+	c := exec.Command(os.Args[0], "-test.run=^TestKillGuardSleeperProcess$")
+	c.Env = append(c.Environ(), "GRAYMATTER_TEST_SLEEP_HELPER=1")
 	if err := c.Start(); err != nil {
 		t.Skipf("cannot start a helper process: %v", err)
 	}
