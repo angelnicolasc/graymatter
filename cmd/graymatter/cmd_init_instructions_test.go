@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/internal/tokens"
 )
 
 func TestUpsertInstructions_CreatesFile(t *testing.T) {
@@ -525,4 +527,30 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// instructionsBlockTokenBudget is the ceiling enforced by
+// TestInstructionsBlockBudget. The block is the single most expensive piece of
+// recurring copy GrayMatter ships: unlike the MCP handshake, which rides one
+// initialize per session, this text lives in CLAUDE.md / AGENTS.md and is read
+// on every turn of every session of every project it was installed into. The
+// handshake carries a 240-token ceiling for a 210-token string
+// (cmd/graymatter/internal/mcp/instructions.go); this is the same discipline at
+// the same ~14% headroom, applied where the cost is roughly four times larger.
+// Raise it in this constant, with reasoning, rather than letting the copy grow
+// silently.
+const instructionsBlockTokenBudget = 1060
+
+// TestInstructionsBlockBudget pins the recurring token cost of the installed
+// briefing with the same estimator the handshake budget and the benchmarks use,
+// so the numbers here, there and in docs all mean the same thing.
+func TestInstructionsBlockBudget(t *testing.T) {
+	n := tokens.Approx(instructionsBlock())
+	if n == 0 {
+		t.Fatal("token estimator returned 0 for a non-empty block; estimator or template broke")
+	}
+	if n > instructionsBlockTokenBudget {
+		t.Fatalf("installed instructions block costs %d tokens, budget is %d — shorten the copy or raise the budget with reasoning",
+			n, instructionsBlockTokenBudget)
+	}
 }
