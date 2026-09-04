@@ -67,7 +67,7 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 	if report.DeltaBudgetMs != msDuration(HookRecallDeltaBudget) {
 		t.Errorf("report delta budget = %v, want %v", report.DeltaBudgetMs, msDuration(HookRecallDeltaBudget))
 	}
-	if report.ScalingNormalized <= 0 || report.ScalingNormalized > HookScalingMaxNormalized {
+	if !hookScalingRatioValid(report.ScalingNormalized) {
 		t.Errorf("scaling normalized = %v, want (0, %.1f]", report.ScalingNormalized, HookScalingMaxNormalized)
 	}
 	// The injected-block guard: with corpus-matching queries the user-prompt
@@ -87,6 +87,42 @@ func TestRunHookLatency_ScaledPipeline(t *testing.T) {
 	if report.Rows[0].Event != "user-prompt" || report.Rows[2].Event != "session-end" {
 		t.Errorf("row order = %s..%s, want user-prompt first, session-end last",
 			report.Rows[0].Event, report.Rows[2].Event)
+	}
+}
+
+func TestNormalizeHookScalingRejectsMissingMeasurements(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		small, big time.Duration
+	}{
+		{name: "small", small: 0, big: time.Millisecond},
+		{name: "big", small: time.Millisecond, big: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := normalizeHookScaling(tc.small, tc.big, 100, 5); err == nil {
+				t.Fatal("zero-duration recall must be rejected as a missing measurement")
+			}
+		})
+	}
+}
+
+func TestHookScalingRatioValidRange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ratio float64
+		want  bool
+	}{
+		{name: "negative", ratio: -1, want: false},
+		{name: "zero", ratio: 0, want: false},
+		{name: "positive", ratio: 0.01, want: true},
+		{name: "maximum", ratio: HookScalingMaxNormalized, want: true},
+		{name: "above maximum", ratio: HookScalingMaxNormalized + 0.01, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hookScalingRatioValid(tc.ratio); got != tc.want {
+				t.Errorf("hookScalingRatioValid(%v) = %v, want %v", tc.ratio, got, tc.want)
+			}
+		})
 	}
 }
 

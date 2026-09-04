@@ -248,7 +248,7 @@ func RunHookLatency(p HookLatencyParams, stdout io.Writer) (HookLatencyReport, e
 	if report.SessionEndDeltaMs > msDuration(HookSessionEndDeltaBudget) {
 		breaches++
 	}
-	if scalingNormalized > HookScalingMaxNormalized {
+	if !hookScalingRatioValid(scalingNormalized) {
 		breaches++
 	}
 	report.Pass = breaches == 0
@@ -349,11 +349,22 @@ func hookScalingRatio(seedFacts int) (float64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	return normalizeHookScaling(smallBest, bigBest, seedFacts, smallFacts)
+}
+
+func normalizeHookScaling(smallBest, bigBest time.Duration, seedFacts, smallFacts int) (float64, float64, error) {
 	if smallBest <= 0 {
 		return 0, 0, fmt.Errorf("small recall measured %v", smallBest)
 	}
+	if bigBest <= 0 {
+		return 0, 0, fmt.Errorf("big recall measured %v", bigBest)
+	}
 	raw := float64(bigBest) / float64(smallBest)
 	return raw / (float64(seedFacts) / float64(smallFacts)), raw, nil
+}
+
+func hookScalingRatioValid(normalized float64) bool {
+	return normalized > 0 && normalized <= HookScalingMaxNormalized
 }
 
 func scalingTopic(i int) string {

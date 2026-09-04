@@ -7,16 +7,15 @@ import (
 	"time"
 )
 
-// TestHookLatencyBudgets is the CI gate: the hook budgets are machine-checked
-// against the real binary, exactly like every other published number. A
-// breach fails the benchmark package, which ci.yml runs as a blocking job
-// (go test ./benchmarks/...).
+// TestHookLatencyBudgets runs the real binary against the machine-relative
+// contract: the median user-prompt and session-end deltas from pre-compact
+// must stay within recallDeltaBudget and sessionEndDeltaBudget (200 ms each),
+// and normalized scaling must stay within recallScalingMaxNormalized (2.5x).
+// Pre-compact is the per-run baseline and has no absolute gate.
 //
-// Budgets (playbook, mirrored in cmd/graymatter/hooks_run.go):
-//
-//	user-prompt  p99 < 150 ms on a 10k-fact store
-//	session-end  max < 500 ms
-//	pre-compact  max < 200 ms
+// CI runs this timing measurement report-only with continue-on-error; it is
+// deliberately excluded from the blocking benchmark-package tests because
+// shared-runner timings are noisy.
 func TestHookLatencyBudgets(t *testing.T) {
 	if testing.Short() {
 		t.Skip("hook latency gate needs process spawns; skipped in -short")
