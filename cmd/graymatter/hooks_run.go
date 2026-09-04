@@ -95,6 +95,7 @@ const (
 )
 
 func hooksRunCmd() *cobra.Command {
+	var noCreate bool
 	cmd := &cobra.Command{
 		Use:   "run <event>",
 		Short: "Execute a hook event handler (called by Claude Code, not by you)",
@@ -108,9 +109,12 @@ hooks must degrade silently, never break the session.`,
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"session-start", "user-prompt", "pre-compact", "session-end"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHookEvent(args[0])
+			return runHookEventWithNoCreate(args[0], noCreate)
 		},
 	}
+	cmd.Flags().BoolVar(&noCreate, "no-create", false, "exit silently when the data directory has not been initialized")
+	cmd.Flags().Bool("graymatter-managed-hook", false, "mark a command managed by GrayMatter")
+	_ = cmd.Flags().MarkHidden("graymatter-managed-hook")
 	return cmd
 }
 
@@ -145,8 +149,15 @@ func readHookPayload(r io.Reader) hookEventPayload {
 // runHookEvent dispatches one event, enforcing the exit-0/silent-failure
 // contract in exactly one place.
 func runHookEvent(event string) error {
+	return runHookEventWithNoCreate(event, false)
+}
+
+func runHookEventWithNoCreate(event string, noCreate bool) error {
 	start := timeNow()
 	payload := readHookPayload(os.Stdin)
+	if noCreate && !hookStoreInitialized(dataDir) {
+		return nil
+	}
 
 	out, err := dispatchHook(event, payload)
 	elapsed := timeNow().Sub(start)
@@ -208,6 +219,16 @@ func mustWorkdir() string {
 		return ""
 	}
 	return wd
+}
+
+func hookStoreInitialized(dir string) bool {
+	for _, marker := range []string{"gray.db", "MEMORY.md"} {
+		info, err := os.Stat(filepath.Join(dir, marker))
+		if err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 var hookAgentSanitize = regexp.MustCompile(`[^a-z0-9]+`)
@@ -539,13 +560,13 @@ func hookBlockHash(block string) string {
 func hookLog(payload hookEventPayload, event string, elapsed time.Duration, outcome, detail string) {
 	path := filepath.Join(dataDir, "hooks.log")
 	entry := map[string]any{
-		"ts":       timeNow().UTC().Format(time.RFC3339),
-		"event":    event,
-		"outcome":  outcome,
-		"ms":       elapsed.Milliseconds(),
-		"detail":   detail,
-		"agent":    deriveAgentID(hookCWD(payload)),
-		"session":  payload.SessionID,
+		"ts":      timeNow().UTC().Format(time.RFC3339),
+		"event":   event,
+		"outcome": outcome,
+		"ms":      elapsed.Milliseconds(),
+		"detail":  detail,
+		"agent":   deriveAgentID(hookCWD(payload)),
+		"session": payload.SessionID,
 	}
 	if payload.Source != "" {
 		entry["source"] = payload.Source
