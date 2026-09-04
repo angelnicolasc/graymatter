@@ -237,11 +237,8 @@ func TestCall_RefusesTamperedBinary(t *testing.T) {
 		SHA256: mustHash(t, binPath),
 	}
 
-	// Sanity: it runs while the bytes match.
-	if _, err := Call(context.Background(), manifest, "echo_hello", nil); err != nil {
-		t.Fatalf("Call before tampering: %v", err)
-	}
-
+	// TestCall_EchoPlugin covers the matching-binary path. Tamper before this
+	// binary is ever executed so replacing its bytes is portable across OSes.
 	if err := os.WriteFile(binPath, []byte("replaced"), 0o755); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}
