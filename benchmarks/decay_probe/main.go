@@ -16,9 +16,17 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	cfg := graymatter.DefaultConfig()
 	cfg.DataDir, _ = os.MkdirTemp("", "gm-decay")
-	defer os.RemoveAll(cfg.DataDir)
+	defer func() {
+		if err := os.RemoveAll(cfg.DataDir); err != nil {
+			fmt.Fprintf(os.Stderr, "cleanup %s: %v\n", cfg.DataDir, err)
+		}
+	}()
 	cfg.DecayHalfLife = 2 * time.Second // 30 days compressed to 2 seconds
 	cfg.AsyncConsolidate = false        // drive consolidation by hand
 	cfg.ConsolidateThreshold = 1000     // never auto-trigger
@@ -27,8 +35,14 @@ func main() {
 	mem, err := graymatter.NewWithConfig(cfg)
 	if err != nil {
 		fmt.Println("open:", err)
-		os.Exit(1)
+		return 1
 	}
+	// Registered after directory cleanup so LIFO closes bbolt first on return.
+	defer func() {
+		if err := mem.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "close:", err)
+		}
+	}()
 	ctx := context.Background()
 	fmt.Println("Embedder: keyword (no LLM, no network, no API key)")
 
@@ -36,12 +50,12 @@ func main() {
 	for _, f := range []string{"untouched A", "untouched B", "untouched C", "untouched D", "untouched E", "untouched F", "untouched G", "untouched H", "untouched I", "untouched J"} {
 		if err := mem.Remember(ctx, agent, f); err != nil {
 			fmt.Println("remember:", err)
-			os.Exit(1)
+			return 1
 		}
 	}
 	if err := mem.Remember(ctx, agent, "pinned institutional fact: production secrets live in the platform vault"); err != nil {
 		fmt.Println("remember pinned:", err)
-		os.Exit(1)
+		return 1
 	}
 	// pin it through the store handle (what memory_reflect action=pin does)
 	adv := mem.Advanced()
@@ -68,7 +82,7 @@ func main() {
 	time.Sleep(6 * time.Second)
 	if err := mem.Consolidate(ctx, agent); err != nil {
 		fmt.Println("consolidate 1:", err)
-		os.Exit(1)
+		return 1
 	}
 	facts, _ = adv.List(agent)
 	maxW := 0.0
@@ -88,7 +102,7 @@ func main() {
 	// the touch: recalling A resets its decay clock
 	if _, err := mem.Recall(ctx, agent, "untouched A"); err != nil {
 		fmt.Println("recall touch:", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// The touch: recalling A resets ITS decay clock — and the clocks of the
@@ -100,7 +114,7 @@ func main() {
 	time.Sleep(8 * time.Second)
 	if err := mem.Consolidate(ctx, agent); err != nil {
 		fmt.Println("consolidate 2:", err)
-		os.Exit(1)
+		return 1
 	}
 
 	facts, _ = adv.List(agent)
@@ -125,9 +139,10 @@ func main() {
 
 	if failures > 0 {
 		fmt.Printf("\n%d checks FAILED\n", failures)
-		os.Exit(1)
+		return 1
 	}
 	fmt.Println("\nAll forgetting-curve checks passed.")
+	return 0
 }
 
 var _ = math.Exp
