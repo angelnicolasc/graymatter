@@ -287,8 +287,9 @@ and after that the hook runner supplies routine recall automatically:
 | `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
 
 Hooks and MCP are complementary. Every non-empty hook recall begins with a
-marker naming the namespace it actually queried, for example
-`[GrayMatter hook recall ran for agent_id="my-project".]`. The agent reuses
+bracketed `GrayMatter hook recall ran` marker naming the namespace it actually
+queried. This page never spells that marker out in full, so an agent reading
+the docs cannot mistake them for a live recall. The agent reuses
 only the newest block available for the session's initial turn. If that ID
 matches its own, each non-empty section replaces that scope's startup search.
 If the IDs differ, it reruns both project and `__shared__` searches because
