@@ -71,11 +71,13 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 	if hs.PID == 0 {
 		return fmt.Errorf("session %q has no PID — it was not started in background mode", sessionID)
 	}
-	if err := confirmOurProcess(db, sessionID, hs.PID, hs.PIDStart); err != nil {
+	target, err := confirmOurProcess(db, sessionID, hs.PID, hs.PIDStart)
+	if err != nil {
 		return err
 	}
+	defer target.close()
 
-	if err := killPID(hs.PID); err != nil {
+	if err := target.terminate(); err != nil {
 		return fmt.Errorf("kill session %q (pid %d): %w", sessionID, hs.PID, err)
 	}
 
@@ -84,6 +86,12 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 	hs.Status = "killed"
 	hs.FinishedAt = &now
 	return saveHarnessSession(db, *hs)
+}
+
+type processKillTarget interface {
+	startTime() (int64, error)
+	terminate() error
+	close()
 }
 
 // confirmOurProcess checks that pid is one graymatter actually spawned for
@@ -95,22 +103,27 @@ func KillSessionDB(db *bolt.DB, sessionID string) error {
 // "running", call SessionKill, and the daemon terminates that process on your
 // behalf. The PID file narrows the primitive to processes this tool started.
 // The start identity also rejects stale records after the OS recycles a PID.
+// On Windows, the start check and termination share one process HANDLE, so PID
+// reuse cannot change the target between them. Unix keeps the established
+// check-then-signal-by-PID behavior; that sequence is not atomic, and its much
+// smaller reuse window remains accepted until a field need justifies platform-
+// specific handle support there.
 //
 // It is not a defence against a process already running as the same user: that
 // process can write both the record and the file. It is a defence against the
 // RPC surface being a kill primitive on its own, which is a different thing.
-func confirmOurProcess(db *bolt.DB, sessionID string, pid int, recordedStart int64) error {
+func confirmOurProcess(db *bolt.DB, sessionID string, pid int, recordedStart int64) (processKillTarget, error) {
 	if pid == os.Getpid() {
-		return fmt.Errorf("session %q names this process (pid %d); refusing to kill it", sessionID, pid)
+		return nil, fmt.Errorf("session %q names this process (pid %d); refusing to kill it", sessionID, pid)
 	}
 	if recordedStart == 0 {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"session %q predates process-identity hardening and has no process start time; "+
 				"refusing to kill pid %d: stop it manually only after verifying its identity",
 			sessionID, pid)
 	}
 	if recordedStart < 0 {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"session %q could not record a process start time; refusing to kill pid %d: "+
 				"stop it manually only after verifying its identity",
 			sessionID, pid)
@@ -122,28 +135,36 @@ func confirmOurProcess(db *bolt.DB, sessionID string, pid int, recordedStart int
 
 	onDisk, err := ReadPIDFile(pidPath)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"session %q: no PID file at %s, so pid %d is recorded only in the database; "+
 				"refusing to kill a process graymatter cannot confirm it started: %w",
 			sessionID, pidPath, pid, err)
 	}
 	if onDisk != pid {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"session %q: the database says pid %d but %s says %d; refusing to kill either",
 			sessionID, pid, pidPath, onDisk)
 	}
-	liveStart, err := processStartTime(pid)
+	target, err := openKillTarget(pid)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
+			"session %q: cannot open pid %d for verified termination; refusing to kill it: %w",
+			sessionID, pid, err)
+	}
+	liveStart, err := target.startTime()
+	if err != nil {
+		target.close()
+		return nil, fmt.Errorf(
 			"session %q: cannot verify the start time of pid %d; refusing to kill it: %w",
 			sessionID, pid, err)
 	}
 	if liveStart != recordedStart {
-		return fmt.Errorf(
+		target.close()
+		return nil, fmt.Errorf(
 			"session %q: pid %d was recycled (recorded start time %d, live start time %d); refusing to kill it",
 			sessionID, pid, recordedStart, liveStart)
 	}
-	return nil
+	return target, nil
 }
 
 // SaveSessionDB persists a HarnessSession record against an already-open db
