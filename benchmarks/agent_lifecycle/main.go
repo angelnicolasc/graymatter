@@ -461,9 +461,10 @@ func main() {
 		m.tokensRecall += countTokens(text)
 		m.queriesCounted++
 		if strings.Contains(text, pq.fact) {
-			m.probeHits++
 			if pq.fact == paraphrase.fact {
 				m.paraphraseHit = true
+			} else {
+				m.probeHits++
 			}
 		}
 		checkDead(text, m)
