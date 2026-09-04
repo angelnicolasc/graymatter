@@ -313,7 +313,7 @@ func flagIfUnused(c checkResult, dir string, facts int) checkResult {
 	}
 	c.Status = "warn"
 	c.Detail = fmt.Sprintf("initialised %d day(s) ago and still holds no facts", int(age.Hours()/24))
-	c.Hint = zeroFactsRestartHint + "; if a restart did happen, confirm CLAUDE.md / AGENTS.md carry the memory block (re-run `graymatter init` to refresh it), that your agent loads that file, or use `graymatter init --global` to install it for every project"
+	c.Hint = zeroFactsRestartHint + "; if a restart did happen, confirm CLAUDE.md / AGENTS.md carry the memory block (re-run `graymatter init` to refresh it), that your agent loads that file, or use `graymatter init --global` to install the instruction block home-wide (MCP wiring remains per project)"
 	return c
 }
 
@@ -596,7 +596,7 @@ func checkInstructions(projectDir string) checkResult {
 	case len(uncovered) > 0:
 		c.Status = "warn"
 		c.Detail = "nothing tells " + strings.Join(uncovered, ", ") + " to use the memory tools"
-		c.Hint = "an MCP connection only makes tools *available* — without instructions the model never calls them; run `graymatter init` (or `--global` for every project)"
+		c.Hint = "an MCP connection only makes tools *available* — without instructions the model never calls them; run `graymatter init` in this project (use `--global` only to install the instruction block home-wide)"
 	case len(stale) > 0:
 		// Everything is covered, but by a briefing from before v0.7.0 — the one
 		// that told the model to search "when prior context might matter",

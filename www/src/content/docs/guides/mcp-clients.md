@@ -6,6 +6,11 @@ description: Wiring GrayMatter into Claude Code, Cursor, Codex, OpenCode, Antigr
 `graymatter init` auto-wires every supported client at once. Existing entries
 from other MCP servers are merged, never overwritten.
 
+`graymatter init --global` still initializes the current project. The flag
+also installs home-scoped agent instructions; it does not globalize the
+project-scoped MCP configs below, so wire each repository separately with
+`init` or manual configuration. Codex's MCP config is already home-scoped.
+
 | Client | Config file | Scope |
 |--------|-------------|-------|
 | Claude Code | `.mcp.json` | project |

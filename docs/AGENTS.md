@@ -28,6 +28,23 @@ Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/intern
 
 > ℹ️ **`memory_reflect` accepts both `agent_id` (canonical) and `agent` (deprecated alias).** Since the canonical flip ([ADR-014](decisions/014-agent-id-canonical.md)) exactly one of the two is required — the schema enforces it as an `anyOf` — and `agent_id` wins when both are set. New integrations spell it `agent_id`, matching every other tool.
 
+### Hooks and MCP at session start
+
+Claude Code hooks and MCP are complementary. When a hook actually injects
+recalled facts, the block begins with a bracketed marker that names the
+hook's real `agent_id`.
+
+Before the first substantive reply, inspect only the newest hook block
+available for the session's initial turn; quoted examples and blocks from older
+turns do not count. Reuse its non-empty sections only when the marker's id
+equals the `agent_id` you intended to search. If the ids differ, run both
+project and `__shared__` searches: cross-namespace deduplication may have
+placed a shared duplicate under `## Memory`. With matching ids, run only the
+search for each missing section. Continue to use MCP for
+`checkpoint_resume`, focused or batch lookups, writes, corrections, aliases,
+and checkpoint saves. An empty, failed, absent, or throttled hook emits no
+fresh block, so ordinary MCP startup searches remain the fallback.
+
 ### Return-shape examples
 
 Every success result carries **both** a `structuredContent` object (declared in the tool's `outputSchema`) and the same human-readable text in `content` — machine-readable and text-parsing clients are both first-class ([ADR-013](decisions/013-structured-tool-results.md)).
@@ -694,8 +711,9 @@ Need to retrieve context?
 ### Session-start checklist
 
 - [ ] `checkpoint_resume` — was I interrupted?
-- [ ] `memory_search` agent-specific (top_k=8) — relevant memories
-- [ ] `memory_search` `__shared__` (top_k=5) — shared context
+- [ ] Inspect only the newest hook block available for this session's initial turn
+- [ ] Marker id differs: run both project and `__shared__` searches
+- [ ] Marker id matches: search only the scopes whose sections are missing
 - [ ] Concatenate into system prompt
 - [ ] Proceed with task
 

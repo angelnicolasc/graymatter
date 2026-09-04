@@ -137,7 +137,7 @@ ratio — printed or emitted as JSON.
 |---|---|
 | **Persistent memory** | Facts survive across sessions. Recall by meaning, not just keyword |
 | **90% token reduction** | Top-8 relevant facts instead of full-history injection |
-| **Automatic hooks** | Claude Code injects memory every turn — no tool calls required (`graymatter hooks install`) |
+| **Automatic hooks** | Claude Code injects routine recall every turn; MCP remains available for writes and focused searches (`graymatter hooks install`) |
 | **Receipts, not vibes** | `recall --explain` returns why each fact ranked: per-signal ranks, fused score, provenance |
 | **Knowledge graph** | Typed entities and co-mention edges, auto-populated from ordinary use |
 | **Self-curation** | `memory_reflect` lets the agent add, update, forget, and link its own memories |
@@ -159,6 +159,13 @@ graymatter init              # wire YOUR project: MCP config + memory block
 graymatter init --hooks      # Claude Code: memory injected every turn
 graymatter doctor            # verify everything
 ```
+
+`graymatter init --global` still performs that normal setup in the current
+directory. It additionally installs the managed memory instructions in Claude
+Code and OpenCode's home-scoped instruction files. It does **not** globalize
+project-scoped MCP configs: each repository must be wired separately with
+`graymatter init` or manual client configuration. Codex is the exception in
+the table below because its MCP config is already home-scoped.
 
 `graymatter demo` seeds a scratch store, runs consolidation, and opens the
 TUI — then `graymatter kg render --out kg-graph.html` shows the graph it
@@ -270,8 +277,7 @@ Consolidation is the only "smart" step. Everything else is deterministic.
 ### Hooks (Claude Code, opt-in)
 
 `graymatter hooks install` writes the hook block into `.claude/settings.json`
-and after that memory runs itself — the model never has to remember to call a
-tool:
+and after that the hook runner supplies routine recall automatically:
 
 | Hook | What it does |
 |------|--------------|
@@ -279,6 +285,17 @@ tool:
 | `UserPromptSubmit` | Short per-turn recall (top-3 agent + top-3 shared), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save, `remember shared: <text>` saves into the shared namespace every agent reads |
 | `PreCompact` | Deterministic checkpoint before context compaction |
 | `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
+
+Hooks and MCP are complementary. Every non-empty hook recall begins with a
+bracketed `GrayMatter hook recall ran` marker naming the namespace it actually
+queried. This page never spells that marker out in full, so an agent reading
+the docs cannot mistake them for a live recall. The agent reuses
+only the newest block available for the session's initial turn. If that ID
+matches its own, each non-empty section replaces that scope's startup search.
+If the IDs differ, it reruns both project and `__shared__` searches because
+cross-namespace deduplication may have placed a shared fact in the project
+section. Missing sections also fall back to MCP. Focused and batch searches,
+writes, corrections, aliases, and checkpoint tools always remain available.
 
 Failure contract: every error exits 0 with empty stdout and a receipt in
 `<dataDir>/hooks.log` — a broken memory degrades silently, it never breaks

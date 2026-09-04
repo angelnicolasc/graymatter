@@ -60,6 +60,12 @@ const (
 	// Checked before hooksRememberPrefix, which it does not collide with
 	// ("remember " carries a space where "remember:" carries a colon).
 	hooksRememberSharedPrefix = "remember shared:"
+
+	// hookRecallMarkerPrefix identifies a fresh hook-recall block. The rendered
+	// marker also names the hook's actual namespace; MCP guidance can therefore
+	// skip only a matching, non-empty section instead of hiding facts stored
+	// under a role-suffixed or otherwise different agent_id.
+	hookRecallMarkerPrefix = "[GrayMatter hook recall ran for agent_id="
 )
 
 // timeNow is the process clock, a seam so latency paths are testable.
@@ -349,19 +355,19 @@ var hookRecallBlock = func(store cliStore, agent, query string, agentTopK, share
 	case agentErr != nil && sharedErr != nil:
 		return "", fmt.Errorf("recall agent: %v; recall shared: %v", agentErr, sharedErr)
 	case agentErr != nil:
-		block := renderMemoryBlock(nil, sharedFacts)
+		block := renderMemoryBlock(agent, nil, sharedFacts)
 		if block == "" {
 			return "", fmt.Errorf("recall agent: %w", agentErr)
 		}
 		return block, fmt.Errorf("agent recall failed, injecting shared facts only: %w", agentErr)
 	case sharedErr != nil:
-		block := renderMemoryBlock(agentFacts, nil)
+		block := renderMemoryBlock(agent, agentFacts, nil)
 		if block == "" {
 			return "", fmt.Errorf("recall shared: %w", sharedErr)
 		}
 		return block, fmt.Errorf("shared recall failed, injecting agent facts only: %w", sharedErr)
 	}
-	return renderMemoryBlock(agentFacts, sharedFacts), nil
+	return renderMemoryBlock(agent, agentFacts, sharedFacts), nil
 }
 
 // hookCheckpoint is the pre-compact runner: one deterministic checkpoint, no
@@ -438,12 +444,14 @@ func sessionCheckpointFor(agent string, payload hookEventPayload, event string) 
 
 // renderMemoryBlock renders the injected context. Plain text (Claude Code
 // accepts plain text or JSON; plain keeps the block human-readable in the
-// transcript too). Two labeled sections — the agent's own facts, then the
-// project-wide __shared__ conventions — because a model consuming the block
-// must be able to tell its own history from standing project rules. Facts
-// longer than one line are folded, and a text stored in both namespaces
-// renders once under Memory: the block must stay skimmable inside a prompt.
-func renderMemoryBlock(agentFacts, sharedFacts []string) string {
+// transcript too). A non-empty block starts with a marker naming the exact
+// agent namespace the hook queried. MCP guidance can then reuse only matching,
+// non-empty sections from the newest applicable hook block. Two
+// labeled sections follow — the agent's own facts, then the project-wide
+// __shared__ conventions — because a model consuming the block must tell its
+// own history from standing project rules. Facts longer than one line are
+// folded, and text stored in both namespaces renders once under Memory.
+func renderMemoryBlock(agent string, agentFacts, sharedFacts []string) string {
 	var sb strings.Builder
 	seen := make(map[string]bool, len(agentFacts)+len(sharedFacts))
 	render := func(header string, facts []string) {
@@ -469,7 +477,14 @@ func renderMemoryBlock(agentFacts, sharedFacts []string) string {
 	}
 	render("## Memory", agentFacts)
 	render("## Shared memory (project-wide)", sharedFacts)
-	return strings.TrimRight(sb.String(), "\n")
+	if sb.Len() == 0 {
+		return ""
+	}
+	return hookRecallMarker(agent) + "\n" + strings.TrimRight(sb.String(), "\n")
+}
+
+func hookRecallMarker(agent string) string {
+	return fmt.Sprintf("%s%q.]", hookRecallMarkerPrefix, agent)
 }
 
 // --- state + log ----------------------------------------------------------------

@@ -18,14 +18,25 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 
 ## When to call which
 
-- **Before answering** any question that depends on prior context → `memory_search` first.
+- **At session start**, check `checkpoint_resume` before searches when work may have been interrupted.
+- **Before the first substantive reply**, pull project and `__shared__` context unless the session's newest startup hook block can safely supply it as described below.
 - **After learning** a user preference, project convention, or making a non-obvious decision → `memory_add`.
 - **When the user corrects you** or a fact becomes stale → `memory_reflect` with `action="update"` and `target=<old fact text>`.
-- **At the start of a session** that may resume a long task → `checkpoint_resume`. **Before stopping** mid-task → `checkpoint_save`.
+- **Before stopping** mid-task → `checkpoint_save`.
 
-## First call
+## First calls
 
-The very first thing to do when you open a session is pull what you already know:
+Before the first substantive reply, inspect only the newest hook block
+available for the session's initial turn; ignore quoted examples and blocks
+from older turns. A real recall block begins with a bracketed GrayMatter
+hook-recall marker naming its `agent_id`.
+
+If that id differs from the `agent_id` you would search, run both project and
+`__shared__` searches; cross-namespace dedup may have put a shared duplicate
+under `## Memory`. When the ids match, reuse each non-empty section and run the
+search for every missing section. This does not suppress `checkpoint_resume`,
+focused or batch searches, writes, reflections, aliases, or checkpoint saves.
+With no fresh block, pull both scopes before replying:
 
 ```jsonc
 { "tool": "memory_search", "args": {
@@ -33,9 +44,15 @@ The very first thing to do when you open a session is pull what you already know
     "query":    "<the task the user just asked you to do>",
     "top_k":    8
 }}
+
+{ "tool": "memory_search", "args": {
+    "agent_id": "__shared__",
+    "query":    "<the task the user just asked you to do>",
+    "top_k":    5
+}}
 ```
 
-Inject the returned facts into your working context before composing your reply.
+Inject the returned or hook-supplied facts into your working context before composing your reply.
 
 ## Identity
 
@@ -52,7 +69,7 @@ Project-wide rules — conventions every agent in this repo should respect — g
 }}
 ```
 
-To get both your agent-specific facts and shared facts in one go, issue two `memory_search` calls (one with your own `agent_id`, one with `__shared__`) and merge the results.
+To get both your agent-specific facts and shared facts, issue two `memory_search` calls (one with your own `agent_id`, one with `__shared__`) and merge the results. Before the first reply, skip a routine call only when a same-id initial hook block supplies its matching non-empty section.
 
 ## Don't store
 

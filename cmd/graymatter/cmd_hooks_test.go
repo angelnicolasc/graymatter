@@ -509,8 +509,8 @@ func TestHookRun_SessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeded store: %v", err)
 	}
-	if !strings.HasPrefix(out, "## Memory\n") || !strings.Contains(out, "release checklist") {
-		t.Errorf("injection = %q, want a Memory block with the fact", out)
+	if !strings.HasPrefix(out, hookRecallMarker(agent)+"\n## Memory\n") || !strings.Contains(out, "release checklist") {
+		t.Errorf("injection = %q, want the hook marker and a Memory block with the fact", out)
 	}
 }
 
@@ -581,8 +581,8 @@ func seedSharedFacts(t *testing.T, facts ...string) {
 }
 
 // TestHookRun_SessionStart_SharedNamespace: session-start must inject the
-// shared namespace alongside the agent's own — shared-only, agent-only
-// (legacy shape, byte-compatible), and both together.
+// shared namespace alongside the agent's own — shared-only, agent-only,
+// and both together.
 func TestHookRun_SessionStart_SharedNamespace(t *testing.T) {
 	t.Run("shared only", func(t *testing.T) {
 		withHooksEnv(t)
@@ -600,7 +600,7 @@ func TestHookRun_SessionStart_SharedNamespace(t *testing.T) {
 		}
 	})
 
-	t.Run("agent only keeps the legacy block", func(t *testing.T) {
+	t.Run("agent only", func(t *testing.T) {
 		withHooksEnv(t)
 		agent := deriveAgentID(mustWorkdir())
 		store, err := openStore()
@@ -616,8 +616,8 @@ func TestHookRun_SessionStart_SharedNamespace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dispatch: %v", err)
 		}
-		if !strings.HasPrefix(out, "## Memory\n") || !strings.Contains(out, "Postgres on db-01") {
-			t.Errorf("agent-only injection = %q, want the legacy Memory block", out)
+		if !strings.HasPrefix(out, hookRecallMarker(agent)+"\n## Memory\n") || !strings.Contains(out, "Postgres on db-01") {
+			t.Errorf("agent-only injection = %q, want the hook marker and Memory block", out)
 		}
 		if strings.Contains(out, "Shared memory") {
 			t.Errorf("agent-only injection must not carry a shared section: %q", out)
@@ -850,7 +850,7 @@ func TestHookRun_DegradeReceiptInLog(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		return renderMemoryBlock(facts, nil), fmt.Errorf("shared recall failed, injecting agent facts only: broken on purpose")
+		return renderMemoryBlock(agent, facts, nil), fmt.Errorf("shared recall failed, injecting agent facts only: broken on purpose")
 	}
 	t.Cleanup(func() { hookRecallBlock = oldRecall })
 
@@ -872,34 +872,41 @@ func TestHookRun_DegradeReceiptInLog(t *testing.T) {
 	}
 }
 
-// TestRenderMemoryBlock_Sections pins the block shape: agent facts first, the
-// shared section second, exact duplicates across namespaces rendered once,
-// multi-line facts folded, and an empty pair of lists rendering nothing.
+// TestRenderMemoryBlock_Sections pins the block shape: every non-empty block
+// carries the hook's exact namespace, agent facts come before the shared
+// section, exact duplicates render once, multi-line facts are folded, and an
+// empty pair of lists renders nothing (including no marker).
 func TestRenderMemoryBlock_Sections(t *testing.T) {
+	const agent = "my-project"
+	const wantMarker = `[GrayMatter hook recall ran for agent_id="my-project".]`
+	if got := hookRecallMarker(agent); got != wantMarker {
+		t.Fatalf("hook recall marker = %q, want stable contract %q", got, wantMarker)
+	}
+
 	cases := []struct {
 		name        string
 		agent, shrd []string
 		want        string
 	}{
-		{"agent only keeps the legacy shape", []string{"a fact"}, nil, "## Memory\n- a fact"},
-		{"shared only", nil, []string{"a convention"}, "## Shared memory (project-wide)\n- a convention"},
+		{"agent only", []string{"a fact"}, nil, wantMarker + "\n## Memory\n- a fact"},
+		{"shared only", nil, []string{"a convention"}, wantMarker + "\n## Shared memory (project-wide)\n- a convention"},
 		{
 			"both sections, agent first",
 			[]string{"own history"},
 			[]string{"project convention"},
-			"## Memory\n- own history\n\n## Shared memory (project-wide)\n- project convention",
+			wantMarker + "\n## Memory\n- own history\n\n## Shared memory (project-wide)\n- project convention",
 		},
 		{
 			"exact duplicate renders once, under Memory",
 			[]string{"same text"},
 			[]string{"same text"},
-			"## Memory\n- same text",
+			wantMarker + "\n## Memory\n- same text",
 		},
-		{"multi-line folded", []string{"line one\nline two"}, nil, "## Memory\n- line one line two"},
+		{"multi-line folded", []string{"line one\nline two"}, nil, wantMarker + "\n## Memory\n- line one line two"},
 		{"both empty is nothing", nil, nil, ""},
 	}
 	for _, c := range cases {
-		if got := renderMemoryBlock(c.agent, c.shrd); got != c.want {
+		if got := renderMemoryBlock(agent, c.agent, c.shrd); got != c.want {
 			t.Errorf("%s: renderMemoryBlock = %q, want %q", c.name, got, c.want)
 		}
 	}
