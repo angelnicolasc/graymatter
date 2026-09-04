@@ -269,11 +269,22 @@ func FuzzRewriteHookEvent(f *testing.F) {
 		if err != nil {
 			t.Fatalf("merged event array is not serialisable: %v", err)
 		}
-		if !strings.Contains(string(blob), "graymatter hooks run user-prompt") {
+		if !strings.Contains(string(blob), `"args":["hooks","run","user-prompt","--graymatter-managed-hook"]`) {
 			t.Fatalf("install lost our group: %s", blob)
 		}
 		_ = drift
 	})
+}
+
+func TestHooksOwnership_RejectsMalformedStructuredArgs(t *testing.T) {
+	for _, tc := range []struct{ command string; args any }{{"/opt/gm/graymatter", nil}, {"/opt/gm/graymatter", "hooks run user-prompt"}, {"/opt/gm/graymatter", []any{"hooks", 7, "user-prompt"}}, {"echo", []any{hooksCommandMarker}}} {
+		group := map[string]any{"hooks": []any{map[string]any{
+			"type": "command", "command": tc.command, "args": tc.args,
+		}}}
+		if hookGroupIsOurs(group, "/opt/gm/graymatter") {
+			t.Errorf("malformed entry %+v was claimed as a managed hook", tc)
+		}
+	}
 }
 
 // A foreign command that only mentions the legacy marker is never ours.

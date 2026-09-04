@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -62,6 +64,8 @@ func hookGroups(t *testing.T, root map[string]any, event string) []map[string]an
 
 func groupCommands(t *testing.T, group map[string]any) []string {
 	t.Helper()
+	// Compatibility view for older assertions; persisted exec-form tests read
+	// command and args separately and never execute this reconstruction.
 	list, _ := group["hooks"].([]any)
 	out := make([]string, 0, len(list))
 	for _, h := range list {
@@ -73,6 +77,9 @@ func groupCommands(t *testing.T, group map[string]any) []string {
 			t.Errorf("hook type = %v, want command", hook["type"])
 		}
 		c, _ := hook["command"].(string)
+		if args, ok := hookEntryArgs(hook); ok {
+			c += " " + strings.Join(args, " ")
+		}
 		out = append(out, c)
 	}
 	return out
@@ -81,7 +88,7 @@ func groupCommands(t *testing.T, group map[string]any) []string {
 // TestHooksInstall_WritesCanonicalContract pins the emitted settings shape:
 // four events, SessionStart split across a startup|resume|fork group and a
 // compact group, the user-prompt hook carrying a 10s timeout, and every
-// command an absolute path carrying the documented invocation.
+// command an exact executable path and args carrying the invocation tokens.
 func TestHooksInstall_WritesCanonicalContract(t *testing.T) {
 	withHooksEnv(t)
 	dir := t.TempDir()
@@ -121,18 +128,25 @@ func TestHooksInstall_WritesCanonicalContract(t *testing.T) {
 
 	for _, event := range hookEventNames() {
 		for _, g := range hookGroups(t, root, event) {
-			for _, c := range groupCommands(t, g) {
-				if !strings.Contains(c, hooksCommandMarker) {
-					t.Errorf("%s command %q lacks the marker", event, c)
+			for _, raw := range g["hooks"].([]any) {
+				hook := raw.(map[string]any)
+				if command, _ := hook["command"].(string); command != exe {
+					t.Errorf("%s command = %q, want exact path %q", event, command, exe)
 				}
-				if !strings.Contains(c, hooksRunCommandMarker+hookRunArg(event)+" "+hooksCommandMarker) {
-					t.Errorf("command %q must invoke the run event %q", c, hookRunArg(event))
-				}
-				if !filepath.IsAbs(hookBinaryPath(c)) {
-					t.Errorf("command %q must record an absolute binary path", c)
+				args, ok := hookEntryArgs(hook)
+				want := []string{"hooks", "run", hookRunArg(event), hooksCommandMarker}
+				if !ok || !stringSlicesEqual(args, want) {
+					t.Errorf("%s args = %q, want %q", event, args, want)
 				}
 			}
 		}
+	}
+	global := hookGroupsFor(exe, hooksEventPreCompact, scopeGlobal)[0].(map[string]any)
+	hook := global["hooks"].([]any)[0].(map[string]any)
+	args, ok := hookEntryArgs(hook)
+	want := []string{"hooks", "run", "pre-compact", hooksCommandMarker, hooksNoCreateArg}
+	if hook["command"] != exe || !ok || !stringSlicesEqual(args, want) {
+		t.Errorf("global exec form = command %v args %q, want %q + %q", hook["command"], args, exe, want)
 	}
 }
 
@@ -364,10 +378,10 @@ func TestHooksSettings_NonObjectHooksLeftUntouched(t *testing.T) {
 	}
 }
 
-// TestHookCommand_Quoting: binaries under paths with spaces must record a
-// quoted command, and hookBinaryPath must round-trip it.
-func TestHookCommand_Quoting(t *testing.T) {
-	withSpaces := `/c/Program Files/hooks run/graymatter`
+// TestHookCommand_LegacyParsing keeps the two shell-form readers available for
+// reinstall and uninstall of settings written by previous releases.
+func TestHookCommand_LegacyParsing(t *testing.T) {
+	withSpaces := `/c/Program Files/hook's run/graymatter`
 	cmd := hookCommand(withSpaces, "user-prompt")
 	if !strings.HasPrefix(cmd, `"`) {
 		t.Errorf("command %q must quote a path containing spaces", cmd)
@@ -380,6 +394,126 @@ func TestHookCommand_Quoting(t *testing.T) {
 	plain := hookCommand("/usr/local/bin/graymatter", "session-start")
 	if strings.HasPrefix(plain, `"`) {
 		t.Errorf("command %q need not be quoted", plain)
+	}
+}
+
+func TestHooksInstall_ExecFormRunsLiteralBinaryPath(t *testing.T) {
+	for _, name := range []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "VOYAGE_API_KEY"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("GRAYMATTER_OLLAMA_URL", "disabled://hook-command-test")
+
+	root := t.TempDir()
+	binDir := filepath.Join(root, "hook path $ (literal)")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(binDir, "graymatter.exe")
+	build := exec.Command("go", "build", "-o", bin, "github.com/angelnicolasc/graymatter/cmd/graymatter")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build hook binary: %v\n%s", err, out)
+	}
+
+	project := filepath.Join(root, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	storeDir := filepath.Join(project, ".graymatter")
+	t.Cleanup(func() {
+		stop := exec.Command(bin, "--dir", storeDir, "daemon", "stop")
+		stop.Dir = project
+		_ = stop.Run()
+		time.Sleep(300 * time.Millisecond)
+	})
+
+	settings := filepath.Join(project, ".claude", "settings.json")
+	install := exec.Command(bin, "hooks", "install")
+	install.Dir = project
+	if out, err := install.CombinedOutput(); err != nil {
+		t.Fatalf("install hooks from literal path: %v\n%s", err, out)
+	}
+	groups := hookGroups(t, readSettings(t, settings), hooksEventUserPrompt)
+	hook := groups[0]["hooks"].([]any)[0].(map[string]any)
+	command, _ := hook["command"].(string)
+	args, ok := hookEntryArgs(hook)
+	if command != bin || !ok {
+		t.Fatalf("persisted exec form = command %q args %q", command, args)
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"cwd": project, "prompt": "remember: exec form preserved the literal path",
+	})
+	run := exec.Command(command, args...)
+	run.Dir, run.Stdin = project, strings.NewReader(string(payload))
+	out, err := run.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "Saved to memory") {
+		t.Fatalf("execute persisted command+args: %v\n%s", err, out)
+	}
+}
+
+func TestHooksInstall_MigratesPreviousCommandFormsWithoutDrift(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "graymatter.exe")
+	cases := []struct {
+		name    string
+		scope   hookScope
+		command string
+	}{
+		{"string project", scopeProject, hookCommand(exe, "user-prompt")},
+		{"string global", scopeGlobal, hookCommand(exe, "user-prompt", scopeGlobal)},
+		{"pre-marker project", scopeProject, filepath.ToSlash(exe) + " graymatter hooks run user-prompt"},
+		{"pre-marker global", scopeGlobal, filepath.ToSlash(exe) + " graymatter hooks run user-prompt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			legacy := map[string]any{"hooks": map[string]any{
+				hooksEventUserPrompt: []any{map[string]any{"hooks": []any{
+					map[string]any{"type": "command", "command": tc.command, "timeout": userPromptHookTimeout},
+				}}},
+			}}
+			write := func(value map[string]any) {
+				t.Helper()
+				data, _ := json.MarshalIndent(value, "", "  ")
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(legacy)
+			if drift, err := hookSettingsDrift(path, exe, tc.scope); err != nil || drift {
+				t.Fatalf("previous generation reported drift=%v err=%v", drift, err)
+			}
+			res, err := upsertHookSettings(path, exe, true, tc.scope)
+			if err != nil || !res.Changed || res.Drifted {
+				t.Fatalf("migration result=%+v err=%v", res, err)
+			}
+			group := hookGroups(t, readSettings(t, path), hooksEventUserPrompt)[0]
+			hook := group["hooks"].([]any)[0].(map[string]any)
+			if hook["command"] != exe {
+				t.Fatalf("migrated command = %v, want %q", hook["command"], exe)
+			}
+			wantArgs := []string{"hooks", "run", "user-prompt", hooksCommandMarker}
+			if tc.scope == scopeGlobal {
+				wantArgs = append(wantArgs, hooksNoCreateArg)
+			}
+			if args, ok := hookEntryArgs(hook); !ok || !stringSlicesEqual(args, wantArgs) {
+				t.Fatalf("migrated args = %q", args)
+			}
+
+			write(legacy)
+			res, err = upsertHookSettings(path, exe, false, tc.scope)
+			if err != nil || !res.Changed {
+				t.Fatalf("uninstall previous generation result=%+v err=%v", res, err)
+			}
+			if _, exists := readSettings(t, path)["hooks"]; exists {
+				t.Fatal("uninstall left the previous-generation hook installed")
+			}
+
+			edited := legacy["hooks"].(map[string]any)[hooksEventUserPrompt].([]any)[0].(map[string]any)
+			edited["hooks"].([]any)[0].(map[string]any)["timeout"] = 60
+			write(legacy)
+			if drift, err := hookSettingsDrift(path, exe, tc.scope); err != nil || !drift {
+				t.Fatalf("real edit reported drift=%v err=%v", drift, err)
+			}
+		})
 	}
 }
 
