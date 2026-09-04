@@ -192,6 +192,7 @@ func run(stdout io.Writer) error {
 		}
 	}
 
+	fmt.Fprintln(stdout, "Embedder: keyword (no LLM, no network, no API key)")
 	fmt.Fprintf(stdout, "store: %d facts · %d warm-up + %d measured process runs per event\n\n",
 		seedFacts, warmupSamples, measuredRuns)
 
@@ -260,6 +261,8 @@ func measureRecallScaling(dir string) (float64, error) {
 	open := func(dataDir string, n int) (*graymatter.Memory, error) {
 		cfg := graymatter.DefaultConfig()
 		cfg.DataDir = dataDir
+		// Keep this latency gate local and reproducible, independent of ambient credentials.
+		cfg.EmbeddingMode = graymatter.EmbeddingKeyword
 		cfg.VectorReconcileInterval = 0
 		cfg.AsyncConsolidate = false
 		mem, err := graymatter.NewWithConfig(cfg)
@@ -332,6 +335,14 @@ func topicsFor(i int) string {
 func execHook(binary, workDir, storeDir, event, payload string) (string, error) {
 	cmd := exec.Command(binary, "--dir", storeDir, "hooks", "run", event)
 	cmd.Dir = workDir
+	// Hook samples auto-start a daemon, and session-end spawns consolidation.
+	// Keep that entire measured path local, reproducible, and network-free.
+	cmd.Env = append(cmd.Environ(),
+		"ANTHROPIC_API_KEY=",
+		"OPENAI_API_KEY=",
+		"VOYAGE_API_KEY=",
+		"GRAYMATTER_OLLAMA_URL=disabled://hook-latency-benchmark",
+	)
 	cmd.Stdin = strings.NewReader(payload)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -503,6 +514,8 @@ func buildBinary(dir string) (string, func(), error) {
 func seedStore(dir string) error {
 	cfg := graymatter.DefaultConfig()
 	cfg.DataDir = dir
+	// Keep corpus seeding local and reproducible, independent of ambient credentials.
+	cfg.EmbeddingMode = graymatter.EmbeddingKeyword
 	cfg.VectorReconcileInterval = 0 // no background churn during measurement
 	cfg.AsyncConsolidate = false
 	mem, err := graymatter.NewWithConfig(cfg)
