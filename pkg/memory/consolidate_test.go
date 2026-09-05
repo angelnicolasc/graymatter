@@ -250,6 +250,66 @@ func TestConsolidate_SummarizeGuard(t *testing.T) {
 	}
 }
 
+func TestConsolidate_ConcurrentIdenticalPutKeepsSummaryIdentity(t *testing.T) {
+	s, cleanup := openTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	var tick atomic.Int64
+	s.now = func() time.Time { return time.Unix(tick.Add(1), 0).UTC() }
+
+	const agent = "concurrent-consolidators"
+	const summary = "the deploy window is Tuesday 02:00 UTC"
+	first, err := s.putReturningFact(ctx, agent, "deploys used to be Monday")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.putReturningFact(ctx, agent, "the deploy window moved once already")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	summaryCommitted := make(chan string)
+	releaseConsolidation := make(chan struct{})
+	var claimed atomic.Bool
+	s.cfg.OnPut = func(_, id string, _ time.Duration) {
+		if claimed.CompareAndSwap(false, true) {
+			summaryCommitted <- id
+			<-releaseConsolidation
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.applyProposal(ctx, agent, []Fact{first, second}, &consolidationProposal{
+			Summary:  summary,
+			Consumes: []string{first.ID, second.ID},
+		})
+		done <- err
+	}()
+
+	correctID := <-summaryCommitted // committed by this cycle; applyProposal is held before tombstoning
+	interloper, putErr := s.putReturningFact(ctx, agent, summary)
+	close(releaseConsolidation)
+	applyErr := <-done
+	if putErr != nil {
+		t.Fatal(putErr)
+	}
+	if interloper.ID == correctID {
+		t.Fatal("interleaved write reused the consolidation summary identity")
+	}
+	if applyErr != nil {
+		t.Fatal(applyErr)
+	}
+	for _, victim := range []Fact{first, second} {
+		stored, ok := s.loadFact(agent, victim.ID)
+		if !ok || stored.SupersededBy != correctID {
+			t.Errorf("victim %q: present=%v SupersededBy=%q, want %q (interloper %q)",
+				victim.ID, ok, stored.SupersededBy, correctID, interloper.ID)
+		}
+	}
+}
+
 // TestConsolidate_PutBeforeDelete verifies the atomic contract: when
 // summarisation succeeds, old facts are deleted; if Put fails, nothing is lost.
 // We test the happy path here (Put succeeds, batch is deleted).
