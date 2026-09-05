@@ -36,7 +36,7 @@ toolchain go1.26.7
 
 require (
 	github.com/BurntSushi/toml v1.4.0
-	github.com/angelnicolasc/graymatter v0.18.0
+	github.com/angelnicolasc/graymatter v0.19.0
 	github.com/anthropics/anthropic-sdk-go v1.33.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4
