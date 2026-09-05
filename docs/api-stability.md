@@ -162,14 +162,16 @@ verified against a live `tools/list` exchange at the time of writing.
 | Tool | Required parameters | Optional parameters |
 |---|---|---|
 | `memory_search` | `agent_id`, `query` | `top_k` (default `8`), `explain` (boolean, default `false`) |
+| `memory_search_batch` | `agent_id`, `queries` | `top_k` (default `8`) |
 | `memory_add` | `agent_id`, `text` | — |
+| `memory_alias` | `agent_id`, `term`, `equivalents` | — |
 | `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
 | `checkpoint_resume` | `agent_id` | — |
-| `memory_reflect` | `action`, plus exactly one of `agent_id` (canonical) or `agent` (deprecated alias) | `text`, `target` |
+| `memory_reflect` | `action`, plus at least one of `agent_id` (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text`, `target` |
 
 `memory_reflect.action` is an enum: `add`, `update`, `forget`, `link`, `pin`,
 `unpin`. The agent parameter on `memory_reflect` is expressed as a schema
-`anyOf` (exactly one of the two spellings is required); `agent` is deprecated,
+`anyOf` (at least one of the two spellings is required, both allowed); `agent` is deprecated,
 and when both spellings arrive `agent_id` wins.
 
 ### `structuredContent` payloads

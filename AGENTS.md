@@ -2,19 +2,21 @@
 
 > If you're an AI agent (Claude Code, OpenCode, Codex, Cursor, Antigravity, custom MCP client) operating in this repo, read this first. Full operational manual: [`docs/AGENTS.md`](docs/AGENTS.md).
 
-This repo **is** a memory system for AI agents. While you work here, you also get to use it: it's wired into your MCP toolbelt as five tools that persist facts and checkpoints across sessions.
+This repo **is** a memory system for AI agents. While you work here, you also get to use it: it's wired into your MCP toolbelt as seven tools that persist facts and checkpoints across sessions.
 
 ## Your tools
 
 | Tool | Required params | Optional |
 |------|----------------|----------|
 | `memory_search` | `agent_id`, `query` | `top_k` (default `8`) |
+| `memory_search_batch` | `agent_id`, `queries` | `top_k` (default `8`) |
 | `memory_add` | `agent_id`, `text` | — |
-| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`), **`agent`** | `text`, `target` (which one is required depends on `action` — for `forget`, either works) |
+| `memory_alias` | `agent_id`, `term`, `equivalents` | — |
+| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus at least one of **`agent_id`** (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text`, `target` (which one is required depends on `action` — for `forget`/`pin`/`unpin`, either works) |
 | `checkpoint_save` | `agent_id` | `state` (JSON-encoded string) |
 | `checkpoint_resume` | `agent_id` | — |
 
-> **`memory_reflect` uses `agent_id` (canonical since ADR-014).** The other four also use `agent_id`. The deprecated alias `agent` is still accepted for compatibility; `agent_id` wins when both are set.
+> **`memory_reflect` uses `agent_id` (canonical since ADR-014).** The other six also use `agent_id`. The deprecated alias `agent` is still accepted for compatibility; `agent_id` wins when both are set.
 
 ## When to call which
 

@@ -1,10 +1,13 @@
 // Package mcp exposes GrayMatter memory as a Model Context Protocol server.
-// Claude Code, Cursor, and any MCP-compatible client can use the four tools:
+// Claude Code, Cursor, and any MCP-compatible client can use the seven tools:
 //
-//   - memory_search  — recall facts for a query
-//   - memory_add     — store a new fact
-//   - checkpoint_save   — snapshot agent state
-//   - checkpoint_resume — restore last checkpoint
+//   - memory_search       — recall facts for a query
+//   - memory_search_batch — recall facts for several queries at once
+//   - memory_add          — store a new fact
+//   - memory_alias        — teach the store a vocabulary alias
+//   - memory_reflect      — curate facts: add, update, forget, link, pin, unpin
+//   - checkpoint_save     — snapshot agent state
+//   - checkpoint_resume   — restore last checkpoint
 //
 // Usage:
 //
@@ -343,8 +346,9 @@ func readOnlyTool() mcp.ToolOption {
 // call stores a new record.
 //
 // memory_reflect passes destructive=false even though its forget/update
-// actions can retire a fact. The annotation is per-tool and three of its four
-// actions are purely additive, so advertising destructive would push hosts
+// actions can retire a fact. The annotation is per-tool and its six actions
+// never hard-delete (retiring actions leave a tombstone), so advertising
+// destructive would push hosts
 // into gating every self-edit behind an approval prompt — including plain
 // adds — which is how unattended agents quietly stop calling the tool. The
 // guardrail lives in the handler instead, where it is testable: forget
@@ -503,8 +507,8 @@ func (s *Server) registerTools() {
 	// memory_reflect
 	//
 	// The input schema is hand-authored raw JSON because the contract cannot
-	// be expressed with typed helpers: exactly one of agent_id (canonical) or
-	// agent (deprecated alias) is required, which is an anyOf over two
+	// be expressed with typed helpers: at least one of agent_id (canonical) or
+	// agent (deprecated alias) is required (both allowed), which is an anyOf over two
 	// required-lists — mcp-go's typed builders only produce flat required
 	// lists, and requiring `agent` here would re-break the caller class the
 	// alias exists for (issue #77, step 3 of the canonical flip).

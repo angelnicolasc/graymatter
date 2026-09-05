@@ -19,9 +19,10 @@ whatever parameter names the schema advertises.
 `agent_id` is canonical; `agent` is a deprecated alias:
 
 - The input schema expresses the true contract as an `anyOf` over two
-  required-lists — exactly one of the spellings must be present, and neither
-  belongs in a flat `required` (requiring either one would schema-invalid the
-  caller class the other spelling serves). mcp-go's typed builders cannot
+  required-lists — at least one of the spellings must be present (both at once
+  are allowed; `agent_id` wins when both arrive), and neither belongs in a
+  flat `required` (requiring either one would schema-invalid the caller class
+  the other spelling serves). mcp-go's typed builders cannot
   express `anyOf`, so `memory_reflect` carries a hand-authored raw input
   schema; every property, the enum, and `additionalProperties: false` are
   preserved in it.
@@ -38,7 +39,7 @@ whatever parameter names the schema advertises.
   behaviourally identical to before. No caller breaks at this step; the
   class that could observe a difference (both spellings, different values)
   is not known to exist.
-- The XOR moves from prose into machine-checkable schema, and
+- The at-least-one rule moves from prose into machine-checkable schema, and
   `reflect_schema_test.go` pins the anyOf shape, the deprecation marker, and
   both precedence directions on the real `tools/list` payload.
 - The wire contract tables in `docs/api-stability.md` and the parameter

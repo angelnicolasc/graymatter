@@ -169,7 +169,7 @@ the table below because its MCP config is already home-scoped.
 
 `graymatter demo` seeds a scratch store, runs consolidation, and opens the
 TUI — then `graymatter kg render --out kg-graph.html` shows the graph it
-built. Restart your editor. Five memory tools are live.
+built. Restart your editor. Seven memory tools are live.
 
 <details>
 <summary><strong>Package managers</strong> — Homebrew, Scoop, Nix</summary>

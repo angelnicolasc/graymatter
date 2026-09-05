@@ -1,12 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/angelnicolasc/graymatter/internal/tokens"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 func TestUpsertInstructions_CreatesFile(t *testing.T) {
@@ -25,7 +30,7 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent`, not `agent_id`", "memory_alias", "weak-match", "hook recall ran"} {
+	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent_id` like every other tool", "memory_alias", "memory_search_batch", "action=\"pin\"", "weak-match", "hook recall ran"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
 		}
@@ -553,4 +558,293 @@ func TestInstructionsBlockBudget(t *testing.T) {
 		t.Fatalf("installed instructions block costs %d tokens, budget is %d — shorten the copy or raise the budget with reasoning",
 			n, instructionsBlockTokenBudget)
 	}
+}
+
+// TestInstructionsBlock_ToolCensusContract pins the generated briefing against
+// the MCP surface it teaches (issues #111/#112). The live tools/list side is
+// pinned by TestToolDefinitionContract in internal/mcp; this pins the block
+// side to the same contract without hardcoding the tool list: tool names are
+// derived from the MCP registrations in internal/mcp/server.go, the reflect
+// anyOf shape is read from the real RawInputSchema JSON, and the handshake
+// briefing is read from internal/mcp/instructions.go. Adding a new tool and
+// updating the MCP contract test turns this red while the briefing is stale.
+// Anchors, not prose: wording may evolve, the contract may not drift.
+func TestInstructionsBlock_ToolCensusContract(t *testing.T) {
+	block := instructionsBlock()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller cannot locate test file; cross-surface check needs its own directory")
+	}
+	base := filepath.Dir(thisFile)
+	serverSrc, err := os.ReadFile(filepath.Join(base, "internal", "mcp", "server.go"))
+	if err != nil {
+		t.Fatalf("read MCP server surface: %v", err)
+	}
+	instrSrc, err := os.ReadFile(filepath.Join(base, "internal", "mcp", "instructions.go"))
+	if err != nil {
+		t.Fatalf("read server instructions: %v", err)
+	}
+
+	// Tool set derived from the MCP surface: every mcp.NewTool("name") in
+	// registerTools. No hardcoded list here by design, so a new registration
+	// with a stale briefing fails below instead of passing silently.
+	toolRe := regexp.MustCompile(`NewTool\("([^"]+)"`)
+	seen := map[string]bool{}
+	var derived []string
+	for _, m := range toolRe.FindAllSubmatch(serverSrc, -1) {
+		name := string(m[1])
+		if !seen[name] {
+			seen[name] = true
+			derived = append(derived, name)
+		}
+	}
+	sort.Strings(derived)
+	if len(derived) == 0 {
+		t.Fatal("derived zero tools from internal/mcp/server.go; registration parse broke")
+	}
+
+	// Every registered tool has a row in the generated tools table. Table rows
+	// open with "| `name` |", which trigger-table prose never does.
+	for _, name := range derived {
+		if row := "| `" + name + "` |"; !strings.Contains(block, row) {
+			t.Errorf("generated block has no tools-table row for registered tool %q", name)
+		}
+	}
+
+	// No extra tools-table rows beyond the registered set: a removed tool must
+	// not linger in the briefing.
+	rowRe := regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
+	for _, m := range rowRe.FindAllSubmatch([]byte(block), -1) {
+		name := string(m[1])
+		// The tools table is the only table whose rows open with a backticked
+		// name; still, skip the header word if it ever matches.
+		if name == "Tool" {
+			continue
+		}
+		// Trigger-table rows open with prose ("| The ..."), so any other
+		// backticked opener here belongs to the tools table.
+		if !seen[name] {
+			t.Errorf("generated block has tools-table row for %q with no MCP registration", name)
+		}
+	}
+
+	// Reflect identity comes from the real schema JSON, not from prose memory.
+	// server.go carries RawInputSchema as a backticked JSON literal; extract
+	// and decode it here so a schema edit moves this test with it.
+	rawJSON := extractReflectRawSchema(t, string(serverSrc))
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+		AnyOf    []struct {
+			Required []string `json:"required"`
+		} `json:"anyOf"`
+		RawOneOf json.RawMessage `json:"oneOf"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &schema); err != nil {
+		t.Fatalf("decode reflect RawInputSchema: %v", err)
+	}
+	for _, prop := range []string{"action", "agent_id", "agent", "text", "target"} {
+		if _, ok := schema.Properties[prop]; !ok {
+			t.Errorf("reflect schema missing property %q", prop)
+		}
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "action" {
+		t.Errorf("reflect schema required = %v, want [action] with agent identity in anyOf", schema.Required)
+	}
+	if len(schema.RawOneOf) != 0 {
+		t.Error("reflect schema must use anyOf (at least one, both allowed), not oneOf (exactly one)")
+	}
+	if len(schema.AnyOf) != 2 {
+		t.Fatalf("reflect schema anyOf has %d branches, want 2 (agent_id / agent)", len(schema.AnyOf))
+	}
+	sawID, sawAlias := false, false
+	for _, branch := range schema.AnyOf {
+		if len(branch.Required) == 1 {
+			switch branch.Required[0] {
+			case "agent_id":
+				sawID = true
+			case "agent":
+				sawAlias = true
+			}
+		}
+	}
+	if !sawID || !sawAlias {
+		t.Errorf("reflect anyOf must offer the agent_id and agent alternatives (got id=%v alias=%v)", sawID, sawAlias)
+	}
+	agentDesc := schema.Properties["agent"].Description
+	if !strings.Contains(strings.ToLower(agentDesc), "deprecated") {
+		t.Error("reflect schema must mark `agent` deprecated")
+	}
+	if !strings.Contains(agentDesc, "agent_id wins") {
+		t.Error("reflect schema must document that `agent_id` wins when both are set")
+	}
+
+	// The block must teach that same contract: canonical agent_id, deprecated
+	// alias, at-least-one required, agent_id wins. Anchors, not full prose.
+	if row := "| `memory_reflect` | `action`, `agent_id`"; !strings.Contains(block, row) {
+		t.Errorf("reflect row does not spell `agent_id` canonical: %q", row)
+	}
+	if !strings.Contains(block, "deprecated alias") {
+		t.Error("generated block never says `agent` is a deprecated alias")
+	}
+	if !strings.Contains(block, "at least one") {
+		t.Error("generated block must say at least one of agent_id/agent is required (anyOf allows both)")
+	}
+	if !strings.Contains(block, "agent_id` wins") && !strings.Contains(block, "agent_id wins") {
+		t.Error("generated block must say `agent_id` wins when both are set")
+	}
+	for _, stale := range []string{"exactly one of", "Mixing them up fails validation", "`agent`, not `agent_id`"} {
+		if strings.Contains(block, stale) {
+			t.Errorf("generated block still carries stale reflect wording %q", stale)
+		}
+	}
+
+	// The handshake briefing must use the same canonical names, never stale
+	// agent-only reflect wording.
+	instrText := string(instrSrc)
+	if !strings.Contains(instrText, "agent_id") {
+		t.Error("serverInstructions never names the canonical `agent_id`")
+	}
+	if !strings.Contains(instrText, "memory_search") || !strings.Contains(instrText, "memory_reflect") {
+		t.Error("serverInstructions must name the tools it tells the model to call")
+	}
+	for _, stale := range []string{"exactly one of", "Mixing them up fails validation", "`agent`, not `agent_id`"} {
+		if strings.Contains(instrText, stale) {
+			t.Errorf("serverInstructions still carries stale reflect wording %q", stale)
+		}
+	}
+
+	// The alias action is the shared constant, not a hardcoded literal that
+	// can drift from the handshake (serverInstructions) and the CLI.
+	if !strings.Contains(block, "`"+memory.FeedbackAction+"`") {
+		t.Errorf("generated block does not render the shared alias action %q", memory.FeedbackAction)
+	}
+	if strings.Contains(block, "ALIAS_TOOL") {
+		t.Error("generated block leaks the unrendered ALIAS_TOOL placeholder")
+	}
+}
+
+// TestInstructionsBlock_DocsContract pins the focused docs surface for issue
+// #112: docs/AGENTS.md and docs/api-stability.md must teach the same
+// seven-tool census and canonical reflect contract as the generated block and
+// the MCP schema. Anchors only, no full-prose semantic diff. Skips only when
+// a docs file is absent; wrong content fails.
+func TestInstructionsBlock_DocsContract(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller cannot locate test file; docs check needs its own directory")
+	}
+	base := filepath.Dir(thisFile)
+	agentsPath := filepath.Join(base, "..", "..", "docs", "AGENTS.md")
+	stabilityPath := filepath.Join(base, "..", "..", "docs", "api-stability.md")
+
+	agentsRaw, err := os.ReadFile(agentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("docs contract skipped: %s absent", agentsPath)
+		}
+		t.Fatalf("read docs/AGENTS.md: %v", err)
+	}
+	stabilityRaw, err := os.ReadFile(stabilityPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("docs contract skipped: %s absent", stabilityPath)
+		}
+		t.Fatalf("read docs/api-stability.md: %v", err)
+	}
+	agentsDoc := string(agentsRaw)
+	stabilityDoc := string(stabilityRaw)
+	docs := []struct {
+		name string
+		src  string
+	}{
+		{"docs/AGENTS.md", agentsDoc},
+		{"docs/api-stability.md", stabilityDoc},
+	}
+
+	// (a) Seven-tool census: batch + alias rows present in both docs, with no
+	// stale five-tool counts.
+	for _, d := range docs {
+		t.Run(d.name+" census", func(t *testing.T) {
+			for _, row := range []string{"| `memory_search_batch`", "| `memory_alias`"} {
+				if !strings.Contains(d.src, row) {
+					t.Errorf("%s missing tool-table row %q", d.name, row)
+				}
+			}
+			for _, tool := range []string{"memory_search_batch", "memory_alias", "memory_add", "memory_reflect", "checkpoint_save", "checkpoint_resume"} {
+				if !strings.Contains(d.src, "`"+tool+"`") {
+					t.Errorf("%s never names tool %q", d.name, tool)
+				}
+			}
+			if !strings.Contains(d.src, "`memory_search`") {
+				t.Errorf("%s never names tool %q", d.name, "memory_search")
+			}
+			for _, stale := range []string{"Five tools are registered", "Five tools", "five tools"} {
+				if strings.Contains(d.src, stale) {
+					t.Errorf("%s carries stale tool count %q", d.name, stale)
+				}
+			}
+		})
+	}
+	// docs/AGENTS.md states the seven-tool count explicitly.
+	if !strings.Contains(agentsDoc, "Seven tools are registered") {
+		t.Error("docs/AGENTS.md must state the seven-tool census (\"Seven tools are registered\")")
+	}
+
+	// (b) Canonical reflect contract in both docs.
+	for _, d := range docs {
+		t.Run(d.name+" reflect", func(t *testing.T) {
+			for _, want := range []string{"agent_id", "canonical", "deprecated", "anyOf", "at least one", "wins"} {
+				if !strings.Contains(d.src, want) {
+					t.Errorf("%s missing reflect anchor %q", d.name, want)
+				}
+			}
+			if !strings.Contains(d.src, "deprecated alias") {
+				t.Errorf("%s must say `agent` is a deprecated alias", d.name)
+			}
+			if !strings.Contains(d.src, "agent_id` wins") && !strings.Contains(d.src, "agent_id wins") {
+				t.Errorf("%s must say `agent_id` wins when both are set", d.name)
+			}
+			for _, stale := range []string{"exactly one of", "`agent`, not `agent_id`", "Mixing them up fails validation"} {
+				if strings.Contains(d.src, stale) {
+					t.Errorf("%s carries stale reflect wording %q", d.name, stale)
+				}
+			}
+		})
+	}
+
+	// (c) memory_search row mentions explain in docs/AGENTS.md (the schema has it).
+	found := false
+	for _, line := range strings.Split(agentsDoc, "\n") {
+		if strings.Contains(line, "memory_search") && strings.Contains(line, "explain") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("docs/AGENTS.md memory_search row must mention `explain`")
+	}
+}
+
+// extractReflectRawSchema returns the JSON literal assigned to
+// reflectTool.RawInputSchema in server.go source.
+func extractReflectRawSchema(t *testing.T, src string) string {
+	t.Helper()
+	anchor := src[strings.Index(src, "RawInputSchema"):]
+	if anchor == "" {
+		t.Fatal("RawInputSchema assignment missing from internal/mcp/server.go")
+	}
+	open := strings.Index(anchor, "`")
+	if open < 0 {
+		t.Fatal("RawInputSchema JSON literal missing opening backtick")
+	}
+	rest := anchor[open+1:]
+	close := strings.Index(rest, "`")
+	if close < 0 {
+		t.Fatal("RawInputSchema JSON literal missing closing backtick")
+	}
+	return rest[:close]
 }
