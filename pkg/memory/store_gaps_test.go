@@ -354,16 +354,30 @@ func TestVectorReconcileLoop_RetriesOnCadenceUntilShutdown(t *testing.T) {
 		Embedder:                &stubEmbedder{vec: []float32{1, 2}},
 		VectorBackend:           vs,
 		VectorReconcileInterval: 30 * time.Millisecond,
-		OnVectorIndexError:      func(string, string, error) { hooked <- struct{}{} },
+		OnVectorIndexError: func(string, string, error) {
+			select {
+			case hooked <- struct{}{}:
+			default:
+			}
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	// Put leaves the pending marker behind (the backend refuses), so the
-	// cadence tick — not the inline attempt — must be what reports next.
+	// Put leaves the pending marker behind when the backend refuses.
 	if err := s.Put(ctx, "loop", "planted after open, picked up by the tick"); err != nil {
 		t.Fatal(err)
+	}
+	// Discard every notification queued before Put returned. Any later event
+	// can only come from a cadence retry of the pending marker.
+drainQueued:
+	for {
+		select {
+		case <-hooked:
+		default:
+			break drainQueued
+		}
 	}
 
 	select {
