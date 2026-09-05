@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -26,6 +27,62 @@ const (
 	deadFact = "We use Lemon Squeezy for billing and payments"
 	liveFact = "We use Polar for billing and payments"
 )
+
+func TestRevise_ConcurrentPutKeepsReplacementIdentity(t *testing.T) {
+	s, cleanup := openTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	var tick atomic.Int64
+	s.now = func() time.Time { return time.Unix(tick.Add(1), 0).UTC() }
+	first, err := s.putReturningFact(ctx, "shared-writers", "deployments require Maria's approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.putReturningFact(ctx, "shared-writers", "Maria approves every production deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementCommitted := make(chan string)
+	releaseRevise := make(chan struct{})
+	var claimed atomic.Bool
+	s.cfg.OnPut = func(_, id string, _ time.Duration) {
+		if claimed.CompareAndSwap(false, true) {
+			replacementCommitted <- id
+			<-releaseRevise
+		}
+	}
+	type result struct {
+		id  string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, err := s.Revise(ctx, "shared-writers", "Priya approves every production deploy", first, second)
+		done <- result{id, err}
+	}()
+	correctID := <-replacementCommitted // replacement is committed; Revise is held before its next step
+	unrelated, putErr := s.putReturningFact(ctx, "shared-writers", "incident channel is ops-sev")
+	close(releaseRevise)
+	if putErr != nil {
+		t.Fatal(putErr)
+	}
+	if unrelated.ID == correctID {
+		t.Fatal("interleaved write reused the replacement identity")
+	}
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.id != correctID {
+		t.Fatalf("Revise returned %q, want its committed replacement %q (unrelated %q)", got.id, correctID, unrelated.ID)
+	}
+	for _, victim := range []Fact{first, second} {
+		stored, ok := s.loadFact("shared-writers", victim.ID)
+		if !ok || stored.SupersededBy != correctID {
+			t.Errorf("victim %q: present=%v SupersededBy=%q, want %q", victim.ID, ok, stored.SupersededBy, correctID)
+		}
+	}
+}
 
 // TestRecall_ExcludesSupersededFact is the regression test for that scenario.
 func TestRecall_ExcludesSupersededFact(t *testing.T) {
