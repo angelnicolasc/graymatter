@@ -262,11 +262,11 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the corrected fact) is required for update")
 		}
-		before, err := s.backend.List(agentID)
+		facts, err := s.backend.List(agentID)
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		victim, ok := findByText(before, target)
+		victim, ok := findByText(facts, target)
 		if !ok {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
@@ -275,17 +275,23 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		// Write the correction before retiring what it corrects. The previous
 		// order zeroed the old fact's weight first, so a failing Remember left
 		// the agent with a retired fact and no replacement.
-		if err := s.backend.Remember(ctx, agentID, text); err != nil {
+		writer, ok := s.backend.(interface {
+			PutReturningFact(context.Context, string, string) (memory.Fact, error)
+		})
+		if !ok {
+			return toolError("add updated fact: backend does not expose identity-preserving writes")
+		}
+		replacement, err := writer.PutReturningFact(ctx, agentID, text)
+		if err != nil {
 			return toolError(fmt.Sprintf("add updated fact: %v", err))
+		}
+		if replacement.ID == "" {
+			return toolError("add updated fact: backend returned an empty fact identity")
 		}
 
 		// Point the tombstone at the replacement so the correction can be
 		// followed later, rather than only showing that something was retired.
-		replacementID := newFactID(s.backend, agentID, before)
-		if replacementID == "" {
-			replacementID = memory.SupersededByAgent
-		}
-		if err := s.supersedeFact(agentID, victim, replacementID); err != nil {
+		if err := s.supersedeFact(agentID, victim, replacement.ID); err != nil {
 			return toolError(fmt.Sprintf("supersede old fact: %v", err))
 		}
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
@@ -388,28 +394,6 @@ func findByText(facts []memory.Fact, text string) (memory.Fact, bool) {
 		}
 	}
 	return memory.Fact{}, false
-}
-
-// newFactID returns the ID of the fact added since the `before` snapshot was
-// taken. Matching on identity rather than text keeps it correct when the new
-// fact repeats wording that is already stored. Returns "" if the new fact
-// cannot be identified — the caller falls back to a generic marker rather than
-// leaving the correction untombstoned.
-func newFactID(backend Backend, agentID string, before []memory.Fact) string {
-	after, err := backend.List(agentID)
-	if err != nil {
-		return ""
-	}
-	known := make(map[string]bool, len(before))
-	for _, f := range before {
-		known[f.ID] = true
-	}
-	for _, f := range after {
-		if !known[f.ID] {
-			return f.ID
-		}
-	}
-	return ""
 }
 
 // supersedeFact retires a fact: it is tombstoned so Recall skips it from

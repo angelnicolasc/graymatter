@@ -488,8 +488,15 @@ func (s *Store) PutConfident(ctx context.Context, agentID, text, confidence stri
 // This closes the crash window between the bbolt write and the vector write:
 // after a crash, reconcileVectors() at Open() drains the pending bucket.
 func (s *Store) Put(ctx context.Context, agentID, text string) error {
-	_, err := s.putReturningFact(ctx, agentID, text)
+	_, err := s.PutReturningFact(ctx, agentID, text)
 	return err
+}
+
+// PutReturningFact writes a fact and returns the exact value committed. It is
+// the identity-preserving counterpart to Put for callers that must persist a
+// reference to their own write without rediscovering it through List.
+func (s *Store) PutReturningFact(ctx context.Context, agentID, text string) (Fact, error) {
+	return s.putReturningFact(ctx, agentID, text)
 }
 
 // putReturningFact is the single durable write path: it commits the fact and
