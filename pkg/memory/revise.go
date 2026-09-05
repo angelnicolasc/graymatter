@@ -21,9 +21,8 @@ import (
 // curve (ADR-007); what changes is that Recall drops them before scoring, and
 // the live fact's receipt names them under Provenance.Supersedes.
 //
-// This is the single home for the semantics. The CLI's `graymatter revise`
-// and the revision benchmark both call it, so a store curated from a terminal
-// and one built by a benchmark cannot drift apart.
+// The revision benchmark calls this method directly. The CLI implements its
+// own daemon-capable revision path because Revise is not part of the RPC surface.
 func (s *Store) Revise(ctx context.Context, agentID, newText string, victims ...Fact) (string, error) {
 	if newText == "" {
 		return "", fmt.Errorf("revise: the replacement text is required")
@@ -32,15 +31,6 @@ func (s *Store) Revise(ctx context.Context, agentID, newText string, victims ...
 		if v.IsSuperseded() {
 			return "", fmt.Errorf("revise: %q is already superseded", v.Text)
 		}
-	}
-
-	before, err := s.List(agentID)
-	if err != nil {
-		return "", fmt.Errorf("revise: list facts: %w", err)
-	}
-	known := make(map[string]bool, len(before))
-	for _, f := range before {
-		known[f.ID] = true
 	}
 
 	// The replacement inherits the victim's kind: a revised alias stays an
@@ -52,29 +42,11 @@ func (s *Store) Revise(ctx context.Context, agentID, newText string, victims ...
 	if len(victims) > 0 {
 		kind = victims[0].Kind
 	}
-	if _, err := s.putReturningFactKind(ctx, agentID, newText, kind, ""); err != nil {
+	replacement, err := s.putReturningFactKind(ctx, agentID, newText, kind, "")
+	if err != nil {
 		return "", fmt.Errorf("revise: write the replacement: %w", err)
 	}
-
-	// Identify the replacement by identity rather than text, so a correction
-	// that repeats wording already in the store still resolves to the fact
-	// this call created.
-	after, err := s.List(agentID)
-	if err != nil {
-		return "", fmt.Errorf("revise: re-list facts: %w", err)
-	}
-	replacementID := ""
-	for _, f := range after {
-		if !known[f.ID] {
-			replacementID = f.ID
-			break
-		}
-	}
-	if replacementID == "" {
-		// The replacement cannot be named — record that something retired
-		// these facts rather than leaving them live and unexplained.
-		replacementID = SupersededByAgent
-	}
+	replacementID := replacement.ID
 
 	for _, v := range victims {
 		v.SupersededBy = replacementID
