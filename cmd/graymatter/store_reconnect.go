@@ -124,6 +124,20 @@ func (r *reconnectingStore) Remember(ctx context.Context, agentID, text string) 
 	return r.do(func(s cliStore) error { return s.Remember(ctx, agentID, text) })
 }
 
+func (r *reconnectingStore) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	var fact memory.Fact
+	err := r.do(func(s cliStore) error {
+		writer, ok := s.(returningFactStore)
+		if !ok {
+			return errors.New("store does not expose PutReturningFact")
+		}
+		var err error
+		fact, err = writer.PutReturningFact(ctx, agentID, text)
+		return err
+	})
+	return fact, err
+}
+
 func (r *reconnectingStore) PutShared(ctx context.Context, text string) error {
 	return r.do(func(s cliStore) error { return s.PutShared(ctx, text) })
 }

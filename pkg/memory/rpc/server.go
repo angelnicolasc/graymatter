@@ -44,6 +44,11 @@ type Backend interface {
 	PendingVectorCount() int
 }
 
+// returningFactWriter keeps the additive capability out of public Backend.
+type returningFactWriter interface {
+	PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error)
+}
+
 // compile-time guarantee that *memory.Store satisfies Backend.
 var _ Backend = (*memory.Store)(nil)
 
@@ -263,6 +268,21 @@ func (s *Server) Stop() {
 func (s *Server) Put(req *PutRequest, resp *PutResponse) error {
 	defer s.touch()
 	return s.backend.Put(context.Background(), req.AgentID, req.Text)
+}
+
+// PutReturningFact handles an identity-preserving write when supported.
+func (s *Server) PutReturningFact(req *PutReturningFactRequest, resp *PutReturningFactResponse) error {
+	defer s.touch()
+	writer, ok := s.backend.(returningFactWriter)
+	if !ok {
+		return errors.New("rpc: backend does not expose PutReturningFact")
+	}
+	fact, err := writer.PutReturningFact(context.Background(), req.AgentID, req.Text)
+	if err != nil {
+		return err
+	}
+	resp.Fact = fact
+	return nil
 }
 
 // PutShared handles a remote AdvancedStore.PutShared.

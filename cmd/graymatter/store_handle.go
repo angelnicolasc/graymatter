@@ -79,6 +79,10 @@ type cliStore interface {
 	Close() error
 }
 
+type returningFactStore interface {
+	PutReturningFact(context.Context, string, string) (memory.Fact, error)
+}
+
 // daemonStore adapts *daemon.Client to cliStore (only the bits the client
 // doesn't already satisfy structurally).
 type daemonStore struct {
@@ -107,10 +111,16 @@ func (d daemonStore) ExportGraphObsidian(outDir string) error {
 // daemon is both reachable and speaking a compatible protocol.
 func (d daemonStore) Ready() error { return d.Ping() }
 
-// compile-time checks: both implementations satisfy cliStore.
+// compile-time checks: store implementations satisfy their internal contracts.
 var (
 	_ cliStore = daemonStore{}
 	_ cliStore = (*directStore)(nil)
+)
+
+var (
+	_ returningFactStore = daemonStore{}
+	_ returningFactStore = (*directStore)(nil)
+	_ returningFactStore = (*reconnectingStore)(nil)
 )
 
 // openStore is the single entry point commands use to reach the store.
@@ -182,6 +192,26 @@ func maybeWireKG(adv graymatter.AdvancedStore) error {
 
 func (d *directStore) Remember(ctx context.Context, agentID, text string) error {
 	return d.mem.Remember(ctx, agentID, text)
+}
+
+// PutReturningFact preserves Remember semantics and returns the durable identity.
+func (d *directStore) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	store, ok := d.store.(interface {
+		PutReturningFact(context.Context, string, string) (memory.Fact, error)
+		LaunchAsyncConsolidate(string, memory.ConsolidateConfig)
+	})
+	if !ok {
+		return memory.Fact{}, fmt.Errorf("memory store does not expose PutReturningFact")
+	}
+	fact, err := store.PutReturningFact(ctx, agentID, text)
+	if err != nil {
+		return memory.Fact{}, fmt.Errorf("graymatter: remember: %w", err)
+	}
+	cfg := d.mem.Config()
+	if cfg.AsyncConsolidate {
+		store.LaunchAsyncConsolidate(agentID, cfg)
+	}
+	return fact, nil
 }
 
 func (d *directStore) PutShared(ctx context.Context, text string) error {

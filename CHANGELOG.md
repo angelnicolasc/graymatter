@@ -29,6 +29,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **`Store.Revise` keeps its own replacement identity.** A write interleaved in the same namespace could make the library method return that unrelated fact's ID and point its victims at it; the method now uses the identity returned by its own committed replacement write.
 
+- **`memory_reflect update` keeps its own replacement identity.** A concurrent write in the same `agent_id` could make the tool point the corrected fact's tombstone at an unrelated fact; the tool now uses the identity returned by its own committed replacement write over both direct and daemon-backed stores.
+
 - **Claude Code hooks now launch GrayMatter with structured `command` + `args`.** Installed hooks no longer pass executable paths through a shell, so paths containing spaces or shell metacharacters work unchanged on every platform with Claude Code 2.1.139 or later. Reinstalling migrates both the prior string form and the pre-marker legacy form; uninstall and drift detection continue to recognize them.
 
 - **Hook scope management and diagnostics now match their public contract.** `hooks uninstall --all` and `hooks doctor --all` cover project and global settings, while the unsafe `hooks install --all` form is rejected to prevent duplicate hook execution. `hooks doctor` reports an uninitialised store without creating it, including when settings are missing or malformed.

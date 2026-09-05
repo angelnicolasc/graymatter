@@ -32,6 +32,17 @@ type PutRequest struct {
 // PutResponse carries no data; presence indicates success.
 type PutResponse struct{}
 
+// PutReturningFactRequest is the wire form of Store.PutReturningFact.
+type PutReturningFactRequest struct {
+	AgentID string
+	Text    string
+}
+
+// PutReturningFactResponse carries the exact fact committed by the write.
+type PutReturningFactResponse struct {
+	Fact memory.Fact
+}
+
 // PutSharedRequest is the wire form of AdvancedStore.PutShared.
 type PutSharedRequest struct {
 	Text string

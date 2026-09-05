@@ -180,6 +180,15 @@ func (c *Client) Put(ctx context.Context, agentID, text string) error {
 	return c.call("Put", &PutRequest{AgentID: agentID, Text: text}, &PutResponse{})
 }
 
+// PutReturningFact writes a fact and returns the exact value committed remotely.
+func (c *Client) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	var resp PutReturningFactResponse
+	if err := c.call("PutReturningFact", &PutReturningFactRequest{AgentID: agentID, Text: text}, &resp); err != nil {
+		return memory.Fact{}, err
+	}
+	return resp.Fact, nil
+}
+
 // PutShared writes a fact to the __shared__ namespace.
 func (c *Client) PutShared(ctx context.Context, text string) error {
 	return c.call("PutShared", &PutSharedRequest{Text: text}, &PutSharedResponse{})

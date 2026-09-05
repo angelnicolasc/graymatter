@@ -19,6 +19,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -379,6 +380,26 @@ type rememberBackend struct {
 
 func (b rememberBackend) Put(ctx context.Context, agentID, text string) error {
 	return b.mem.Remember(ctx, agentID, text)
+}
+
+// PutReturningFact preserves Remember semantics and returns the durable identity.
+func (b rememberBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	store, ok := b.AdvancedStore.(interface {
+		PutReturningFact(context.Context, string, string) (memory.Fact, error)
+		LaunchAsyncConsolidate(string, memory.ConsolidateConfig)
+	})
+	if !ok {
+		return memory.Fact{}, errors.New("memory store does not expose PutReturningFact")
+	}
+	fact, err := store.PutReturningFact(ctx, agentID, text)
+	if err != nil {
+		return memory.Fact{}, fmt.Errorf("graymatter: remember: %w", err)
+	}
+	cfg := b.mem.Config()
+	if cfg.AsyncConsolidate {
+		store.LaunchAsyncConsolidate(agentID, cfg)
+	}
+	return fact, nil
 }
 
 func (b rememberBackend) PutShared(ctx context.Context, text string) error {

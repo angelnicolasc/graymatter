@@ -2,9 +2,12 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -16,9 +19,199 @@ import (
 // exactly what it meant to write.
 
 const (
-	staleFact = "Billing runs through Lemon Squeezy"
-	freshFact = "Billing runs through Polar"
+	staleFact       = "Billing runs through Lemon Squeezy"
+	freshFact       = "Billing runs through Polar"
+	interleavedFact = "The deployment window is Thursday at 03:00 UTC"
 )
+
+type reflectInterleavingBackend struct {
+	Backend
+	armed         bool
+	replacementID string
+	interloperID  string
+}
+
+func (b *reflectInterleavingBackend) Remember(ctx context.Context, agentID, text string) error {
+	if err := b.Backend.Remember(ctx, agentID, text); err != nil {
+		return err
+	}
+	if !b.armed {
+		return nil
+	}
+	b.replacementID = b.newestID(agentID, text)
+	return b.interleave(ctx, agentID)
+}
+
+// Keep this optional so the same test compiles against the pre-fix Backend:
+// that handler calls Remember above, while the fixed handler takes this path.
+func (b *reflectInterleavingBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	writer, ok := b.Backend.(interface {
+		PutReturningFact(context.Context, string, string) (memory.Fact, error)
+	})
+	if !ok {
+		return memory.Fact{}, errors.New("backend does not expose PutReturningFact")
+	}
+	fact, err := writer.PutReturningFact(ctx, agentID, text)
+	if err != nil {
+		return memory.Fact{}, err
+	}
+	if b.armed {
+		b.replacementID = fact.ID
+		err = b.interleave(ctx, agentID)
+	}
+	return fact, err
+}
+
+func (b *reflectInterleavingBackend) interleave(ctx context.Context, agentID string) error {
+	b.armed = false
+	if err := b.Backend.Remember(ctx, agentID, interleavedFact); err != nil {
+		return err
+	}
+	b.interloperID = b.newestID(agentID, interleavedFact)
+	return nil
+}
+
+func (b *reflectInterleavingBackend) newestID(agentID, text string) string {
+	facts, err := b.Backend.List(agentID)
+	if err != nil {
+		return ""
+	}
+	for _, fact := range facts {
+		if fact.Text == text {
+			return fact.ID
+		}
+	}
+	return ""
+}
+
+func newDaemonReflectBackend(t *testing.T) Backend {
+	t.Helper()
+	dataDir := t.TempDir()
+
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- daemon.Run(daemon.RunOptions{
+			DataDir: dataDir,
+			Logf: func(format string, _ ...any) {
+				if strings.HasPrefix(format, "graymatter daemon ready:") {
+					close(ready)
+				}
+			},
+		})
+	}()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("daemon exited before ready: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("daemon did not become ready")
+	}
+
+	client, err := daemon.ConnectNoSpawn(dataDir)
+	if err != nil {
+		t.Fatalf("connect daemon: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = client.Shutdown()
+		_ = client.Close()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("daemon shutdown: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("daemon did not stop")
+		}
+	})
+	return client
+}
+
+func TestMemoryReflect_UpdateKeepsItsReplacementIdentity(t *testing.T) {
+	// Keep both paths provider-free; the invalid scheme prevents an Ollama dial.
+	t.Setenv("GRAYMATTER_OLLAMA_URL", "disabled://")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	tests := []struct {
+		name string
+		open func(*testing.T) Backend
+	}{
+		{
+			name: "direct",
+			open: func(t *testing.T) Backend {
+				s, _ := newTestServer(t)
+				return s.backend
+			},
+		},
+		{name: "daemon_rpc", open: newDaemonReflectBackend},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			base := tc.open(t)
+			const agentID = "concurrent-reflect"
+			const oldText = "The deployment window is Wednesday at 03:00 UTC"
+			const correctedText = "The deployment window is Tuesday at 03:00 UTC"
+
+			// Arm only after seeding: otherwise the interleaving is consumed by
+			// setup and the test does not exercise the vulnerable window.
+			if err := base.Remember(ctx, agentID, oldText); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			interleaved := &reflectInterleavingBackend{Backend: base, armed: true}
+			s := New(interleaved, "test")
+
+			res, err := s.handleMemoryReflect(ctx, reflectReq(map[string]any{
+				"action": "update", "agent_id": agentID,
+				"target": oldText, "text": correctedText,
+			}))
+			if err != nil || res.IsError {
+				t.Fatalf("memory_reflect update: %v / %s", err, resultText(t, res))
+			}
+			if interleaved.replacementID == "" || interleaved.interloperID == "" {
+				t.Fatalf("interleaving IDs = replacement %q, interloper %q; want both", interleaved.replacementID, interleaved.interloperID)
+			}
+			if interleaved.replacementID == interleaved.interloperID {
+				t.Fatal("replacement and interloper reused one identity")
+			}
+
+			facts, err := base.List(agentID)
+			if err != nil {
+				t.Fatalf("list facts: %v", err)
+			}
+			byID := make(map[string]memory.Fact, len(facts))
+			for _, fact := range facts {
+				byID[fact.ID] = fact
+			}
+			// This guard proves the ID called "replacement" belongs to this
+			// invocation's corrected text before testing the tombstone.
+			if got := byID[interleaved.replacementID].Text; got != correctedText {
+				t.Fatalf("replacement ID carries %q, want corrected text %q", got, correctedText)
+			}
+			if got := byID[interleaved.interloperID].Text; got != interleavedFact {
+				t.Fatalf("interloper ID carries %q, want %q", got, interleavedFact)
+			}
+
+			var victim memory.Fact
+			for _, fact := range facts {
+				if fact.Text == oldText {
+					victim = fact
+					break
+				}
+			}
+			if victim.ID == "" {
+				t.Fatal("seeded victim not found")
+			}
+			if victim.SupersededBy != interleaved.replacementID {
+				t.Fatalf("victim SupersededBy=%q, want this call's replacement %q (interloper %q)",
+					victim.SupersededBy, interleaved.replacementID, interleaved.interloperID)
+			}
+		})
+	}
+}
 
 // TestMemoryReflect_UpdateRemovesOldFactFromSearch is the regression test for
 // the correction case: after an update, the superseded statement must not come

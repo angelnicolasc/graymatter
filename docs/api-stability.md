@@ -38,6 +38,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 |---|---|
 | `Open(cfg StoreConfig) (*Store, error)` | |
 | `(*Store).Put(ctx, agentID, text string) error` | |
+| `(*Store).PutReturningFact(ctx, agentID, text string) (Fact, error)` | Added after v0.18.0. Concrete `Store` capability, intentionally not part of `AdvancedStore`; returns the exact fact committed so callers can persist its identity without a post-write lookup |
 | `(*Store).Delete(agentID, factID string) error` | |
 | `(*Store).List(agentID string) ([]Fact, error)` | |
 | `(*Store).ListAgents() ([]string, error)` | |
