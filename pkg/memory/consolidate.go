@@ -390,9 +390,9 @@ func stripCodeFence(s string) string {
 //     exportable and auditable, and pruning collects them on the ordinary
 //     schedule. Zeroing their weight instead would let step 3 of this very
 //     cycle delete each receipt milliseconds after writing it.
-//   - The receipt points at the real summary fact's ID. Falling back to the
-//     generic SupersededByAgent marker on lookup failure would falsify the
-//     audit trail ("an agent retired this"), so failure aborts instead.
+//   - The receipt points at the exact summary fact this cycle wrote. Looking
+//     it up by text could select an identical fact from a concurrent writer
+//     and falsify the audit trail.
 //
 // It returns how many facts were actually tombstoned; per-fact write failures
 // are joined into the returned error without stopping the remaining ones.
@@ -418,15 +418,11 @@ func (s *Store) applyProposal(ctx context.Context, agentID string, batch []Fact,
 		consumed = append(consumed, f)
 	}
 
-	if err := s.Put(ctx, agentID, prop.Summary); err != nil {
+	summary, err := s.putReturningFact(ctx, agentID, prop.Summary)
+	if err != nil {
 		return 0, fmt.Errorf("put consolidation summary: %w", err)
 	}
-	summaryID := s.factIDByText(agentID, prop.Summary)
-	if summaryID == "" {
-		// Unreachable in practice — Put just stored exactly this text — but
-		// refusing here is what keeps every receipt resolvable.
-		return 0, fmt.Errorf("consolidation summary vanished after put; batch left untouched")
-	}
+	summaryID := summary.ID
 
 	var errs []error
 	applied := 0
