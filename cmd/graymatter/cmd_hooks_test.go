@@ -708,7 +708,7 @@ func TestHookRun_UserPromptRecallAndThrottle(t *testing.T) {
 	}
 	_ = store.Close()
 
-	first, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit"})
+	first, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "throttle", CWD: mustWorkdir(), Prompt: "rate limit"})
 	if err != nil {
 		t.Fatalf("first recall: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestHookRun_UserPromptRecallAndThrottle(t *testing.T) {
 		t.Errorf("first injection = %q, want the matching fact", first)
 	}
 
-	second, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit again please"})
+	second, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "throttle", CWD: mustWorkdir(), Prompt: "rate limit again please"})
 	if err != nil {
 		t.Fatalf("second recall: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestHookRun_UserPromptRecallAndThrottle(t *testing.T) {
 		t.Errorf("state file missing: %v", err)
 	}
 
-	third, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "where does postgres run"})
+	third, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "throttle", CWD: mustWorkdir(), Prompt: "where does postgres run"})
 	if err != nil {
 		t.Fatalf("third recall: %v", err)
 	}
@@ -949,7 +949,7 @@ func TestHookRun_UserPrompt_SharedThrottle(t *testing.T) {
 	withHooksEnv(t)
 	seedSharedFacts(t, "Deploys freeze on Fridays: do not deploy to production on Fridays")
 
-	first, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "can I deploy on a Friday"})
+	first, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "shared-throttle", CWD: mustWorkdir(), Prompt: "can I deploy on a Friday"})
 	if err != nil {
 		t.Fatalf("first turn: %v", err)
 	}
@@ -957,7 +957,7 @@ func TestHookRun_UserPrompt_SharedThrottle(t *testing.T) {
 		t.Fatalf("first injection = %q, want the shared convention", first)
 	}
 
-	second, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "and what about Saturday"})
+	second, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "shared-throttle", CWD: mustWorkdir(), Prompt: "and what about Saturday"})
 	if err != nil {
 		t.Fatalf("second turn: %v", err)
 	}
@@ -974,7 +974,7 @@ func TestHookRun_UserPrompt_SharedThrottle(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = store.Close()
-	third, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "when does the ship window reopen"})
+	third, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "shared-throttle", CWD: mustWorkdir(), Prompt: "when does the ship window reopen"})
 	if err != nil {
 		t.Fatalf("third turn: %v", err)
 	}

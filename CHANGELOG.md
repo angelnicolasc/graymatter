@@ -23,6 +23,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **New hook sessions no longer inherit another window's injection throttle.** Identical memory blocks remain suppressed within one identified session, while a different or unidentified session receives its own context; the best-effort cache is bounded to its most recently recorded sessions.
+
 - **`Store.Revise` keeps its own replacement identity.** A write interleaved in the same namespace could make the library method return that unrelated fact's ID and point its victims at it; the method now uses the identity returned by its own committed replacement write.
 
 - **Claude Code hooks now launch GrayMatter with structured `command` + `args`.** Installed hooks no longer pass executable paths through a shell, so paths containing spaces or shell metacharacters work unchanged on every platform with Claude Code 2.1.139 or later. Reinstalling migrates both the prior string form and the pre-marker legacy form; uninstall and drift detection continue to recognize them.

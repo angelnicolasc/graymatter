@@ -13,6 +13,8 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,9 +49,12 @@ const (
 	// are small JSON objects; anything beyond this is not a hook payload.
 	hookStdinMax = 1 << 20
 
-	// hooksStateFile caches the last injected block's hash so an identical
-	// recall is not re-injected on consecutive turns.
+	// hooksStateFile caches recent injected block hashes so an identical recall
+	// is not re-injected on consecutive turns in the same session.
 	hooksStateFile = "state.json"
+
+	hookStateSessionLimit  = 32
+	hookStateSessionPrefix = "last_block_sha256:v2:"
 
 	// hooksRememberPrefix turns a prompt into a deterministic instant-save,
 	// no model in the loop.
@@ -280,8 +285,8 @@ func hookSessionStart(agent string, payload hookEventPayload) (string, error) {
 
 // hookUserPrompt either performs a deterministic remember (prompt starts with
 // "remember:" or "remember shared:") or a short recall from both namespaces.
-// Consecutive turns with identical recall output are suppressed via the state
-// file: the context is already there.
+// Consecutive turns with identical recall output in the same identified
+// session are suppressed via the state file: the context is already there.
 func hookUserPrompt(agent string, payload hookEventPayload) (string, error) {
 	prompt := strings.TrimSpace(payload.Prompt)
 	if prompt == "" {
@@ -337,10 +342,10 @@ func hookUserPrompt(agent string, payload hookEventPayload) (string, error) {
 	if degrade != nil {
 		hookLog(payload, "user-prompt", timeNow().Sub(start), "error", degrade.Error())
 	}
-	if hookStateSeenBlock(agent, block) {
-		return "", nil // identical context already injected on a recent turn
+	if hookStateSeenBlock(agent, payload.SessionID, block) {
+		return "", nil // identical context is already present in this session
 	}
-	hookStateRecordBlock(agent, block)
+	hookStateRecordBlock(agent, payload.SessionID, block)
 	return block, nil
 }
 
@@ -515,10 +520,11 @@ func hookStatePath(dataDir string) string {
 	return filepath.Join(dataDir, "hooks", hooksStateFile)
 }
 
-// hookStateSeenBlock reports whether this exact block was the last one
-// injected for this agent. Read failures mean "not seen" — a missing cache
-// only causes a redundant injection.
-func hookStateSeenBlock(agent, block string) bool {
+// hookStateSeenBlock fails open without a session ID to avoid false suppression.
+func hookStateSeenBlock(agent, sessionID, block string) bool {
+	if sessionID == "" {
+		return false
+	}
 	data, err := os.ReadFile(hookStatePath(dataDir))
 	if err != nil {
 		return false
@@ -527,12 +533,16 @@ func hookStateSeenBlock(agent, block string) bool {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return false
 	}
-	return st[hookStateKey(agent)] == hookBlockHash(block)
+	_, hash, ok := hookStateEntry(st[hookStateKey(agent, sessionID)])
+	return ok && hash == hookBlockHash(block)
 }
 
-// hookStateRecordBlock stores the block's hash as the last injected one for
-// this agent. Best-effort: a failure to write only costs a duplicate injection.
-func hookStateRecordBlock(agent, block string) {
+// hookStateRecordBlock retains the latest block per identified session.
+// Best-effort failures only cost a duplicate injection.
+func hookStateRecordBlock(agent, sessionID, block string) {
+	if sessionID == "" {
+		return
+	}
 	path := hookStatePath(dataDir)
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 
@@ -540,15 +550,54 @@ func hookStateRecordBlock(agent, block string) {
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, &st) // keep other agents' entries when readable
 	}
-	st[hookStateKey(agent)] = hookBlockHash(block)
+	if st == nil {
+		st = map[string]string{}
+	}
+
+	type sessionEntry struct {
+		key      string
+		sequence uint64
+	}
+	key := hookStateKey(agent, sessionID)
+	entries := make([]sessionEntry, 0, len(st)+1)
+	var maxSequence uint64
+	for existingKey, value := range st {
+		if strings.HasPrefix(existingKey, hookStateSessionPrefix) {
+			sequence, _, ok := hookStateEntry(value)
+			if !ok || existingKey == key {
+				delete(st, existingKey)
+				continue
+			}
+			entries = append(entries, sessionEntry{existingKey, sequence})
+			if sequence > maxSequence {
+				maxSequence = sequence
+			}
+		}
+	}
+	sequence := maxSequence + 1
+	st[key] = fmt.Sprintf("%d:%s", sequence, hookBlockHash(block))
+	entries = append(entries, sessionEntry{key, sequence})
+	sort.Slice(entries, func(i, j int) bool { return entries[i].sequence > entries[j].sequence })
+	if len(entries) > hookStateSessionLimit {
+		for _, entry := range entries[hookStateSessionLimit:] {
+			delete(st, entry.key)
+		}
+	}
 	if out, err := json.Marshal(st); err == nil {
 		_ = os.WriteFile(path, out, 0o644)
 	}
 }
 
-// hookStateKey namespaces the hash per agent so two agents in one project do
-// not suppress each other's injections.
-func hookStateKey(agent string) string { return "last_block_sha256:" + agent }
+// The state-file path scopes the store; this key adds agent + opaque session.
+func hookStateKey(agent, sessionID string) string {
+	return hookStateSessionPrefix + agent + ":" + hookBlockHash(sessionID)
+}
+
+func hookStateEntry(value string) (uint64, string, bool) {
+	sequenceText, hash, ok := strings.Cut(value, ":")
+	sequence, err := strconv.ParseUint(sequenceText, 10, 64)
+	return sequence, hash, ok && err == nil && hash != ""
+}
 
 func hookBlockHash(block string) string {
 	sum := sha256.Sum256([]byte(block))
