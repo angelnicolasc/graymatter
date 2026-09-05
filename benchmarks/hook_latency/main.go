@@ -1,5 +1,5 @@
-// hook_latency gates the Claude Code hooks' hot path against what the code
-// actually controls — never against shared-CI hardware.
+// hook_latency measures the Claude Code hooks' hot path against what the code
+// actually controls — never against shared-CI hardware. CI runs it report-only.
 //
 // Absolute wall-clock budgets are a hardware lottery: the same tree measured
 // p99 user-prompt 121 ms on a dev machine, 170 ms on macOS runners and
@@ -8,7 +8,7 @@
 // "checkpoint budget" failed there without a single line of Go being wrong.
 // Gating absolutes on shared runners gates the runner queue, not the code.
 //
-// What is gated instead is hardware-invariant:
+// What the benchmark checks instead is machine-relative:
 //
 //	1. recall delta     user-prompt p99 − pre-compact p99 ≤ 200 ms
 //	   (pre-compact measures this machine's spawn+connect+checkpoint cost;
@@ -17,14 +17,14 @@
 //	   tokenize or full decode shows up immediately)
 //	2. session-end delta session-end p99 − pre-compact p99 ≤ 200 ms
 //	   (the detached consolidation spawn must add almost nothing)
-//	3. scaling          in-process Recall(10k facts) ≤ 20 × Recall(500)
-//	   (catches algorithmic blowups — accidental O(n²) passes, full
-//	   re-decodes — independent of how fast the machine is)
+//	3. scaling          (Recall(10k)/Recall(500)) / (10000/500)
+//	   ≤ recallScalingMaxNormalized (1.0x is linear; catches algorithmic
+//	   blowups — accidental O(n²) passes, full re-decodes)
 //
 // Absolute numbers are still measured and printed: they are reference data
 // for humans, and the published reference-hardware figure (user-prompt p99
 // 121 ms on the dev machine that set the budgets) stays in the README beside
-// the deltas CI enforces.
+// the checks this benchmark reports. CI does not block merges on this result.
 //
 // The queries deliberately overlap the seeded corpus so every measured run
 // produces a distinct injected block — an unmatched query returns the same
@@ -33,7 +33,7 @@
 //
 // Usage:
 //
-//	go test ./benchmarks/hook_latency/   # the CI gate
+//	go test ./benchmarks/hook_latency/   # CI report-only measurement
 //	go run  ./benchmarks/hook_latency    # human-readable report
 package main
 
@@ -66,8 +66,8 @@ const (
 	// (deltas: ~90 ms dev, ~136 ms macOS, ~92 ms Windows) while a
 	// reintroduced double-tokenize (+40 ms) or a per-fact write txn
 	// (+500 ms) breach it decisively.
-	recallDeltaBudget      = 200 * time.Millisecond
-	sessionEndDeltaBudget  = 200 * time.Millisecond
+	recallDeltaBudget     = 200 * time.Millisecond
+	sessionEndDeltaBudget = 200 * time.Millisecond
 	// Scaling is normalized by the size ratio (Recall(10k)/Recall(500)) /
 	// (10000/500), so 1.0x is exactly linear. Measured on the reference
 	// machine: 1.17x (cache and GC make ten-thousand-item work slightly
@@ -322,6 +322,9 @@ func measureRecallScaling(dir string) (float64, error) {
 
 	if smallBest <= 0 {
 		return 0, fmt.Errorf("small recall measured %v", smallBest)
+	}
+	if bigBest <= 0 {
+		return 0, fmt.Errorf("big recall measured %v", bigBest)
 	}
 	return float64(bigBest) / float64(smallBest), nil
 }
