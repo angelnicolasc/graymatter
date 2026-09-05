@@ -6,7 +6,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [Unreleased]
+## [0.19.0] - 2026-09-05
 
 ### Added
 
@@ -25,11 +25,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **New hook sessions no longer inherit another window's injection throttle.** Identical memory blocks remain suppressed within one identified session, while a different or unidentified session receives its own context; the best-effort cache is bounded to its most recently recorded sessions.
 
-- **Consolidation keeps its own summary identity.** A concurrent write of identical summary text could make consumed facts point at the other writer's copy; consolidation now uses the identity returned by its own committed summary write.
+- **`Store.Revise` now binds replacement lineage to the identity returned by its committed write.** The returned ID and every retired fact's `SupersededBy` reference stay anchored to that exact replacement, including when another write commits concurrently in the same namespace.
 
-- **`Store.Revise` keeps its own replacement identity.** A write interleaved in the same namespace could make the library method return that unrelated fact's ID and point its victims at it; the method now uses the identity returned by its own committed replacement write.
+- **Consolidation applies the same write-derived identity guarantee to summaries.** Consumed facts reference the exact summary created by their consolidation cycle, including when another writer commits identical summary text concurrently.
 
-- **`memory_reflect update` keeps its own replacement identity.** A concurrent write in the same `agent_id` could make the tool point the corrected fact's tombstone at an unrelated fact; the tool now uses the identity returned by its own committed replacement write over both direct and daemon-backed stores.
+- **`memory_reflect update` carries the guarantee across direct and daemon-backed stores.** The corrected fact's tombstone receives the exact ID returned by its replacement write, preserving revision lineage through overlapping writes in the same `agent_id`.
 
 - **Claude Code hooks now launch GrayMatter with structured `command` + `args`.** Installed hooks no longer pass executable paths through a shell, so paths containing spaces or shell metacharacters work unchanged on every platform with Claude Code 2.1.139 or later. Reinstalling migrates both the prior string form and the pre-marker legacy form; uninstall and drift detection continue to recognize them.
 
