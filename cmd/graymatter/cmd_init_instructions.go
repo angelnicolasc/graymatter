@@ -99,9 +99,10 @@ Facts every agent in the project should see go to the reserved id ~__shared__~.
 | A pinned fact is still true but no longer needs permanence | ~memory_reflect~ with ~action="unpin"~ |
 | A search comes back with a **weak-match note** | Reformulate **once** with the note's suggested terms; if your wording and the store's differ, declare it with ~ALIAS_TOOL~ before trying more synonyms |
 
-Err toward storing: a fact you failed to store costs the same mistake a
-second time. Every stored fact still costs retrieval noise and decay upkeep,
-so keep each one atomic, and pin the few that must never decay.
+Prefer durable, actionable, atomic conclusions; skip low-signal, duplicate,
+or transient information. A missed fact costs the same mistake twice, but
+every stored fact costs retrieval noise and decay upkeep, so pin the few
+that must never decay.
 
 ### The tools
 
