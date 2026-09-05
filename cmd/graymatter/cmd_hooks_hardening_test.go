@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,18 +130,17 @@ func TestHookState_CorruptedStateFileIsUnseen(t *testing.T) {
 	seedHookStoreFacts(t, "the rate limit is 60 requests per minute")
 
 	// Corrupt the state file after a first (injecting) call.
-	if _, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit"}); err != nil {
+	if _, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "corrupt-state", CWD: mustWorkdir(), Prompt: "rate limit"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(hookStatePath(dataDir), []byte("{corrupt"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit again"})
-	if err != nil {
-		t.Fatalf("corrupt state must not error the hook: %v", err)
-	}
-	if out == "" {
-		t.Error("corrupt state must be treated as unseen and inject again")
+	for _, content := range []string{"{corrupt", "null"} {
+		if err := os.WriteFile(hookStatePath(dataDir), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, err := dispatchHook("user-prompt", hookEventPayload{SessionID: "corrupt-state", CWD: mustWorkdir(), Prompt: "rate limit again"})
+		if err != nil || out == "" {
+			t.Errorf("state %q: out=%q err=%v, want fail-open injection", content, out, err)
+		}
 	}
 }
 
@@ -151,7 +151,8 @@ func TestHookState_PerAgentKeys(t *testing.T) {
 	seedHookStoreFacts(t, "the rate limit is 60 requests per minute", "postgres runs on db-01")
 
 	agent := deriveAgentID(mustWorkdir())
-	if _, err := dispatchHook("user-prompt", hookEventPayload{CWD: mustWorkdir(), Prompt: "rate limit"}); err != nil {
+	const sessionID = "per-agent"
+	if _, err := dispatchHook("user-prompt", hookEventPayload{SessionID: sessionID, CWD: mustWorkdir(), Prompt: "rate limit"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,8 +163,61 @@ func TestHookState_PerAgentKeys(t *testing.T) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		t.Fatalf("state file unreadable: %v", err)
 	}
-	if _, ok := st["last_block_sha256:"+agent]; !ok {
+	if _, ok := st[hookStateKey(agent, sessionID)]; !ok {
 		t.Fatalf("state file does not key the block per agent: %v", st)
+	}
+}
+
+func TestHookState_ThrottleIsPerSessionAndMissingIDFailsOpen(t *testing.T) {
+	withHooksEnv(t)
+	seedHookStoreFacts(t, "the rate limit is 60 requests per minute")
+	payload := hookEventPayload{SessionID: "session-a", CWD: mustWorkdir(), Prompt: "rate limit"}
+
+	first, err := dispatchHook("user-prompt", payload)
+	if err != nil || first == "" {
+		t.Fatalf("first session A turn: out=%q err=%v", first, err)
+	}
+	if again, err := dispatchHook("user-prompt", payload); err != nil || again != "" {
+		t.Fatalf("second session A turn: out=%q err=%v, want suppressed", again, err)
+	}
+	payload.SessionID = "session-b"
+	if other, err := dispatchHook("user-prompt", payload); err != nil || other == "" {
+		t.Fatalf("first session B turn: out=%q err=%v, want injected", other, err)
+	}
+	payload.SessionID = "session-a"
+	if again, err := dispatchHook("user-prompt", payload); err != nil || again != "" {
+		t.Fatalf("later session A turn: out=%q err=%v, want still suppressed", again, err)
+	}
+	payload.SessionID = ""
+	for turn := 1; turn <= 2; turn++ {
+		if out, err := dispatchHook("user-prompt", payload); err != nil || out == "" {
+			t.Fatalf("missing-session turn %d: out=%q err=%v, want fail-open injection", turn, out, err)
+		}
+	}
+}
+
+func TestHookState_BoundsMostRecentSessions(t *testing.T) {
+	withHooksEnv(t)
+	const extra = 5
+	for i := 0; i < hookStateSessionLimit+extra; i++ {
+		hookStateRecordBlock("bounded-agent", fmt.Sprintf("session-%02d", i), "same block")
+	}
+	data, err := os.ReadFile(hookStatePath(dataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st map[string]string
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st) != hookStateSessionLimit {
+		t.Fatalf("state entries = %d, want cap %d", len(st), hookStateSessionLimit)
+	}
+	for i := 0; i < hookStateSessionLimit+extra; i++ {
+		_, present := st[hookStateKey("bounded-agent", fmt.Sprintf("session-%02d", i))]
+		if want := i >= extra; present != want {
+			t.Errorf("session %d present=%v, want %v", i, present, want)
+		}
 	}
 }
 
