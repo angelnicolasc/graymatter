@@ -23,8 +23,8 @@ client at startup, so the memory tools will not exist in the session that ran
 [`AGENTS.md`](AGENTS.md) is the operating manual: which tool to call, when, and
 with which parameter names. The full version is [`docs/AGENTS.md`](docs/AGENTS.md).
 
-The one thing that reliably trips agents up: `memory_reflect` takes `agent`,
-while the other four tools take `agent_id`. Mixing them up fails validation.
+The one thing that reliably trips agents up: `memory_reflect` takes `agent_id`
+like the other six tools (`agent` remains only a deprecated alias). Pass at least one; when both are set `agent_id` wins.
 
 ## You are contributing to GrayMatter itself
 

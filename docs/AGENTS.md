@@ -16,17 +16,19 @@ GrayMatter is your long-term memory. Unlike conversation context, which disappea
 
 ## MCP Tool Reference
 
-Five tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/internal/mcp/server.go`](../cmd/graymatter/internal/mcp/server.go)). **Parameter names are not uniform** — check the table before calling.
+Seven tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/internal/mcp/server.go`](../cmd/graymatter/internal/mcp/server.go)). **Parameter names are not uniform** — check the table before calling.
 
 | Tool | Required params | Optional params | Returns |
 |------|----------------|-----------------|---------|
-| `memory_search` | `agent_id` (string), `query` (string) | `top_k` (int, default `8`) | Numbered fact list with a count header (deduped), or a "No memories found" notice |
+| `memory_search` | `agent_id` (string), `query` (string) | `top_k` (int, default `8`), `explain` (boolean, default `false`) | Numbered fact list with a count header (deduped), or a "No memories found" notice |
+| `memory_search_batch` | `agent_id` (string), `queries` (string array) | `top_k` (int, default `8`) | Merged deduped block plus per-query lists |
 | `memory_add` | `agent_id` (string), `text` (string) | — | Confirmation string |
+| `memory_alias` | `agent_id` (string), `term` (string), `equivalents` (string array) | — | Confirmation naming the term and its equivalents |
 | `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Confirmation containing the checkpoint ID |
 | `checkpoint_resume` | `agent_id` (string) | — | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; error result when none exists |
-| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus exactly one of **`agent_id`** (canonical) or `agent` (deprecated alias) | `text` (string), `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
+| `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus at least one of **`agent_id`** (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text` (string), `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
 
-> ℹ️ **`memory_reflect` accepts both `agent_id` (canonical) and `agent` (deprecated alias).** Since the canonical flip ([ADR-014](decisions/014-agent-id-canonical.md)) exactly one of the two is required — the schema enforces it as an `anyOf` — and `agent_id` wins when both are set. New integrations spell it `agent_id`, matching every other tool.
+> ℹ️ **`memory_reflect` accepts both `agent_id` (canonical) and `agent` (deprecated alias).** Since the canonical flip ([ADR-014](decisions/014-agent-id-canonical.md)) at least one of the two is required — the schema enforces it as an `anyOf` allowing both — and `agent_id` wins when both are set. New integrations spell it `agent_id`, matching every other tool.
 
 ### Hooks and MCP at session start
 
@@ -201,7 +203,7 @@ Facts marked superseded are dropped before any of this — a fact an agent has c
 
 The most powerful tool. Use it to maintain memory quality over time.
 
-> Parameter is **`agent_id`** (canonical, since ADR-014). `agent` remains accepted as a deprecated alias - the schema expresses this as an `anyOf` requiring exactly one of the two - and `agent_id` wins when both are set. New integrations spell it `agent_id`.
+> Parameter is **`agent_id`** (canonical, since ADR-014). `agent` remains accepted as a deprecated alias - the schema expresses this as an `anyOf` requiring at least one of the two (both allowed) - and `agent_id` wins when both are set. New integrations spell it `agent_id`.
 
 | Action | Param meaning of `text` | Param meaning of `target` |
 |--------|-------------------------|---------------------------|

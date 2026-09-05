@@ -94,25 +94,29 @@ Facts every agent in the project should see go to the reserved id ~__shared__~.
 | You make a non-obvious decision | ~memory_add~, include the reasoning |
 | You fix a non-trivial bug or find a workaround | ~memory_add~ |
 | The user corrects you | ~memory_reflect~ with ~action="update"~ |
-| A stored fact became wrong | ~memory_reflect~ with ~action="forget"~ |
+| A stored fact becomes wrong | ~memory_reflect~ with ~action="update"~ or ~action="forget"~ (never ~"unpin"~) |
+| An existing stored fact becomes a standing rule | ~memory_reflect~ with ~action="pin"~ |
+| A pinned fact is still true but no longer needs permanence | ~memory_reflect~ with ~action="unpin"~ |
 | A search comes back with a **weak-match note** | Reformulate **once** with the note's suggested terms; if your wording and the store's differ, declare it with ~ALIAS_TOOL~ before trying more synonyms |
 
-Err toward storing. A fact you never needed costs nothing. One you failed to
-store costs the same mistake a second time.
+Err toward storing: a fact you failed to store costs the same mistake a
+second time. Every stored fact still costs retrieval noise and decay upkeep,
+so keep each one atomic, and pin the few that must never decay.
 
 ### The tools
 
 | Tool | Required | Optional |
 |---|---|---|
-| ~memory_search~ | ~agent_id~, ~query~ | ~top_k~ (default 8) |
+| ~memory_search~ | ~agent_id~, ~query~ | ~top_k~ (default 8), ~explain~ |
+| ~memory_search_batch~ | ~agent_id~, ~queries~ | ~top_k~ (default 8) |
 | ~memory_add~ | ~agent_id~, ~text~ | |
-| ~memory_reflect~ | ~action~, ~agent~ | ~text~, ~target~ |
-| ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | teach the store a vocabulary bridge |
+| ~memory_reflect~ | ~action~, ~agent_id~ (~agent~ is a deprecated alias) | ~text~, ~target~ |
+| ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | |
 | ~checkpoint_save~ | ~agent_id~ | ~state~ |
 | ~checkpoint_resume~ | ~agent_id~ | |
 
-⚠ ~memory_reflect~ takes ~agent~, not ~agent_id~. Every other tool,
-including ~ALIAS_TOOL~, takes ~agent_id~. Mixing them up fails validation.
+⚠ ~memory_reflect~ takes ~agent_id~ like every other tool; ~agent~ is only a
+deprecated alias. Pass at least one; when both are set ~agent_id~ wins.
 
 ### The store learns its own vocabulary
 
