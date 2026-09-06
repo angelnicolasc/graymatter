@@ -730,8 +730,8 @@ func TestInstructionsBlock_ToolCensusContract(t *testing.T) {
 // TestInstructionsBlock_DocsContract pins the focused docs surface for issue
 // #112: docs/AGENTS.md and docs/api-stability.md must teach the same
 // seven-tool census and canonical reflect contract as the generated block and
-// the MCP schema. Anchors only, no full-prose semantic diff. Skips only when
-// a docs file is absent; wrong content fails.
+// the MCP schema. Anchors only, no full-prose semantic diff.
+// A missing docs file fails; wrong content fails.
 func TestInstructionsBlock_DocsContract(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -744,14 +744,14 @@ func TestInstructionsBlock_DocsContract(t *testing.T) {
 	agentsRaw, err := os.ReadFile(agentsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Skipf("docs contract skipped: %s absent", agentsPath)
+			t.Fatalf("docs contract violated: %s absent", agentsPath)
 		}
 		t.Fatalf("read docs/AGENTS.md: %v", err)
 	}
 	stabilityRaw, err := os.ReadFile(stabilityPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Skipf("docs contract skipped: %s absent", stabilityPath)
+			t.Fatalf("docs contract violated: %s absent", stabilityPath)
 		}
 		t.Fatalf("read docs/api-stability.md: %v", err)
 	}
