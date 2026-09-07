@@ -69,6 +69,62 @@ func withBuiltDaemon(t *testing.T) {
 	t.Cleanup(func() { resolveExecutable = prev })
 }
 
+// startTestDaemon retains the child so even a failed startup or assertion is
+// followed by process exit before t.TempDir removes the store and daemon.log.
+// The returned function requires a successful exit; cleanup only kills a child
+// left behind by a failed test.
+func startTestDaemon(t *testing.T, dir string, idleExit time.Duration) func() {
+	t.Helper()
+	log, err := os.Create(filepath.Join(dir, "daemon.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cmd := exec.CommandContext(ctx, buildBinary(t), "daemon", "run",
+		"--dir", dir, "--idle-exit", idleExit.String())
+	cmd.Stdout, cmd.Stderr = log, log
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return func() {
+		t.Helper()
+		select {
+		case <-done:
+			if waitErr != nil {
+				t.Fatalf("daemon exited with error: %v", waitErr)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("daemon did not exit within 15s")
+		}
+	}
+}
+
+func dialTestDaemon(t *testing.T, dir string, timeout time.Duration) *Client {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cl, err := rpc.Dial(rpc.DialOptions{DataDir: dir}); err == nil {
+			return &Client{Client: cl, dataDir: dir}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	log, _ := os.ReadFile(filepath.Join(dir, "daemon.log"))
+	t.Fatalf("daemon did not come up within %s\n%s", timeout, log)
+	return nil
+}
+
 // TestConnect_SpawnsDaemonAndWrites is the end-to-end issue #8 acceptance
 // test: with no daemon running, Connect must start one and a write must
 // round-trip through it.
@@ -115,16 +171,12 @@ func TestConcurrentClients_ThroughDaemon(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
 	}
-	withBuiltDaemon(t)
 	dir := t.TempDir()
 	ctx := context.Background()
+	wait := startTestDaemon(t, dir, DefaultIdleExit)
 
-	// First connection spawns the daemon; keep it open so the daemon stays
-	// up for the whole test.
-	lead, err := Connect(dir)
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	// Keep a connection open so the daemon stays up for the whole test.
+	lead := dialTestDaemon(t, dir, connectBudget)
 	defer func() { _ = lead.Close() }()
 
 	const clients = 4
@@ -166,7 +218,10 @@ func TestConcurrentClients_ThroughDaemon(t *testing.T) {
 		t.Fatalf("got %d facts, want %d (lost writes = lock contention)", len(facts), clients*writes)
 	}
 
-	_ = lead.Shutdown()
+	if err := lead.Shutdown(); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	wait()
 }
 
 // TestIdleExit verifies a client-spawned daemon reaps itself after the idle
@@ -177,38 +232,10 @@ func TestIdleExit(t *testing.T) {
 	}
 	dir := t.TempDir()
 
-	// Run the daemon directly with a tiny idle window in a goroutine.
-	done := make(chan error, 1)
-	go func() {
-		done <- Run(RunOptions{
-			DataDir:  dir,
-			IdleExit: 1 * time.Second,
-			Logf:     func(string, ...any) {},
-		})
-	}()
-
-	// Wait for it to come up.
-	deadline := time.Now().Add(5 * time.Second)
-	var c *Client
-	for time.Now().Before(deadline) {
-		if cl, err := rpc.Dial(rpc.DialOptions{DataDir: dir}); err == nil {
-			c = &Client{Client: cl, dataDir: dir}
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if c == nil {
-		t.Fatal("daemon did not come up")
-	}
+	wait := startTestDaemon(t, dir, time.Second)
+	c := dialTestDaemon(t, dir, 5*time.Second)
 	// Disconnect so the idle clock can start.
 	_ = c.Close()
 
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("daemon exited with error: %v", err)
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("daemon did not idle-exit within 15s")
-	}
+	wait()
 }
