@@ -888,16 +888,26 @@ func TestInstructionsBlock_DocsAnchors(t *testing.T) {
 			t.Errorf("docs/api-stability.md missing structuredContent row %q", row)
 		}
 	}
+
+	// (f) docs/api-stability.md documents the optional weak-match feedback key
+	// on the plain memory_search structuredContent payload (v0.18.0).
+	if !strings.Contains(stabilityDoc, "| `memory_search` | `{\"agent_id\", \"query\", \"count\", \"facts\", \"feedback\"?}`") {
+		t.Error("docs/api-stability.md memory_search structuredContent row must mark `feedback` optional")
+	}
+	if !strings.Contains(stabilityDoc, "weak-match vocabulary block") {
+		t.Error("docs/api-stability.md must explain what `feedback` carries")
+	}
 }
 
 // extractReflectRawSchema returns the JSON literal assigned to
 // reflectTool.RawInputSchema in server.go source.
 func extractReflectRawSchema(t *testing.T, src string) string {
 	t.Helper()
-	anchor := src[strings.Index(src, "RawInputSchema"):]
-	if anchor == "" {
-		t.Fatal("RawInputSchema assignment missing from internal/mcp/server.go")
+	idx := strings.Index(src, "reflectTool.RawInputSchema")
+	if idx < 0 {
+		t.Fatal("reflectTool.RawInputSchema assignment missing from internal/mcp/server.go")
 	}
+	anchor := src[idx:]
 	open := strings.Index(anchor, "`")
 	if open < 0 {
 		t.Fatal("RawInputSchema JSON literal missing opening backtick")

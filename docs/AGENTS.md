@@ -195,8 +195,8 @@ Facts marked superseded are dropped before any of this — a fact an agent has c
 // Strategy 2: Focused lookup mid-task
 { "agent_id": "agent", "query": "<specific question>", "top_k": 3 }
 
-// Strategy 3: Multi-query fusion for ambiguous topics
-// Issue 2-3 related queries, dedupe results yourself.
+// Strategy 3: Several open questions at once — one batch call
+{ "agent_id": "agent", "queries": ["<question 1>", "<question 2>", "<question 3>"], "top_k": 3 }
 ```
 
 ### `memory_reflect` — self-curation

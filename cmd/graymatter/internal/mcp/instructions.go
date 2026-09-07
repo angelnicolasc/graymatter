@@ -38,7 +38,7 @@ Session protocol:
 1. Resuming work? Call checkpoint_resume first.
 2. Before your first substantive reply, inspect only the newest hook block available for the session's initial turn; ignore examples and older turns. Its marker names agent_id. If that id differs from yours, run both project and __shared__ searches because shared duplicates may appear under ## Memory. If ids match, reuse each non-empty section and search every missing scope.
 3. Hooks and MCP are complementary. Use memory_search or memory_search_batch for focused, ad-hoc lookups.
-4. Store durable preferences, decisions, corrections, and milestones with memory_reflect action=add.
+4. Store durable preferences, decisions, and milestones with memory_add; correct stale facts with memory_reflect action=update.
 5. Replace stale facts with memory_reflect action=update; never leave both versions live.
 6. Before context gets heavy or you stop mid-task, call checkpoint_save.
 7. A weak-match note means a vocabulary gap: reformulate once with its terms; when your wording differs from the store's, declare the bridge with %s before trying more synonyms.
