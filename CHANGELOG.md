@@ -33,6 +33,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **`memory_reflect update` carries the guarantee across direct and daemon-backed stores.** The corrected fact's tombstone receives the exact ID returned by its replacement write, preserving revision lineage through overlapping writes in the same `agent_id`.
 
+- **`memory_reflect` now applies `forget`, `update`, `pin` and `unpin` to every eligible exact-text match in the selected namespace.** Forgetting a fact stored twice previously reported success while leaving a copy recallable; retired revision receipts now stay intact.
+
 - **Claude Code hooks now launch GrayMatter with structured `command` + `args`.** Installed hooks no longer pass executable paths through a shell, so paths containing spaces or shell metacharacters work unchanged on every platform with Claude Code 2.1.139 or later. Reinstalling migrates both the prior string form and the pre-marker legacy form; uninstall and drift detection continue to recognize them.
 
 - **Hook scope management and diagnostics now match their public contract.** `hooks uninstall --all` and `hooks doctor --all` cover project and global settings, while the unsafe `hooks install --all` form is rejected to prevent duplicate hook execution. `hooks doctor` reports an uninitialised store without creating it, including when settings are missing or malformed.
