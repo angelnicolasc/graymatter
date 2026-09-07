@@ -266,11 +266,11 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		victim, ok := findByText(facts, target)
-		if !ok {
+		victims := findByText(facts, target, false)
+		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
-		oldText = victim.Text
+		oldText = target
 
 		// Write the correction before retiring what it corrects. The previous
 		// order zeroed the old fact's weight first, so a failing Remember left
@@ -291,8 +291,10 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 
 		// Point the tombstone at the replacement so the correction can be
 		// followed later, rather than only showing that something was retired.
-		if err := s.supersedeFact(agentID, victim, replacement.ID); err != nil {
-			return toolError(fmt.Sprintf("supersede old fact: %v", err))
+		for _, victim := range victims {
+			if err := s.supersedeFact(agentID, victim, replacement.ID); err != nil {
+				return toolError(fmt.Sprintf("supersede old fact: %v", err))
+			}
 		}
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
 
@@ -310,16 +312,18 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		victim, ok := findByText(facts, wanted)
-		if !ok {
+		victims := findByText(facts, wanted, false)
+		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
 		}
-		oldText = victim.Text
+		oldText = wanted
 
 		// Nothing replaces this one, so the tombstone records that an agent
 		// decided to drop it.
-		if err := s.supersedeFact(agentID, victim, memory.SupersededByAgent); err != nil {
-			return toolError(fmt.Sprintf("suppress fact: %v", err))
+		for _, victim := range victims {
+			if err := s.supersedeFact(agentID, victim, memory.SupersededByAgent); err != nil {
+				return toolError(fmt.Sprintf("suppress fact: %v", err))
+			}
 		}
 		resultMsg = fmt.Sprintf("Fact suppressed for agent %q.", agentID)
 
@@ -350,23 +354,22 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if err != nil {
 			return toolError(fmt.Sprintf("list facts: %v", err))
 		}
-		victim, ok := findByText(facts, wanted)
-		if !ok {
+		// Pin only live copies. Unpin also clears retired copies, preserving
+		// the existing flag-cleanup behavior without changing their receipts.
+		victims := findByText(facts, wanted, action == "unpin")
+		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
 		}
-		// Pinning a retired fact would promise permanence for something that
-		// is no longer live; unpinning one is harmless flag hygiene.
-		if action == "pin" && victim.IsSuperseded() {
-			return toolError("cannot pin a superseded fact")
-		}
-		victim.Pinned = action == "pin"
-		if victim.Pinned {
-			victim.PinnedAt = time.Now().UTC()
-		} else {
-			victim.PinnedAt = time.Time{}
-		}
-		if err := s.backend.UpdateFact(agentID, victim); err != nil {
-			return toolError(fmt.Sprintf("%s failed: %v", action, err))
+		for _, victim := range victims {
+			victim.Pinned = action == "pin"
+			if victim.Pinned {
+				victim.PinnedAt = time.Now().UTC()
+			} else {
+				victim.PinnedAt = time.Time{}
+			}
+			if err := s.backend.UpdateFact(agentID, victim); err != nil {
+				return toolError(fmt.Sprintf("%s failed: %v", action, err))
+			}
 		}
 		resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay, pruning and summarisation.", action, agentID)
 
@@ -386,14 +389,18 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	return toolStructured(reflectResult{Action: action, Agent: agentID, OK: true}, resultMsg)
 }
 
-// findByText returns the first fact whose text matches exactly.
-func findByText(facts []memory.Fact, text string) (memory.Fact, bool) {
+// findByText selects every exact match from one List snapshot: acting on just
+// one duplicate leaves the same belief live or with inconsistent pin state.
+// Retired receipts are excluded unless unpin requests flag cleanup; later
+// writes of the same text are separate facts, outside this operation's snapshot.
+func findByText(facts []memory.Fact, text string, includeRetired bool) []memory.Fact {
+	var matches []memory.Fact
 	for _, f := range facts {
-		if f.Text == text {
-			return f, true
+		if f.Text == text && (includeRetired || !f.IsSuperseded()) {
+			matches = append(matches, f)
 		}
 	}
-	return memory.Fact{}, false
+	return matches
 }
 
 // supersedeFact retires a fact: it is tombstoned so Recall skips it from

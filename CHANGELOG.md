@@ -23,6 +23,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`memory_reflect` now applies `forget`, `update`, `pin` and `unpin` to every eligible exact-text match in the selected namespace.** Forgetting a fact stored twice previously reported success while leaving a copy recallable; retired revision receipts now stay intact.
+
 - **New hook sessions no longer inherit another window's injection throttle.** Identical memory blocks remain suppressed within one identified session, while a different or unidentified session receives its own context; the best-effort cache is bounded to its most recently recorded sessions.
 
 - **`Store.Revise` now binds replacement lineage to the identity returned by its committed write.** The returned ID and every retired fact's `SupersededBy` reference stay anchored to that exact replacement, including when another write commits concurrently in the same namespace.

@@ -2,12 +2,16 @@ package mcp
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // newTestServer returns an MCP Server backed by a real Memory in a temp dir,
@@ -343,5 +347,175 @@ func TestMemoryReflect_UpdateSupersedes(t *testing.T) {
 	}
 	if w := factWeight(t, mem, "a1", newFact); w <= 0 {
 		t.Errorf("new fact weight = %v, want > 0", w)
+	}
+}
+
+func TestMemoryReflect_AllExactMatches(t *testing.T) {
+	t.Setenv("GRAYMATTER_OLLAMA_URL", "disabled://")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	for _, transport := range []string{"direct", "daemon_rpc"} {
+		t.Run(transport, func(t *testing.T) {
+			for _, action := range []string{"forget", "update", "pin", "unpin", "update_same_text"} {
+				t.Run(action, func(t *testing.T) {
+					s, _ := newTestServer(t)
+					if transport == "daemon_rpc" {
+						s = New(newDaemonReflectBackend(t), "test")
+					}
+					ctx := context.Background()
+					const text = "the staging database is phoenix-staging.eu-west-1"
+					replacement := "the staging database is phoenix-staging.eu-west-2"
+					if action == "update_same_text" {
+						action, replacement = "update", text
+					}
+					for _, value := range []string{text, text, text, strings.ToUpper(text), text + " "} {
+						mustAdd(t, s, "duplicates", value)
+					}
+					mustAdd(t, s, "other", text)
+					before, err := s.backend.List("duplicates")
+					if err != nil || len(before) != 5 {
+						t.Fatalf("seed: %v / %d facts", err, len(before))
+					}
+					retiredID := ""
+					for i := range before {
+						f := &before[i]
+						if f.Text != text {
+							continue
+						}
+						if retiredID == "" {
+							retiredID, f.SupersededBy = f.ID, "historical-replacement"
+						}
+						f.Pinned = action == "unpin"
+						if f.Pinned {
+							f.PinnedAt = time.Unix(1, 0).UTC()
+						}
+						if err := s.backend.UpdateFact("duplicates", *f); err != nil {
+							t.Fatal(err)
+						}
+					}
+					res, err := s.handleMemoryReflect(ctx, reflectReq(map[string]any{
+						"action": action, "agent_id": "duplicates", "target": text, "text": replacement,
+					}))
+					if err != nil || res.IsError {
+						t.Fatalf("%s: %v / %s", action, err, resultText(t, res))
+					}
+					after, err := s.backend.List("duplicates")
+					if err != nil {
+						t.Fatal(err)
+					}
+					byID := make(map[string]memory.Fact)
+					replacementID := ""
+					for _, f := range after {
+						byID[f.ID] = f
+						if f.Text == replacement && !f.IsSuperseded() {
+							if replacementID != "" {
+								t.Fatal("update wrote more than one replacement")
+							}
+							replacementID = f.ID
+						}
+					}
+					if action == "update" && replacementID == "" {
+						t.Fatal("update did not write a live replacement")
+					}
+					for _, f := range before {
+						want := f
+						if f.Text == text && (f.ID != retiredID || action == "unpin") {
+							switch action {
+							case "forget":
+								want.SupersededBy = memory.SupersededByAgent
+							case "update":
+								want.SupersededBy = replacementID
+							case "pin":
+								want.Pinned, want.PinnedAt = true, byID[f.ID].PinnedAt
+								if want.PinnedAt.IsZero() {
+									t.Error("pin omitted its timestamp")
+								}
+							case "unpin":
+								want.Pinned, want.PinnedAt = false, time.Time{}
+							}
+						}
+						if !reflect.DeepEqual(byID[f.ID], want) {
+							t.Errorf("fact %s: got %+v, want %+v", f.ID, byID[f.ID], want)
+						}
+					}
+					other, err := s.backend.List("other")
+					if err != nil || len(other) != 1 || other[0].IsSuperseded() || other[0].Pinned {
+						t.Fatalf("other namespace changed: %v / %+v", err, other)
+					}
+					got := search(t, s, "duplicates", "staging database phoenix")
+					if (action == "forget" || action == "update") && replacement != text && strings.Contains(got, ". "+text+"\n") {
+						t.Fatalf("retired text is still recallable: %s", got)
+					}
+					if action == "update" && !strings.Contains(got, replacement) {
+						t.Fatalf("replacement is not recallable: %s", got)
+					}
+					if action == "forget" || (action == "update" && replacement != text) {
+						res, err = s.handleMemoryReflect(ctx, reflectReq(map[string]any{
+							"action": action, "agent_id": "duplicates", "target": text, "text": replacement,
+						}))
+						if err != nil || !res.IsError {
+							t.Fatalf("retired-only target must fail: %v / %+v", err, res)
+						}
+						retried, err := s.backend.List("duplicates")
+						if err != nil || len(retried) != len(after) {
+							t.Fatalf("retired-only target created a fact: %v / %+v", err, retried)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+type reflectWriteFailureBackend struct {
+	*DirectBackend
+	updates         int
+	failReplacement bool
+}
+
+func (b *reflectWriteFailureBackend) UpdateFact(agentID string, f memory.Fact) error {
+	b.updates++
+	if b.updates == 2 {
+		return errors.New("injected write failure")
+	}
+	return b.DirectBackend.UpdateFact(agentID, f)
+}
+
+func (b *reflectWriteFailureBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	if b.failReplacement {
+		return memory.Fact{}, errors.New("injected replacement failure")
+	}
+	return b.DirectBackend.PutReturningFact(ctx, agentID, text)
+}
+
+func TestMemoryReflect_DuplicateWriteFailure(t *testing.T) {
+	for _, action := range []string{"forget", "update", "pin", "unpin", "replacement_failure"} {
+		t.Run(action, func(t *testing.T) {
+			s, _ := newTestServer(t)
+			mustAdd(t, s, "a1", staleFact)
+			mustAdd(t, s, "a1", staleFact)
+			backend := &reflectWriteFailureBackend{DirectBackend: s.backend.(*DirectBackend), failReplacement: action == "replacement_failure"}
+			s.backend = backend
+			if backend.failReplacement {
+				action = "update"
+			}
+			res, err := s.handleMemoryReflect(context.Background(), reflectReq(map[string]any{
+				"action": action, "agent_id": "a1", "target": staleFact, "text": freshFact,
+			}))
+			if err != nil || !res.IsError || !strings.Contains(resultText(t, res), "injected") {
+				t.Fatalf("write failure reported success: %v / %+v", err, res)
+			}
+			wantUpdates, wantFacts := 2, 2
+			if backend.failReplacement {
+				wantUpdates = 0
+			} else if action == "update" {
+				wantFacts++ // replacement must exist before any victim is retired
+			}
+			facts, err := backend.List("a1")
+			if err != nil || len(facts) != wantFacts || backend.updates != wantUpdates {
+				t.Fatalf("failure state: err=%v facts=%d updates=%d; want %d/%d", err, len(facts), backend.updates, wantFacts, wantUpdates)
+			}
+		})
 	}
 }
