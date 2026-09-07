@@ -8,7 +8,7 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 
 | Tool | Required params | Optional |
 |------|----------------|----------|
-| `memory_search` | `agent_id`, `query` | `top_k` (default `8`) |
+| `memory_search` | `agent_id`, `query` | `top_k` (default `8`), `explain` (boolean, default `false`) |
 | `memory_search_batch` | `agent_id`, `queries` | `top_k` (default `8`) |
 | `memory_add` | `agent_id`, `text` | — |
 | `memory_alias` | `agent_id`, `term`, `equivalents` | — |

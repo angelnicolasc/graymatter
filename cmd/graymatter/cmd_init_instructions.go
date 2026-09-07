@@ -95,14 +95,14 @@ Facts every agent in the project should see go to the reserved id ~__shared__~.
 | You fix a non-trivial bug or find a workaround | ~memory_add~ |
 | The user corrects you | ~memory_reflect~ with ~action="update"~ |
 | A stored fact becomes wrong | ~memory_reflect~ with ~action="update"~ or ~action="forget"~ (never ~"unpin"~) |
-| An existing stored fact becomes a standing rule | ~memory_reflect~ with ~action="pin"~ |
+| The user or authoritative project policy declares a stored fact permanent | ~memory_reflect~ with ~action="pin"~ |
 | A pinned fact is still true but no longer needs permanence | ~memory_reflect~ with ~action="unpin"~ |
 | A search comes back with a **weak-match note** | Reformulate **once** with the note's suggested terms; if your wording and the store's differ, declare it with ~ALIAS_TOOL~ before trying more synonyms |
 
 Prefer durable, actionable, atomic conclusions; skip low-signal, duplicate,
-or transient information. A missed fact costs the same mistake twice, but
-every stored fact costs retrieval noise and decay upkeep, so pin the few
-that must never decay.
+or transient information. Stored facts add retrieval/decay cost. Pin only
+facts explicitly designated permanent by the user or authoritative project
+guidance.
 
 ### The tools
 

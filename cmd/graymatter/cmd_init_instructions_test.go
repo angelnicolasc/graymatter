@@ -576,21 +576,28 @@ func TestInstructionsBlockBudget(t *testing.T) {
 	}
 }
 
-// TestInstructionsBlock_ToolCensusContract pins the generated briefing against
-// the MCP surface it teaches (issues #111/#112). The live tools/list side is
-// pinned by TestToolDefinitionContract in internal/mcp; this pins the block
-// side to the same contract without hardcoding the tool list: tool names are
-// derived from the MCP registrations in internal/mcp/server.go, the reflect
-// anyOf shape is read from the real RawInputSchema JSON, and the handshake
-// briefing is read from internal/mcp/instructions.go. Adding a new tool and
-// updating the MCP contract test turns this red while the briefing is stale.
-// Anchors, not prose: wording may evolve, the contract may not drift.
-func TestInstructionsBlock_ToolCensusContract(t *testing.T) {
+// TestInstructionsBlock_ToolCensusAndReflectAnchors pins the generated briefing
+// against the MCP surface it teaches (issues #111/#112). The live tools/list
+// side is pinned by TestToolDefinitionContract in internal/mcp; this pins the
+// block side to the same contract without hardcoding the tool list: tool names
+// are derived from the MCP registrations in internal/mcp/server.go, the
+// reflect anyOf shape is read from the real RawInputSchema JSON, and the
+// handshake briefing is read from internal/mcp/instructions.go. Adding a new
+// tool and updating the MCP contract test turns this red while the briefing is
+// stale.
+//
+// Scope note: the structural/schema parts (tool census, RawInputSchema
+// properties/required/anyOf/oneOf, deprecation marker, precedence wording) are
+// checked directly against the real schema and registrations. The prose
+// assertions on the generated block and handshake are focused regression
+// anchors, not a general semantic diff of the whole briefing — wording may
+// evolve, the contract may not drift.
+func TestInstructionsBlock_ToolCensusAndReflectAnchors(t *testing.T) {
 	block := instructionsBlock()
 
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("runtime.Caller cannot locate test file; cross-surface check needs its own directory")
+		t.Fatal("runtime.Caller cannot locate test file; surface check needs its own directory")
 	}
 	base := filepath.Dir(thisFile)
 	serverSrc, err := os.ReadFile(filepath.Join(base, "internal", "mcp", "server.go"))
@@ -703,11 +710,11 @@ func TestInstructionsBlock_ToolCensusContract(t *testing.T) {
 	if row := "| `memory_reflect` | `action`, `agent_id`"; !strings.Contains(block, row) {
 		t.Errorf("reflect row does not spell `agent_id` canonical: %q", row)
 	}
-	if !strings.Contains(block, "deprecated alias") {
+	if !strings.Contains(block, "deprecated `agent` alias") {
 		t.Error("generated block never says `agent` is a deprecated alias")
 	}
-	if !strings.Contains(block, "at least one") {
-		t.Error("generated block must say at least one of agent_id/agent is required (anyOf allows both)")
+	if !strings.Contains(block, "also accepts") {
+		t.Error("generated block must say `agent` is also accepted (canonical agent_id, deprecated alias)")
 	}
 	if !strings.Contains(block, "agent_id` wins") && !strings.Contains(block, "agent_id wins") {
 		t.Error("generated block must say `agent_id` wins when both are set")
@@ -743,12 +750,17 @@ func TestInstructionsBlock_ToolCensusContract(t *testing.T) {
 	}
 }
 
-// TestInstructionsBlock_DocsContract pins the focused docs surface for issue
+// TestInstructionsBlock_DocsAnchors pins the focused docs surface for issue
 // #112: docs/AGENTS.md and docs/api-stability.md must teach the same
 // seven-tool census and canonical reflect contract as the generated block and
-// the MCP schema. Anchors only, no full-prose semantic diff.
-// A missing docs file fails; wrong content fails.
-func TestInstructionsBlock_DocsContract(t *testing.T) {
+// the MCP schema, and the root AGENTS.md tool table must match the schema.
+//
+// Scope note: these are focused regression anchors, not a general semantic
+// diff of the documentation. Structural facts (tool rows, census wording,
+// schema-derived contract wording, structuredContent payload rows) are
+// checked directly; prose elsewhere in the docs is out of scope. A missing
+// authoritative docs file fails; wrong content fails.
+func TestInstructionsBlock_DocsAnchors(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller cannot locate test file; docs check needs its own directory")
@@ -842,6 +854,39 @@ func TestInstructionsBlock_DocsContract(t *testing.T) {
 	}
 	if !found {
 		t.Error("docs/AGENTS.md memory_search row must mention `explain`")
+	}
+
+	// (d) Root AGENTS.md tool table matches the schema: the memory_search row
+	// must document the optional explain parameter (default false).
+	rootAgentsPath := filepath.Join(base, "..", "..", "AGENTS.md")
+	rootAgentsRaw, err := os.ReadFile(rootAgentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Fatalf("docs contract violated: %s absent", rootAgentsPath)
+		}
+		t.Fatalf("read root AGENTS.md: %v", err)
+	}
+	rootAgentsDoc := string(rootAgentsRaw)
+	rootFound := false
+	for _, line := range strings.Split(rootAgentsDoc, "\n") {
+		if strings.Contains(line, "memory_search") && strings.Contains(line, "explain") {
+			rootFound = true
+			break
+		}
+	}
+	if !rootFound {
+		t.Error("root AGENTS.md memory_search row must mention `explain`")
+	}
+
+	// (e) docs/api-stability.md structuredContent payloads cover the batch and
+	// alias tools (their success payloads are part of the wire contract).
+	for _, row := range []string{
+		"| `memory_search_batch` | `{\"agent_id\", \"count\", \"merged\", \"per_query\"}` |",
+		"| `memory_alias` | `{\"agent_id\", \"term\", \"equivalents\", \"stored\"}` |",
+	} {
+		if !strings.Contains(stabilityDoc, row) {
+			t.Errorf("docs/api-stability.md missing structuredContent row %q", row)
+		}
 	}
 }
 

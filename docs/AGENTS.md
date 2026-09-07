@@ -359,7 +359,10 @@ Facts decay. A fact you never recall will eventually be pruned.
 	//     "text": "Critical security policy: …" }}
 	// ```
 	// A pinned fact never decays and is never pruned or summarised away;
-	// unpin when it stops being true.
+	// unpin only restores normal decay — it does not retire the fact. A fact
+	// that is wrong or superseded is fixed with memory_reflect update (or
+	// forget); unpin is for a fact that is still true but no longer needs
+	// permanence.
 ```
 
 ### Cleanup schedule

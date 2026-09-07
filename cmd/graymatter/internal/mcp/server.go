@@ -346,9 +346,8 @@ func readOnlyTool() mcp.ToolOption {
 // call stores a new record.
 //
 // memory_reflect passes destructive=false even though its forget/update
-// actions can retire a fact. The annotation is per-tool and its six actions
-// never hard-delete (retiring actions leave a tombstone), so advertising
-// destructive would push hosts
+// actions can retire a fact. The annotation is per-tool and three of its four
+// actions are purely additive, so advertising destructive would push hosts
 // into gating every self-edit behind an approval prompt — including plain
 // adds — which is how unattended agents quietly stop calling the tool. The
 // guardrail lives in the handler instead, where it is testable: forget
