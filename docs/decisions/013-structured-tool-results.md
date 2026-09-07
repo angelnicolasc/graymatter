@@ -57,6 +57,21 @@ This follows the [MCP tool error and output-schema contract](https://modelcontex
 structured results must match the advertised schema; execution errors can
 carry text with `isError=true`.
 
+### Error classification (#118)
+
+Only `errors.Is(err, session.ErrNoCheckpoint)` selects the historical absence
+notice. Other failures retain their cause under `checkpoint resume error`.
+Checkpoint reads propagate decoding errors instead of silently discarding
+records and presenting incomplete history as a successful or empty resume.
+
+The daemon transports absence in an opt-in `NotFound` response field, because
+`net/rpc` serializes returned errors as strings and loses sentinel identity.
+`ReportNotFound` in the request protects older clients: without the opt-in,
+absence still returns an RPC error. A new client talking to an older daemon
+preserves its untyped error as an operational failure; restarting that daemon
+with the updated binary enables typed absence. No error-text matching or
+general-purpose error protocol is introduced.
+
 ## Consequences
 
 - Success text-parsing clients are unaffected by construction: the text content is

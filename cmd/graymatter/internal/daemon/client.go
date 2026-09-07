@@ -172,8 +172,11 @@ func (c *Client) CheckpointLoad(agentID, checkpointID string) (*session.Checkpoi
 // CheckpointResume retrieves the most recent checkpoint for agentID.
 func (c *Client) CheckpointResume(agentID string) (*session.Checkpoint, error) {
 	var resp CheckpointResumeResponse
-	if err := c.hostCall("CheckpointResume", &CheckpointResumeRequest{AgentID: agentID}, &resp); err != nil {
+	if err := c.hostCall("CheckpointResume", &CheckpointResumeRequest{AgentID: agentID, ReportNotFound: true}, &resp); err != nil {
 		return nil, err
+	}
+	if resp.NotFound {
+		return nil, fmt.Errorf("%w for agent %q", session.ErrNoCheckpoint, agentID)
 	}
 	return &resp.CP, nil
 }

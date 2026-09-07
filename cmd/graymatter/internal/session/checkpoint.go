@@ -6,6 +6,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -15,6 +16,10 @@ import (
 )
 
 var bucketSessions = []byte("sessions")
+
+// ErrNoCheckpoint means the agent has no saved checkpoints. Storage and
+// decoding failures do not match this sentinel.
+var ErrNoCheckpoint = errors.New("no checkpoints")
 
 // Message is a single turn in an agent conversation, stored in a checkpoint.
 type Message struct {
@@ -77,7 +82,8 @@ func Load(db *bolt.DB, agentID, checkpointID string) (*Checkpoint, error) {
 	return &cp, nil
 }
 
-// List returns all checkpoints for agentID sorted newest first.
+// List returns all checkpoints for agentID sorted newest first. An unreadable
+// checkpoint is an error: silently skipping it could resume an older state.
 func List(db *bolt.DB, agentID string) ([]Checkpoint, error) {
 	var checkpoints []Checkpoint
 	err := db.View(func(tx *bolt.Tx) error {
@@ -86,10 +92,10 @@ func List(db *bolt.DB, agentID string) ([]Checkpoint, error) {
 		if b == nil {
 			return nil
 		}
-		return b.ForEach(func(_, v []byte) error {
+		return b.ForEach(func(k, v []byte) error {
 			var cp Checkpoint
 			if err := json.Unmarshal(v, &cp); err != nil {
-				return nil // skip corrupt
+				return fmt.Errorf("decode checkpoint %q for agent %q: %w", k, agentID, err)
 			}
 			checkpoints = append(checkpoints, cp)
 			return nil
@@ -111,7 +117,7 @@ func Latest(db *bolt.DB, agentID string) (*Checkpoint, error) {
 		return nil, err
 	}
 	if len(cps) == 0 {
-		return nil, fmt.Errorf("no checkpoints for agent %q", agentID)
+		return nil, fmt.Errorf("%w for agent %q", ErrNoCheckpoint, agentID)
 	}
 	return &cps[0], nil
 }

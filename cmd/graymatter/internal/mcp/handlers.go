@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -194,7 +195,10 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
-		return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
+		if errors.Is(err, session.ErrNoCheckpoint) {
+			return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
+		}
+		return toolError(fmt.Sprintf("checkpoint resume error: %v", err))
 	}
 
 	stateJSON, _ := json.MarshalIndent(cp.State, "", "  ")

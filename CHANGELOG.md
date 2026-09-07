@@ -11,6 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 
 - **`checkpoint_resume` errors now reach strict MCP clients.** The invalid structured error payload made clients reject the entire response, leaving callers without a checkpoint or an explanation. Errors now carry text with `isError`, while successful results retain their schema and prose ([#117](https://github.com/angelnicolasc/graymatter/issues/117)).
+- **Checkpoint resume distinguishes absence from storage and daemon failures.** Only an empty checkpoint history reports not-found, including through the daemon; unreadable checkpoint records now fail explicitly instead of silently resuming older state or appearing absent ([#118](https://github.com/angelnicolasc/graymatter/issues/118)).
 
 ## [0.19.0] - 2026-09-06
 
