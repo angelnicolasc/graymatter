@@ -111,13 +111,13 @@ that must never decay.
 | ~memory_search~ | ~agent_id~, ~query~ | ~top_k~ (default 8), ~explain~ |
 | ~memory_search_batch~ | ~agent_id~, ~queries~ | ~top_k~ (default 8) |
 | ~memory_add~ | ~agent_id~, ~text~ | |
-| ~memory_reflect~ | ~action~, ~agent_id~ (~agent~ is a deprecated alias) | ~text~, ~target~ |
-| ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | |
+| ~memory_reflect~ | ~action~, ~agent_id~ (or deprecated ~agent~ alias) | ~text~, ~target~ (required by action) |
+| ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | teach the store a vocabulary bridge |
 | ~checkpoint_save~ | ~agent_id~ | ~state~ |
 | ~checkpoint_resume~ | ~agent_id~ | |
 
-⚠ ~memory_reflect~ takes ~agent_id~ like every other tool; ~agent~ is only a
-deprecated alias. Pass at least one; when both are set ~agent_id~ wins.
+~agent_id~ is canonical for every tool. ~memory_reflect~ also accepts the
+deprecated ~agent~ alias; ~agent_id~ wins when both are set.
 
 ### The store learns its own vocabulary
 

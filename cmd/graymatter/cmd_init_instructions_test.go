@@ -30,9 +30,25 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "memory_reflect", "`agent_id` like every other tool", "memory_alias", "memory_search_batch", "action=\"pin\"", "weak-match", "hook recall ran"} {
+	for _, want := range []string{
+		instrBeginMarker, instrEndMarker, "weak-match", "hook recall ran",
+		"| `memory_search` | `agent_id`, `query` | `top_k` (default 8), `explain` |",
+		"| `memory_search_batch` | `agent_id`, `queries` | `top_k` (default 8) |",
+		"| `memory_add` | `agent_id`, `text` | |",
+		"| `memory_reflect` | `action`, `agent_id` (or deprecated `agent` alias) | `text`, `target` (required by action) |",
+		"| `memory_alias` | `agent_id`, `term`, `equivalents` | teach the store a vocabulary bridge |",
+		"| `checkpoint_save` | `agent_id` | `state` |",
+		"| `checkpoint_resume` | `agent_id` | |",
+		"`agent_id` is canonical for every tool",
+		"`agent_id` wins when both are set",
+	} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"`agent`, not `agent_id`", "fails validation", "exactly one"} {
+		if strings.Contains(string(data), unwanted) {
+			t.Errorf("created file contains obsolete contract %q", unwanted)
 		}
 	}
 }
