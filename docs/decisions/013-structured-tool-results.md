@@ -34,22 +34,37 @@ content:
 | `checkpoint_resume` | `{id, created_at, state?, message_count?}` |
 | `memory_reflect` | `{action, agent, ok: true}` |
 
-The one error type worth a contract gets a typed payload: `checkpoint_resume`
-with no checkpoint returns `isError=true` with
-`{error: "not_found", agent_id}` as structured content and the historical
-prose as text. Validation errors stay prose-only: they are misuse messages,
-not part of the result contract, and typing every misuse path would freeze
-error strings into a public schema for no consumer benefit.
+Errors return `isError=true` with text content only; `structuredContent` is
+reserved for successful results matching the declared output schema.
+
+### Amendment — 2026-09-07 (#117)
+
+The original typed `checkpoint_resume` error (`{error: "not_found", agent_id}`)
+did not conform to its success-only output schema. Strict clients rejected
+the entire response, hiding both the error code and the explanation. The
+original test checked that payload against a separate Go type instead of the
+schema advertised in `tools/list`, so it protected the defect.
+
+Resume errors now use the same text-only error helper as other tools. This
+removes the invalid structured error payload while retaining `isError`, the
+historical not-found prose, and the success schema and prose unchanged. It is
+an intentional compatibility correction: consumers of the old error object
+must use the tool-error result instead. Widening the success schema or turning
+absence into success would change a larger, working contract. A future
+machine-readable absence result requires a separate contract decision.
+
+This follows the [MCP tool error and output-schema contract](https://modelcontextprotocol.io/specification/2025-06-18/server/tools):
+structured results must match the advertised schema; execution errors can
+carry text with `isError=true`.
 
 ## Consequences
 
-- Text-parsing clients are unaffected by construction: the text content is
+- Success text-parsing clients are unaffected by construction: the text content is
   unchanged, and the contract tests pin it (`handlers_test.go` asserts the
   same strings as before the migration).
 - `structured_contract_test.go` validates every success payload against its
   declared schema (key subset, required presence, primitive/union type match)
-  and the typed not-found payload — schema drift or payload drift is a CI
-  failure.
+  and asserts that resume errors omit structured content on the wire.
 - The wire contract this decision introduces — tool names, parameter names,
   schemas, and `structuredContent` keys — is covered by the compatibility
   promise in [api-stability.md](../api-stability.md#mcp-wire-contract-stable-within-the-v0x-series).

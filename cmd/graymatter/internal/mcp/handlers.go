@@ -194,12 +194,7 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
-		// Typed not-found: structuredContent carries the machine-readable
-		// error code, content keeps the historical prose, isError marks it.
-		notice := fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err)
-		res := mcp.NewToolResultStructured(checkpointResumeNotFound{Error: "not_found", AgentID: agentID}, notice)
-		res.IsError = true
-		return res, nil
+		return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
 	}
 
 	stateJSON, _ := json.MarshalIndent(cp.State, "", "  ")

@@ -15,8 +15,7 @@ import (
 //     subset of the schema properties and which contains every required
 //     schema property (omitempty fields may be absent, nothing else);
 //  3. every present key has the JSON type the schema declares;
-//  4. the not-found resume error is typed, isError, and its payload matches
-//     its own declared shape.
+//  4. resume errors set isError and omit structuredContent on the wire.
 
 type schemaShape struct {
 	Type       string `json:"type"`
@@ -126,7 +125,7 @@ func TestStructuredContentMatchesOutputSchema(t *testing.T) {
 	}
 }
 
-func TestCheckpointResumeNotFoundIsTypedError(t *testing.T) {
+func TestCheckpointResumeNotFoundIsTextError(t *testing.T) {
 	s, _ := newTestServer(t)
 	res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{"agent_id": "sc-ghost"}))
 	if err != nil {
@@ -136,15 +135,22 @@ func TestCheckpointResumeNotFoundIsTypedError(t *testing.T) {
 		t.Fatal("not-found must set isError")
 	}
 
-	payload, ok := res.StructuredContent.(checkpointResumeNotFound)
-	if !ok {
-		t.Fatalf("structured content is %T, want checkpointResumeNotFound", res.StructuredContent)
+	if res.StructuredContent != nil {
+		validateAgainstSchema(t, "checkpoint_resume", outputSchemas(t)["checkpoint_resume"], res.StructuredContent)
 	}
-	if payload.Error != "not_found" {
-		t.Errorf("error code = %q, want not_found", payload.Error)
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if payload.AgentID != "sc-ghost" {
-		t.Errorf("agent_id = %q, want sc-ghost", payload.AgentID)
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := wire["structuredContent"]; present {
+		t.Error("resume error must omit structuredContent on the wire")
+	}
+	if got, want := resultText(t, res), `no checkpoint found for agent "sc-ghost": no checkpoints for agent "sc-ghost"`; got != want {
+		t.Errorf("text = %q, want %q", got, want)
 	}
 }
 

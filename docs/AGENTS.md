@@ -69,8 +69,8 @@ Every success result carries **both** a `structuredContent` object (declared in 
 // checkpoint_resume — structuredContent (state/message_count omitted when empty)
 { "id": "01JZK7...", "created_at": "2026-04-28T13:42:11Z", "state": { "task": "db migration", "step": 3 } }
 
-// checkpoint_resume with no checkpoint — isError=true, structuredContent:
-{ "error": "not_found", "agent_id": "migration-agent" }
+// checkpoint_resume with no checkpoint — isError=true, text content only:
+"no checkpoint found for agent \"migration-agent\": no checkpoints for agent \"migration-agent\""
 // (content keeps the historical "no checkpoint found for agent ..." prose)
 
 // memory_reflect — structuredContent
