@@ -59,8 +59,17 @@ jobs:
       # PRs: upload a version and get a preview URL without touching
       # production traffic. The URL lands in this step's log and in the
       # Worker's Version History.
+      #
+      # Skipped for pull requests from forks. GitHub withholds secrets from
+      # them by design, so wrangler would run with an empty token and fail:
+      # a red check on every outside contribution, for a reason that has
+      # nothing to do with the contribution. Install and Build still run, so
+      # a fork PR that breaks the site is still caught; only the upload is
+      # skipped. The fix is NOT pull_request_target: that runs with the base
+      # repository secrets while checking out the fork code, which is
+      # precisely how a preview job becomes a credential leak.
       - name: Preview (PR)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
