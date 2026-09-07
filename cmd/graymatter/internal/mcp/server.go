@@ -1,10 +1,13 @@
 // Package mcp exposes GrayMatter memory as a Model Context Protocol server.
-// Claude Code, Cursor, and any MCP-compatible client can use the four tools:
+// Claude Code, Cursor, and any MCP-compatible client can use the seven tools:
 //
-//   - memory_search  — recall facts for a query
-//   - memory_add     — store a new fact
-//   - checkpoint_save   — snapshot agent state
-//   - checkpoint_resume — restore last checkpoint
+//   - memory_search       — recall facts for a query
+//   - memory_search_batch — recall facts for several queries at once
+//   - memory_add          — store a new fact
+//   - memory_alias        — teach the store a vocabulary alias
+//   - memory_reflect      — curate facts: add, update, forget, link, pin, unpin
+//   - checkpoint_save     — snapshot agent state
+//   - checkpoint_resume   — restore last checkpoint
 //
 // Usage:
 //
@@ -503,8 +506,8 @@ func (s *Server) registerTools() {
 	// memory_reflect
 	//
 	// The input schema is hand-authored raw JSON because the contract cannot
-	// be expressed with typed helpers: exactly one of agent_id (canonical) or
-	// agent (deprecated alias) is required, which is an anyOf over two
+	// be expressed with typed helpers: at least one of agent_id (canonical) or
+	// agent (deprecated alias) is required (both allowed), which is an anyOf over two
 	// required-lists — mcp-go's typed builders only produce flat required
 	// lists, and requiring `agent` here would re-break the caller class the
 	// alias exists for (issue #77, step 3 of the canonical flip).

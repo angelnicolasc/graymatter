@@ -162,23 +162,27 @@ verified against a live `tools/list` exchange at the time of writing.
 | Tool | Required parameters | Optional parameters |
 |---|---|---|
 | `memory_search` | `agent_id`, `query` | `top_k` (default `8`), `explain` (boolean, default `false`) |
+| `memory_search_batch` | `agent_id`, `queries` | `top_k` (default `8`) |
 | `memory_add` | `agent_id`, `text` | — |
+| `memory_alias` | `agent_id`, `term`, `equivalents` | — |
 | `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
 | `checkpoint_resume` | `agent_id` | — |
-| `memory_reflect` | `action`, plus exactly one of `agent_id` (canonical) or `agent` (deprecated alias) | `text`, `target` |
+| `memory_reflect` | `action`, plus at least one of `agent_id` (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text`, `target` |
 
 `memory_reflect.action` is an enum: `add`, `update`, `forget`, `link`, `pin`,
 `unpin`. The agent parameter on `memory_reflect` is expressed as a schema
-`anyOf` (exactly one of the two spellings is required); `agent` is deprecated,
+`anyOf` (at least one of the two spellings is required, both allowed); `agent` is deprecated,
 and when both spellings arrive `agent_id` wins.
 
 ### `structuredContent` payloads
 
 | Tool | Success payload | Notes |
 |---|---|---|
-| `memory_search` | `{"agent_id", "query", "count", "facts"}` | `facts` is nullable in the schema; the empty result is `count: 0, facts: []` with a "No memories found" text notice |
+| `memory_search` | `{"agent_id", "query", "count", "facts", "feedback"?}` | `facts` is nullable in the schema; the empty result is `count: 0, facts: []` with a "No memories found" text notice. `feedback` is optional: it carries the weak-match vocabulary block when the query's vocabulary barely overlaps the store's (v0.18.0), omitted otherwise |
 | `memory_search` with `explain: true` | `{"agent_id", "query", "count", "facts", "explained"?}` | Added in v0.17.0. `explained` carries one `RecallReceipt` per fact (same JSON shape as the Go type); `facts` is present but empty so the payload conforms to the declared schema. The ranking is identical to `explain: false` — explain only reads it out |
+| `memory_search_batch` | `{"agent_id", "count", "merged", "per_query"}` | `count` is the number of distinct facts in `merged`; `per_query[]` carries `{"query", "facts", "error"?}` — a per-query failure is reflected in `per_query[].error` while the other query results still return successfully |
 | `memory_add` | `{"agent_id", "stored"}` | `stored` is `true` on success |
+| `memory_alias` | `{"agent_id", "term", "equivalents", "stored"}` | `stored` is `true` on success |
 | `checkpoint_save` | `{"agent_id", "checkpoint_id", "created_at"}` | `created_at` is RFC3339 |
 | `checkpoint_resume` | `{"id", "created_at", "state"?, "message_count"?}` | `state` is the persisted JSON object; keys marked `?` may be absent when empty |
 | `memory_reflect` | `{"action", "agent", "ok"}` | `ok` is `true` on success |

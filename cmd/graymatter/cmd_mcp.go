@@ -44,7 +44,7 @@ Claude Code setup — add to your project's .mcp.json:
     }
   }
 
---http exposes the same five tools over StreamableHTTP. That transport carries
+--http exposes the same seven tools over StreamableHTTP. That transport carries
 the whole memory surface, so it requires an HTTP bearer token (see
 "graymatter server --help" for where the token lives) and should be pointed at
 a loopback address:

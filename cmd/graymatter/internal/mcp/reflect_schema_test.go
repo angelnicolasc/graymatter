@@ -9,7 +9,7 @@ import (
 
 // TestMemoryReflect_AgentIDCanonical pins issue #77 step 3 (the canonical
 // flip): agent_id is the canonical spelling, agent is a documented deprecated
-// alias, and the XOR (exactly one required) is expressed as anyOf over two
+// alias, and the at-least-one requirement (both allowed, agent_id wins) is expressed as anyOf over two
 // required-lists because a flat required list would break one caller class or
 // the other.
 func TestMemoryReflect_AgentIDCanonical(t *testing.T) {
@@ -44,7 +44,7 @@ func TestMemoryReflect_AgentIDCanonical(t *testing.T) {
 	}
 
 	// Canonical flip: required carries only action; the agent requirement is
-	// the anyOf XOR, so callers spelling either name validate.
+	// the anyOf branches, so callers spelling either name (or both) validate.
 	required := map[string]bool{}
 	for _, r := range schema.Required {
 		required[r] = true
@@ -53,7 +53,7 @@ func TestMemoryReflect_AgentIDCanonical(t *testing.T) {
 		t.Error("action must be required")
 	}
 	if required["agent"] || required["agent_id"] {
-		t.Error("neither agent spelling belongs in required; the XOR lives in anyOf")
+		t.Error("neither agent spelling belongs in required; the at-least-one rule lives in anyOf")
 	}
 	if len(schema.AnyOf) != 2 {
 		t.Fatalf("anyOf has %d branches, want 2 (agent_id / agent)", len(schema.AnyOf))
