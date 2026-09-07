@@ -3,7 +3,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 )
 
 // The issue-#76 acceptance requires that handler outputs validate against the
@@ -15,8 +19,7 @@ import (
 //     subset of the schema properties and which contains every required
 //     schema property (omitempty fields may be absent, nothing else);
 //  3. every present key has the JSON type the schema declares;
-//  4. the not-found resume error is typed, isError, and its payload matches
-//     its own declared shape.
+//  4. resume errors set isError and omit structuredContent on the wire.
 
 type schemaShape struct {
 	Type       string `json:"type"`
@@ -126,7 +129,7 @@ func TestStructuredContentMatchesOutputSchema(t *testing.T) {
 	}
 }
 
-func TestCheckpointResumeNotFoundIsTypedError(t *testing.T) {
+func TestCheckpointResumeNotFoundIsTextError(t *testing.T) {
 	s, _ := newTestServer(t)
 	res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{"agent_id": "sc-ghost"}))
 	if err != nil {
@@ -136,15 +139,58 @@ func TestCheckpointResumeNotFoundIsTypedError(t *testing.T) {
 		t.Fatal("not-found must set isError")
 	}
 
-	payload, ok := res.StructuredContent.(checkpointResumeNotFound)
-	if !ok {
-		t.Fatalf("structured content is %T, want checkpointResumeNotFound", res.StructuredContent)
+	if res.StructuredContent != nil {
+		validateAgainstSchema(t, "checkpoint_resume", outputSchemas(t)["checkpoint_resume"], res.StructuredContent)
 	}
-	if payload.Error != "not_found" {
-		t.Errorf("error code = %q, want not_found", payload.Error)
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if payload.AgentID != "sc-ghost" {
-		t.Errorf("agent_id = %q, want sc-ghost", payload.AgentID)
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := wire["structuredContent"]; present {
+		t.Error("resume error must omit structuredContent on the wire")
+	}
+	if got, want := resultText(t, res), `no checkpoint found for agent "sc-ghost": no checkpoints for agent "sc-ghost"`; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+}
+
+type resumeErrorBackend struct {
+	Backend
+	err error
+}
+
+func (b resumeErrorBackend) CheckpointResume(string) (*session.Checkpoint, error) {
+	return nil, b.err
+}
+
+func TestCheckpointResumeBackendFailure(t *testing.T) {
+	for _, cause := range []error{errors.New("memory store not initialised"), errors.New("daemon connection lost"), errors.New("no checkpoints")} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			s := New(resumeErrorBackend{err: cause}, "test")
+			res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{"agent_id": "sc-a"}))
+			if err != nil || !res.IsError || res.StructuredContent != nil {
+				t.Fatalf("result = %+v, error = %v; want text-only tool error", res, err)
+			}
+			if got, want := resultText(t, res), "checkpoint resume error: "+cause.Error(); got != want {
+				t.Errorf("text = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCheckpointResumeWrappedAbsence(t *testing.T) {
+	cause := fmt.Errorf("backend: %w", session.ErrNoCheckpoint)
+	s := New(resumeErrorBackend{err: cause}, "test")
+	res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{"agent_id": "sc-a"}))
+	if err != nil || !res.IsError || res.StructuredContent != nil {
+		t.Fatalf("result = %+v, error = %v; want text-only tool error", res, err)
+	}
+	if got, want := resultText(t, res), `no checkpoint found for agent "sc-a": `+cause.Error(); got != want {
+		t.Errorf("text = %q, want %q", got, want)
 	}
 }
 

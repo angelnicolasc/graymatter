@@ -42,7 +42,7 @@ type Host struct {
 	db      *bolt.DB
 	graph   *kg.Graph
 	adapter *kg.GraphAdapter
-	kgAuto  bool // whether consolidation feeds the graph (opts.KG / env / sentinel)
+	kgAuto  bool   // whether consolidation feeds the graph (opts.KG / env / sentinel)
 	stop    func() // initiates graceful daemon shutdown
 }
 
@@ -54,8 +54,16 @@ type CheckpointSaveResponse struct{ CP session.Checkpoint }
 type CheckpointLoadRequest struct{ AgentID, CheckpointID string }
 type CheckpointLoadResponse struct{ CP session.Checkpoint }
 
-type CheckpointResumeRequest struct{ AgentID string }
-type CheckpointResumeResponse struct{ CP session.Checkpoint }
+type CheckpointResumeRequest struct {
+	AgentID string
+	// Opt in so older clients still receive an RPC error on absence, never
+	// a successful response containing an empty checkpoint.
+	ReportNotFound bool
+}
+type CheckpointResumeResponse struct {
+	CP       session.Checkpoint
+	NotFound bool
+}
 
 type CheckpointListRequest struct{ AgentID string }
 type CheckpointListResponse struct{ CPs []session.Checkpoint }
@@ -118,8 +126,8 @@ type StoreOverviewResponse struct {
 	TotalLiveFacts   int            `json:"total_live_facts"`
 	TotalTombstones  int            `json:"total_tombstones"`
 	PendingVectorOps int            `json:"pending_vector_ops"`
-	Consolidations   int            `json:"consolidations"`    // cycles that applied at least one proposal
-	FactsConsumed    int            `json:"facts_consumed"`    // batch facts tombstoned by those proposals
+	Consolidations   int            `json:"consolidations"` // cycles that applied at least one proposal
+	FactsConsumed    int            `json:"facts_consumed"` // batch facts tombstoned by those proposals
 	Agents           []AgentSummary `json:"agents"`
 }
 
@@ -157,6 +165,10 @@ func (h *Host) CheckpointLoad(req *CheckpointLoadRequest, resp *CheckpointLoadRe
 // CheckpointResume retrieves the most recent checkpoint for an agent.
 func (h *Host) CheckpointResume(req *CheckpointResumeRequest, resp *CheckpointResumeResponse) error {
 	cp, err := session.Resume(h.db, req.AgentID)
+	if req.ReportNotFound && errors.Is(err, session.ErrNoCheckpoint) {
+		resp.NotFound = true
+		return nil
+	}
 	if err != nil {
 		return err
 	}

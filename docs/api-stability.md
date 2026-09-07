@@ -183,10 +183,11 @@ and when both spellings arrive `agent_id` wins.
 | `checkpoint_resume` | `{"id", "created_at", "state"?, "message_count"?}` | `state` is the persisted JSON object; keys marked `?` may be absent when empty |
 | `memory_reflect` | `{"action", "agent", "ok"}` | `ok` is `true` on success |
 
-One error carries a typed payload: `checkpoint_resume` with no checkpoint
-returns `isError: true` with `{"error": "not_found", "agent_id"}`. All other
-errors (validation, storage, unavailable features) are prose-only `isError`
-results and carry no machine-readable contract — their wording may change.
+Errors, including `checkpoint_resume` with no checkpoint, return text-only
+`isError: true` results without `structuredContent`; their wording may change.
+The former `{"error": "not_found", "agent_id"}` payload violated the declared
+success schema and was removed to prevent strict clients from rejecting the
+entire response (#117; [ADR-013 amendment](decisions/013-structured-tool-results.md)).
 
 ---
 

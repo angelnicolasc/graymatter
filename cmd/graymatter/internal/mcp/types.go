@@ -70,14 +70,6 @@ type checkpointResumeResult struct {
 	MessageCount int            `json:"message_count,omitempty"`
 }
 
-// checkpointResumeNotFound is the typed error payload for resume with no
-// checkpoint. It travels with isError=true and the same prose fallback the
-// tool has always returned, so nothing that matched the old error breaks.
-type checkpointResumeNotFound struct {
-	Error   string `json:"error"`
-	AgentID string `json:"agent_id"`
-}
-
 type reflectResult struct {
 	Action string `json:"action"`
 	Agent  string `json:"agent"`
