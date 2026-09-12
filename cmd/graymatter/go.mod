@@ -44,6 +44,7 @@ require (
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/muesli/termenv v0.16.0
 	github.com/oklog/ulid/v2 v2.1.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.8.1
 	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sys v0.34.0
@@ -69,7 +70,6 @@ require (
 	github.com/philippgille/chromem-go v0.7.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

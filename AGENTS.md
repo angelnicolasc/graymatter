@@ -14,7 +14,7 @@ This repo **is** a memory system for AI agents. While you work here, you also ge
 | `memory_alias` | `agent_id`, `term`, `equivalents` | — |
 | `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus at least one of **`agent_id`** (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text`, `target` (which one is required depends on `action` — for `forget`/`pin`/`unpin`, either works) |
 | `checkpoint_save` | `agent_id` | `state` (JSON-encoded string) |
-| `checkpoint_resume` | `agent_id` | — |
+| `checkpoint_resume` | `agent_id` | `on_missing` (enum `error`\|`empty`, default `error`) |
 
 > **`memory_reflect` uses `agent_id` (canonical since ADR-014).** The other six also use `agent_id`. The deprecated alias `agent` is still accepted for compatibility; `agent_id` wins when both are set.
 

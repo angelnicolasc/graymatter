@@ -6,6 +6,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`checkpoint_resume` can report a missing checkpoint as a successful, machine-readable result.** A new optional `on_missing` parameter (`"error"` — the default — or `"empty"`) lets callers ask for `{"found": false, "agent_id"}` with `isError` unset instead of the historical not-found tool error, so a session-start check can tell "nothing saved yet" from a broken store without parsing prose. The output schema declares both result shapes under `oneOf`; storage and daemon failures stay prose-only errors in both modes. See [ADR-015](docs/decisions/015-checkpoint-resume-empty-result.md).
+
+### Notes
+
+- **`checkpoint_resume`'s default becomes `on_missing: "empty"` in v0.21.0.** v0.20.0 ships the option opt-in so callers can adopt and observe the additive result before absence stops being an error; `"error"` stays accepted as the legacy behaviour throughout v0.x. The flip is announced here and in `docs/api-stability.md`, per the prior-minor notice rule.
+
+---
+
 ## [0.19.1] - 2026-09-07
 
 ### Fixed

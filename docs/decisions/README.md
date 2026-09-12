@@ -23,6 +23,8 @@ consequences, reversal condition.
 | [011](011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally | Accepted |
 | [012](012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests | Accepted |
 | [013](013-structured-tool-results.md) | Tool results carry structuredContent twins with declared output schemas | Accepted |
+| [014](014-agent-id-canonical.md) | agent_id is the canonical agent parameter; agent remains a deprecated alias | Accepted |
+| [015](015-checkpoint-resume-empty-result.md) | checkpoint_resume returns a successful absence result under on_missing=empty | Accepted |
 
 ## Writing a new one
 

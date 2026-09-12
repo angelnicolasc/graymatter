@@ -25,7 +25,7 @@ Seven tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/inter
 | `memory_add` | `agent_id` (string), `text` (string) | — | Confirmation string |
 | `memory_alias` | `agent_id` (string), `term` (string), `equivalents` (string array) | — | Confirmation naming the term and its equivalents |
 | `checkpoint_save` | `agent_id` (string) | `state` (JSON-encoded string) | Confirmation containing the checkpoint ID |
-| `checkpoint_resume` | `agent_id` (string) | — | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; error result when none exists |
+| `checkpoint_resume` | `agent_id` (string) | `on_missing` (`"error"` \| `"empty"`, default `"error"`) | `Checkpoint "id" restored` + `Created:` (RFC3339) + indented `State:` JSON; by default an error result when none exists — with `on_missing: "empty"` a successful `{"found": false, "agent_id"}` result |
 | `memory_reflect` | `action` (`add`\|`update`\|`forget`\|`link`\|`pin`\|`unpin`), plus at least one of **`agent_id`** (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text` (string), `target` (string — old fact text for `update`/`forget`/`pin`/`unpin`; target node ID for `link`) | Confirmation string |
 
 > ℹ️ **`memory_reflect` accepts both `agent_id` (canonical) and `agent` (deprecated alias).** Since the canonical flip ([ADR-014](decisions/014-agent-id-canonical.md)) at least one of the two is required — the schema enforces it as an `anyOf` allowing both — and `agent_id` wins when both are set. New integrations spell it `agent_id`, matching every other tool.
@@ -74,6 +74,13 @@ Every success result carries **both** a `structuredContent` object (declared in 
 // checkpoint_resume with no checkpoint — isError=true, text content only:
 "no checkpoint found for agent \"migration-agent\": no checkpoints for agent \"migration-agent\""
 // (content keeps the historical "no checkpoint found for agent ..." prose)
+
+// checkpoint_resume with no checkpoint and on_missing="empty" — success:
+{ "found": false, "agent_id": "migration-agent" }
+// text: "No checkpoint saved for agent \"migration-agent\" yet."
+// Without on_missing the default "error" keeps the historical isError result
+// above; v0.21.0 flips the default to "empty". Storage and daemon failures
+// stay prose-only errors in both modes.
 
 // memory_reflect — structuredContent
 { "action": "update", "agent": "backend-agent", "ok": true }

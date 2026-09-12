@@ -193,11 +193,31 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		return toolError("agent_id is required")
 	}
 
+	// on_missing is an input enum in the schema; mcp-go can enforce it with the
+	// server.WithInputSchemaValidation option, but this server does not enable
+	// that option, so the handler validates it explicitly. Missing means the
+	// historical behaviour; the types are checked before the value so a
+	// non-string argument cannot slip through as the default.
+	onMissing := "error"
+	if raw, present := args["on_missing"]; present {
+		value, ok := raw.(string)
+		if !ok || (value != "error" && value != "empty") {
+			return toolError(`on_missing must be "error" or "empty"`)
+		}
+		onMissing = value
+	}
+
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
 		if errors.Is(err, session.ErrNoCheckpoint) {
+			if onMissing == "empty" {
+				return toolStructured(checkpointResumeEmpty{Found: false, AgentID: agentID},
+					fmt.Sprintf("No checkpoint saved for agent %q yet.", agentID))
+			}
 			return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
 		}
+		// Storage, daemon, and corrupt-record failures stay prose-only in both
+		// modes: they are not absence and must never masquerade as found:false.
 		return toolError(fmt.Sprintf("checkpoint resume error: %v", err))
 	}
 

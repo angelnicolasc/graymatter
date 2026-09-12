@@ -489,16 +489,26 @@ func (s *Server) registerTools() {
 	)
 
 	// checkpoint_resume
+	//
+	// The output schema is the generated result union, not outputSchemaOf:
+	// on_missing="empty" makes absence a second successful shape (ADR-015), and
+	// only a union can declare both without presenting the absence marker as a
+	// checkpoint. The default keeps the historical text-only not-found error.
 	s.mcpSrv.AddTool(
 		mcp.NewTool("checkpoint_resume",
 			mcp.WithToolTitle("Load the latest checkpoint"),
-			mcp.WithDescription("Read an agent's most recent checkpoint without modifying anything: returns its ID, creation time (RFC3339), and the saved state as indented JSON, plus a message-turn count when messages were captured. Use at session start to detect and resume interrupted work; checkpoints are created with checkpoint_save. Errors with \"no checkpoint found\" when the agent has none."),
+			mcp.WithDescription("Read an agent's most recent checkpoint without modifying anything: returns its ID, creation time (RFC3339), and the saved state as indented JSON, plus a message-turn count when messages were captured. Use at session start to detect and resume interrupted work; checkpoints are created with checkpoint_save. With no checkpoint, on_missing=\"error\" (default) returns the historical not-found error; on_missing=\"empty\" returns a successful {\"found\": false, \"agent_id\"} result. Errors stay prose-only for storage and daemon failures."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent whose latest checkpoint to load."),
 			),
-			outputSchemaOf[checkpointResumeResult](),
+			mcp.WithString("on_missing",
+				mcp.Enum("error", "empty"),
+				mcp.DefaultString("error"),
+				mcp.Description("What to return when the agent has no checkpoint: \"error\" (default) keeps the historical not-found tool error; \"empty\" returns a successful {\"found\": false, \"agent_id\"} result."),
+			),
+			checkpointResumeOutputSchema(),
 		),
 		s.handleCheckpointResume,
 	)
@@ -575,6 +585,48 @@ func outputSchemaOf[T any]() mcp.ToolOption {
 		panic(fmt.Sprintf("graymatter/mcp: cannot generate output schema for %T: %v", zero, err))
 	}
 	return mcp.WithRawOutputSchema(raw)
+}
+
+// checkpointResumeAbsenceSchema is the absence branch of checkpoint_resume's
+// declared output: the successful {"found": false, "agent_id"} result that
+// on_missing="empty" returns. It is a schema branch rather than an error
+// payload because strict MCP clients validate structuredContent against the
+// tool's outputSchema whenever it is present, even alongside isError=true
+// (#117) — and because absence is now a successful result, not an error.
+//
+// found is pinned to false and required: {"found": true} never exists (real
+// success returns checkpointResumeResult), so the enum makes that constraint
+// machine-checkable. additionalProperties:false stays on this branch; the
+// union root deliberately carries none — a root-level additionalProperties
+// applies to every branch and would reject both payloads.
+var checkpointResumeAbsenceSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "found": {"type": "boolean", "enum": [false]},
+    "agent_id": {"type": "string"}
+  },
+  "required": ["found", "agent_id"],
+  "additionalProperties": false
+}`)
+
+// checkpointResumeOutputSchema declares checkpoint_resume's two successful
+// result shapes under oneOf: the checkpoint payload and the absence marker.
+// The success branch is generated from checkpointResumeResult, never
+// hand-written, so it cannot drift from the Go type; this helper panics at
+// registration when generation fails, mirroring outputSchemaOf (TD-002).
+func checkpointResumeOutputSchema() mcp.ToolOption {
+	success, err := mcp.SchemaForRaw[checkpointResumeResult]()
+	if err != nil {
+		panic(fmt.Sprintf("graymatter/mcp: cannot generate output schema for %T: %v", checkpointResumeResult{}, err))
+	}
+	union, err := json.Marshal(struct {
+		Type  string            `json:"type"`
+		OneOf []json.RawMessage `json:"oneOf"`
+	}{Type: "object", OneOf: []json.RawMessage{success, checkpointResumeAbsenceSchema}})
+	if err != nil {
+		panic(fmt.Sprintf("graymatter/mcp: cannot build checkpoint_resume output schema: %v", err))
+	}
+	return mcp.WithRawOutputSchema(union)
 }
 
 // toolStructured returns a result whose structuredContent is payload and whose

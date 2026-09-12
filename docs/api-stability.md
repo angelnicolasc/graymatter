@@ -136,9 +136,10 @@ all — compiles against the payloads below. Within the v0.x series:
 
 - **Tool names, parameter names, and required parameters** will not be removed or renamed.
 - **`outputSchema` objects are authoritative**: a success result's
-  `structuredContent` conforms to the tool's declared schema, which sets
-  `additionalProperties: false`. New keys arrive only through a schema
-  revision, never silently.
+  `structuredContent` conforms to the tool's declared schema. Each result
+  shape sets `additionalProperties: false` — on a `oneOf` union, each branch,
+  since a root-level constraint would apply to every branch. New keys arrive
+  only through a schema revision, never silently.
 - **Text content** remains functionally equivalent to `structuredContent` per
   the MCP compatibility guidance. Exact prose wording is best-effort and may
   be reworded; clients should read the structured payload.
@@ -166,7 +167,7 @@ verified against a live `tools/list` exchange at the time of writing.
 | `memory_add` | `agent_id`, `text` | — |
 | `memory_alias` | `agent_id`, `term`, `equivalents` | — |
 | `checkpoint_save` | `agent_id` | `state` (string containing a JSON object) |
-| `checkpoint_resume` | `agent_id` | — |
+| `checkpoint_resume` | `agent_id` | `on_missing` (`"error"` \| `"empty"`, default `"error"`) |
 | `memory_reflect` | `action`, plus at least one of `agent_id` (canonical) or `agent` (deprecated alias; `agent_id` wins when both are set) | `text`, `target` |
 
 `memory_reflect.action` is an enum: `add`, `update`, `forget`, `link`, `pin`,
@@ -185,13 +186,23 @@ and when both spellings arrive `agent_id` wins.
 | `memory_alias` | `{"agent_id", "term", "equivalents", "stored"}` | `stored` is `true` on success |
 | `checkpoint_save` | `{"agent_id", "checkpoint_id", "created_at"}` | `created_at` is RFC3339 |
 | `checkpoint_resume` | `{"id", "created_at", "state"?, "message_count"?}` | `state` is the persisted JSON object; keys marked `?` may be absent when empty |
+| `checkpoint_resume` with `on_missing: "empty"` | `{"found": false, "agent_id"}` | Added in v0.20.0. The successful absence result; `found` is always `false` and is declared non-optional. The output schema declares this shape and the success shape under `oneOf` |
 | `memory_reflect` | `{"action", "agent", "ok"}` | `ok` is `true` on success |
 
-Errors, including `checkpoint_resume` with no checkpoint, return text-only
-`isError: true` results without `structuredContent`; their wording may change.
-The former `{"error": "not_found", "agent_id"}` payload violated the declared
+Errors return text-only `isError: true` results without `structuredContent`;
+their wording may change. `checkpoint_resume` with no checkpoint returns such
+an error **by default**; the optional `on_missing` parameter (`"error"` — the
+default — or `"empty"`) lets a caller opt into the successful
+`{"found": false, "agent_id"}` result above instead. This is an additive
+option, not a behaviour change for existing callers; the default becomes
+`"empty"` in **v0.21.0** (prior-minor notice, per the deprecation rule above),
+and `"error"` remains accepted as the legacy behaviour throughout v0.x.
+Storage, daemon, and corrupt-record failures stay prose-only in both modes. The
+former `{"error": "not_found", "agent_id"}` payload violated the declared
 success schema and was removed to prevent strict clients from rejecting the
-entire response (#117; [ADR-013 amendment](decisions/013-structured-tool-results.md)).
+entire response (#117; [ADR-013 amendment](decisions/013-structured-tool-results.md));
+the machine-readable absence result that amendment deferred is
+[ADR-015](decisions/015-checkpoint-resume-empty-result.md).
 
 ---
 
