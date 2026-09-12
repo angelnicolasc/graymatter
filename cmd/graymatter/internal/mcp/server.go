@@ -16,6 +16,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -492,13 +493,17 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("checkpoint_resume",
 			mcp.WithToolTitle("Load the latest checkpoint"),
-			mcp.WithDescription("Read an agent's most recent checkpoint without modifying anything: returns its ID, creation time (RFC3339), and the saved state as indented JSON, plus a message-turn count when messages were captured. Use at session start to detect and resume interrupted work; checkpoints are created with checkpoint_save. Errors with \"no checkpoint found\" when the agent has none."),
+			mcp.WithDescription("Read an agent's most recent checkpoint without modifying anything: returns its ID, creation time (RFC3339), and the saved state as indented JSON, plus a message-turn count when messages were captured. Use at session start to detect and resume interrupted work; checkpoints are created with checkpoint_save. Errors with \"no checkpoint found\" when the agent has none, unless on_missing=\"empty\" asks for that one case as a successful {\"found\": false, \"agent_id\": ...} result instead. Daemon, storage and decode failures stay errors in either mode."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
 				mcp.Description("The agent whose latest checkpoint to load."),
 			),
-			outputSchemaOf[checkpointResumeResult](),
+			mcp.WithString("on_missing",
+				mcp.Description("How to report an agent that has no checkpoint at all: \"error\" (default, the historical text-only isError result) or \"empty\" (a successful {\"found\": false, \"agent_id\": ...} result). Only that one case is affected; a present checkpoint returns the ordinary payload and real failures stay errors."),
+				mcp.Enum(checkpointOnMissingError, checkpointOnMissingEmpty),
+			),
+			checkpointResumeOutputSchema(),
 		),
 		s.handleCheckpointResume,
 	)
@@ -568,6 +573,73 @@ func toolError(msg string) (*mcp.CallToolResult, error) {
 // declared contract and without any client-visible signal (TD-002); these
 // types are compile-time constants, so a failure is a programming error and
 // panicking at registration is the honest behaviour.
+// The two values of checkpoint_resume's on_missing (issue #123). The default is
+// deliberately the historical one: flipping it would change the wire contract
+// for every existing caller.
+const (
+	checkpointOnMissingError = "error"
+	checkpointOnMissingEmpty = "empty"
+)
+
+// checkpoint_resume advertises two successful shapes since #123: the resume
+// payload, and - only under on_missing=empty - the normal-absence result.
+//
+// Composed from the two GENERATED schemas rather than hand-authored, so neither
+// half can drift from its Go type. The shape is an object whose `properties`
+// carry the union of both halves' fields - what this package's output-schema
+// contract reads (structured_contract_test.go), and what a client browsing the
+// tool sees - with a `oneOf` over the two halves doing the actual constraining:
+// each half keeps its own required list and additionalProperties:false, so no
+// payload can satisfy both and a validator still rejects a mixed one. There is
+// deliberately no top-level required list, because the two shapes disagree
+// about which keys are mandatory; that is what the oneOf exists to say.
+func checkpointResumeOutputSchema() mcp.ToolOption {
+	payload := mustSchemaFor[checkpointResumeResult]()
+	absent := mustSchemaFor[checkpointAbsentResult]()
+	union, err := json.Marshal(map[string]any{
+		"type":       "object",
+		"properties": mergedProperties(payload, absent),
+		"oneOf":      []json.RawMessage{payload, absent},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("graymatter/mcp: cannot compose the checkpoint_resume output schema: %v", err))
+	}
+	return mcp.WithRawOutputSchema(union)
+}
+
+// mergedProperties is the union of the `properties` of the given object
+// schemas. The halves describe disjoint key sets, so there is nothing to
+// reconcile; a collision would mean one field had two declared types, which is
+// a contradiction rather than something to merge, so it panics instead.
+func mergedProperties(schemas ...json.RawMessage) map[string]json.RawMessage {
+	merged := map[string]json.RawMessage{}
+	for _, raw := range schemas {
+		var decoded struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			panic(fmt.Sprintf("graymatter/mcp: cannot read a generated schema's properties: %v", err))
+		}
+		for name, prop := range decoded.Properties {
+			if existing, clash := merged[name]; clash && !bytes.Equal(existing, prop) {
+				panic(fmt.Sprintf("graymatter/mcp: schema halves disagree about %q: %s vs %s",
+					name, existing, prop))
+			}
+			merged[name] = prop
+		}
+	}
+	return merged
+}
+
+func mustSchemaFor[T any]() json.RawMessage {
+	raw, err := mcp.SchemaForRaw[T]()
+	if err != nil {
+		var zero T
+		panic(fmt.Sprintf("graymatter/mcp: cannot generate output schema for %T: %v", zero, err))
+	}
+	return raw
+}
+
 func outputSchemaOf[T any]() mcp.ToolOption {
 	raw, err := mcp.SchemaForRaw[T]()
 	if err != nil {

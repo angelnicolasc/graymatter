@@ -70,6 +70,21 @@ type checkpointResumeResult struct {
 	MessageCount int            `json:"message_count,omitempty"`
 }
 
+// The normal-absence shape for checkpoint_resume under on_missing=empty
+// (issue #123). A fresh agent having no checkpoint is an ordinary session-start
+// state, not a backend failure, so a client that asks for it gets a successful
+// structured result rather than an isError one.
+//
+// Deliberately not the resume payload with empty fields: no id or created_at is
+// invented for a checkpoint that does not exist, and `found` is the
+// discriminator a client reads. The two shapes stay disjoint on the wire - each
+// generated schema carries its own required list and additionalProperties:false
+// - so the union the tool advertises is unambiguous.
+type checkpointAbsentResult struct {
+	Found   bool   `json:"found"`
+	AgentID string `json:"agent_id"`
+}
+
 type reflectResult struct {
 	Action string `json:"action"`
 	Agent  string `json:"agent"`
