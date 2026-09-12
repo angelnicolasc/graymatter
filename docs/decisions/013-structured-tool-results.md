@@ -51,7 +51,10 @@ historical not-found prose, and the success schema and prose unchanged. It is
 an intentional compatibility correction: consumers of the old error object
 must use the tool-error result instead. Widening the success schema or turning
 absence into success would change a larger, working contract. A future
-machine-readable absence result requires a separate contract decision.
+machine-readable absence result requires a separate contract decision. That
+decision is [ADR-015](015-checkpoint-resume-empty-result.md): an opt-in
+`on_missing: "empty"` result with a staged default flip, not a reversal of this
+amendment.
 
 This follows the [MCP tool error and output-schema contract](https://modelcontextprotocol.io/specification/2025-06-18/server/tools):
 structured results must match the advertised schema; execution errors can
