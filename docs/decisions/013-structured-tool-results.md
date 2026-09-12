@@ -21,10 +21,12 @@ mcp-go v0.58 provides `NewToolResultStructured(payload, fallbackText)` and
 
 ## Decision
 
-Every tool declares an `outputSchema` generated from a Go type in
-`internal/mcp/types.go`, and every success handler returns the payload as
-`structuredContent` with its **byte-identical pre-existing prose** as text
-content:
+Every tool declares an `outputSchema`. Normal single-shape schemas are
+generated mechanically from Go types in `internal/mcp/types.go`; [ADR-015](015-checkpoint-resume-empty-result.md)
+later documents the explicit `checkpoint_resume` union exception, whose normal
+checkpoint branch remains generated while `server.go` composes its absence
+branch. Every success handler returns the payload as `structuredContent` with
+its **byte-identical pre-existing prose** as text content:
 
 | tool | structured payload |
 |------|--------------------|
@@ -98,9 +100,12 @@ general-purpose error protocol is introduced.
 - **Structured-only responses** (`NewToolResultStructuredOnly`): breaks the
   text contract the MCP spec explicitly asks tools to keep
   ("SHOULD also return functionally equivalent unstructured content").
-- **A schema-validator dependency for the tests**: the deterministic
-  key-set/type checks in `structured_contract_test.go` cover the contract
-  surface without adding a direct dependency on a validator library.
+- **A schema-validator dependency for the tests**: at the time of this
+  decision, the deterministic key-set/type checks in
+  `structured_contract_test.go` covered the contract surface without adding a
+  direct dependency on a validator library. [ADR-015](015-checkpoint-resume-empty-result.md)
+  later revisited that choice for the explicitly composed `checkpoint_resume`
+  union and validates it with `github.com/santhosh-tekuri/jsonschema/v6`.
 
 ## Reversal condition
 

@@ -114,7 +114,7 @@ guidance.
 | ~memory_reflect~ | ~action~, ~agent_id~ (or deprecated ~agent~ alias) | ~text~, ~target~ (required by action) |
 | ~ALIAS_TOOL~ | ~agent_id~, ~term~, ~equivalents~ | teach the store a vocabulary bridge |
 | ~checkpoint_save~ | ~agent_id~ | ~state~ |
-| ~checkpoint_resume~ | ~agent_id~ | |
+| ~checkpoint_resume~ | ~agent_id~ | ~on_missing~: ~"error"~ (default) or ~"empty"~ when no checkpoint is ordinary control flow |
 
 ~agent_id~ is canonical for every tool. ~memory_reflect~ also accepts the
 deprecated ~agent~ alias; ~agent_id~ wins when both are set.

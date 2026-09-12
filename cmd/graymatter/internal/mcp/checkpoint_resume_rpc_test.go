@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -116,7 +117,9 @@ func TestCheckpointResumeJSONRPCWireContract(t *testing.T) {
 	}
 	schema := compileOutputSchema(t, resume.OutputSchema)
 
-	// Found: the success payload validates as the checkpoint branch.
+	// Found: every mode returns the ordinary checkpoint payload when a checkpoint
+	// exists. on_missing affects absence only; the explicit modes must not select
+	// the found:false branch.
 	save := callToolJSONRPC(t, s, 1, "checkpoint_save", map[string]any{
 		"agent_id": "rpc-agent",
 		"state":    `{"step":3}`,
@@ -125,23 +128,69 @@ func TestCheckpointResumeJSONRPCWireContract(t *testing.T) {
 		t.Fatalf("checkpoint_save failed: %+v", save.Result)
 	}
 
-	success := callToolJSONRPC(t, s, 2, "checkpoint_resume", map[string]any{"agent_id": "rpc-agent"})
-	if success.Result.IsError {
-		t.Fatalf("checkpoint_resume success path returned an error: %+v", success.Result)
+	defaultSuccess := callToolJSONRPC(t, s, 2, "checkpoint_resume", map[string]any{"agent_id": "rpc-agent"})
+	if defaultSuccess.Result.IsError {
+		t.Fatalf("checkpoint_resume default success path returned an error: %+v", defaultSuccess.Result)
 	}
-	var successPayload map[string]any
-	if err := json.Unmarshal(success.Result.StructuredContent, &successPayload); err != nil {
-		t.Fatalf("decode success structuredContent: %v", err)
+	var baselinePayload map[string]any
+	if err := json.Unmarshal(defaultSuccess.Result.StructuredContent, &baselinePayload); err != nil {
+		t.Fatalf("decode default success structuredContent: %v", err)
 	}
-	if successPayload["id"] == nil || successPayload["created_at"] == nil {
-		t.Fatalf("success result missing required fields: %v", successPayload)
+	if baselinePayload["id"] == nil || baselinePayload["created_at"] == nil {
+		t.Fatalf("default success result missing required fields: %v", baselinePayload)
 	}
-	if err := schema.Validate(successPayload); err != nil {
-		t.Fatalf("success payload failed union schema (branch 1): %v", err)
+	state, ok := baselinePayload["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("default success result state = %T, want object: %v", baselinePayload["state"], baselinePayload)
+	}
+	if step, ok := state["step"].(float64); !ok || step != 3 {
+		t.Fatalf("default success result state.step = %v, want 3", state["step"])
+	}
+	for _, absenceKey := range []string{"found", "agent_id"} {
+		if _, present := baselinePayload[absenceKey]; present {
+			t.Fatalf("default success result carried absence key %q: %v", absenceKey, baselinePayload)
+		}
+	}
+	if err := schema.Validate(baselinePayload); err != nil {
+		t.Fatalf("default success payload failed union schema (checkpoint branch): %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		id   int
+		args map[string]any
+	}{
+		{"explicit error", 3, map[string]any{"agent_id": "rpc-agent", "on_missing": "error"}},
+		{"explicit empty", 4, map[string]any{"agent_id": "rpc-agent", "on_missing": "empty"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			success := callToolJSONRPC(t, s, tc.id, "checkpoint_resume", tc.args)
+			if success.Result.IsError {
+				t.Fatalf("checkpoint_resume success path returned an error: %+v", success.Result)
+			}
+			var successPayload map[string]any
+			if err := json.Unmarshal(success.Result.StructuredContent, &successPayload); err != nil {
+				t.Fatalf("decode success structuredContent: %v", err)
+			}
+			if successPayload["id"] == nil || successPayload["created_at"] == nil {
+				t.Fatalf("success result missing required fields: %v", successPayload)
+			}
+			for _, absenceKey := range []string{"found", "agent_id"} {
+				if _, present := successPayload[absenceKey]; present {
+					t.Fatalf("success result carried absence key %q: %v", absenceKey, successPayload)
+				}
+			}
+			if err := schema.Validate(successPayload); err != nil {
+				t.Fatalf("success payload failed union schema (checkpoint branch): %v", err)
+			}
+			if !reflect.DeepEqual(successPayload, baselinePayload) {
+				t.Fatalf("success payload = %v, want default payload %v", successPayload, baselinePayload)
+			}
+		})
 	}
 
 	// Default absence: text-only isError, no structuredContent key at all.
-	missing := callToolJSONRPC(t, s, 3, "checkpoint_resume", map[string]any{"agent_id": "rpc-ghost"})
+	missing := callToolJSONRPC(t, s, 5, "checkpoint_resume", map[string]any{"agent_id": "rpc-ghost"})
 	if !missing.Result.IsError {
 		t.Fatalf("missing checkpoint should set isError: %+v", missing.Result)
 	}
@@ -150,7 +199,7 @@ func TestCheckpointResumeJSONRPCWireContract(t *testing.T) {
 	}
 
 	// on_missing="empty": successful, machine-readable absence (branch 2).
-	empty := callToolJSONRPC(t, s, 4, "checkpoint_resume", map[string]any{
+	empty := callToolJSONRPC(t, s, 6, "checkpoint_resume", map[string]any{
 		"agent_id":   "rpc-ghost",
 		"on_missing": "empty",
 	})
@@ -179,7 +228,7 @@ func TestCheckpointResumeJSONRPCWireContract(t *testing.T) {
 	}
 
 	// Invalid values are rejected with a text-only error result.
-	bad := callToolJSONRPC(t, s, 5, "checkpoint_resume", map[string]any{
+	bad := callToolJSONRPC(t, s, 7, "checkpoint_resume", map[string]any{
 		"agent_id":   "rpc-ghost",
 		"on_missing": "sometimes",
 	})
