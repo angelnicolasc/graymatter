@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	bolt "go.etcd.io/bbolt"
 
 	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
@@ -111,6 +113,218 @@ func TestCheckpoint_SaveResume(t *testing.T) {
 	// resume for an unknown agent errors
 	if res, _ := s.handleCheckpointResume(ctx, reflectReq(map[string]any{"agent_id": "ghost"})); !res.IsError {
 		t.Error("checkpoint_resume for unknown agent should error")
+	}
+}
+
+// TestCheckpointResumeOnMissingEmpty covers the opt-in absence result
+// (ADR-015): default and explicit "error" keep the historical text-only tool
+// error; "empty" is a successful result carrying the typed absence marker.
+func TestCheckpointResumeOnMissingEmpty(t *testing.T) {
+	s, _ := newTestServer(t)
+	ctx := context.Background()
+
+	historical := `no checkpoint found for agent "ghost": no checkpoints for agent "ghost"`
+	for _, args := range []map[string]any{
+		{"agent_id": "ghost"},
+		{"agent_id": "ghost", "on_missing": "error"},
+	} {
+		res, err := s.handleCheckpointResume(ctx, reflectReq(args))
+		if err != nil {
+			t.Fatalf("handler error: %v", err)
+		}
+		if !res.IsError || res.StructuredContent != nil {
+			t.Fatalf("args %v: result = %+v, want text-only isError", args, res)
+		}
+		if got := resultText(t, res); got != historical {
+			t.Errorf("args %v: text = %q, want %q", args, got, historical)
+		}
+	}
+
+	res, err := s.handleCheckpointResume(ctx, reflectReq(map[string]any{
+		"agent_id":   "ghost",
+		"on_missing": "empty",
+	}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("on_missing=empty must be a success result: %s", resultText(t, res))
+	}
+	payload, ok := res.StructuredContent.(checkpointResumeEmpty)
+	if !ok {
+		t.Fatalf("structuredContent = %T, want checkpointResumeEmpty", res.StructuredContent)
+	}
+	if payload.Found || payload.AgentID != "ghost" {
+		t.Fatalf("absence payload = %+v, want found=false agent_id=ghost", payload)
+	}
+	if got, want := resultText(t, res), `No checkpoint saved for agent "ghost" yet.`; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	validateStructuredAgainstToolSchema(t, "checkpoint_resume", res.StructuredContent)
+}
+
+// TestCheckpointResumeEmptyResultWireShape pins the false marker on the wire.
+// found carries no omitempty precisely so it survives encoding; a regression
+// there serialises the payload as {} and re-creates the #117 failure.
+func TestCheckpointResumeEmptyResultWireShape(t *testing.T) {
+	s, _ := newTestServer(t)
+	res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{
+		"agent_id":   "wire-ghost",
+		"on_missing": "empty",
+	}))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var wire struct {
+		StructuredContent map[string]json.RawMessage `json:"structuredContent"`
+		IsError           bool                       `json:"isError"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if wire.IsError {
+		t.Fatalf("isError present on the empty path: %s", raw)
+	}
+	found, ok := wire.StructuredContent["found"]
+	if !ok {
+		t.Fatalf("structuredContent dropped \"found\" (omitempty regression): %s", raw)
+	}
+	var value bool
+	if err := json.Unmarshal(found, &value); err != nil || value {
+		t.Fatalf("found = %s (%v), want false", found, err)
+	}
+	if got := string(wire.StructuredContent["agent_id"]); got != `"wire-ghost"` {
+		t.Fatalf("agent_id = %s, want \"wire-ghost\"", got)
+	}
+}
+
+// TestCheckpointResumeOnMissingValidation covers the values a caller can send
+// outside the declared enum. mcp-go does not enforce input enums, so the
+// handler must, and it must not fall back to the default for a malformed value.
+func TestCheckpointResumeOnMissingValidation(t *testing.T) {
+	s, _ := newTestServer(t)
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{"unknown string", "sometimes"},
+		{"empty string", ""},
+		{"number", float64(1)},
+		{"bool", true},
+		{"null", nil},
+		{"object", map[string]any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{
+				"agent_id":   "ghost",
+				"on_missing": tc.value,
+			}))
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			if !res.IsError || res.StructuredContent != nil {
+				t.Fatalf("on_missing=%v result = %+v, want text-only tool error", tc.value, res)
+			}
+			if got, want := resultText(t, res), `on_missing must be "error" or "empty"`; got != want {
+				t.Errorf("text = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestCheckpointResumeOperationalFailuresStayProseOnly proves the empty mode
+// never swallows an operational failure as absence: only the ErrNoCheckpoint
+// sentinel selects the found:false result.
+func TestCheckpointResumeOperationalFailuresStayProseOnly(t *testing.T) {
+	causes := []struct {
+		name string
+		err  error
+	}{
+		{"unwrapped absence text", errors.New("no checkpoints")},
+		{"daemon failure", errors.New("daemon connection lost")},
+		{"storage failure", errors.New("bbolt: database is unavailable")},
+	}
+	for _, onMissing := range []string{"error", "empty"} {
+		for _, cause := range causes {
+			t.Run("on_missing="+onMissing+"/"+cause.name, func(t *testing.T) {
+				s, _ := newTestServer(t)
+				s.backend = resumeErrorBackend{Backend: s.backend, err: cause.err}
+				res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{
+					"agent_id":   "sc-a",
+					"on_missing": onMissing,
+				}))
+				if err != nil || !res.IsError || res.StructuredContent != nil {
+					t.Fatalf("result = %+v, error = %v; want text-only tool error", res, err)
+				}
+				if got, want := resultText(t, res), "checkpoint resume error: "+cause.err.Error(); got != want {
+					t.Errorf("text = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestCheckpointResumeUninitializedStoreStaysProseOnly keeps the empty mode
+// from reporting an unusable store as a successful absence.
+func TestCheckpointResumeUninitializedStoreStaysProseOnly(t *testing.T) {
+	var empty graymatter.Memory
+	for _, onMissing := range []string{"error", "empty"} {
+		t.Run("on_missing="+onMissing, func(t *testing.T) {
+			s := New(NewDirectBackend(&empty, nil), "test")
+			res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{
+				"agent_id":   "sc-a",
+				"on_missing": onMissing,
+			}))
+			if err != nil || !res.IsError || res.StructuredContent != nil {
+				t.Fatalf("result = %+v, error = %v; want text-only tool error", res, err)
+			}
+			if got := resultText(t, res); !strings.Contains(got, "not initialised") {
+				t.Errorf("error text = %q, want uninitialized-store diagnostic", got)
+			}
+		})
+	}
+}
+
+// TestCheckpointResumeCorruptRecordStaysProseOnly is the decoding-failure side
+// of the same rule: a damaged record is not an absent checkpoint, in either
+// mode (the #118 classification was pinned for the default mode; the empty
+// mode must not weaken it).
+func TestCheckpointResumeCorruptRecordStaysProseOnly(t *testing.T) {
+	s, mem := newTestServer(t)
+	if err := mem.Advanced().DB().Update(func(tx *bolt.Tx) error {
+		b, err := tx.Bucket([]byte("sessions")).CreateBucketIfNotExists([]byte("corrupt-agent"))
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte("corrupt-id"), []byte("{not valid json"))
+	}); err != nil {
+		t.Fatalf("write corrupt checkpoint: %v", err)
+	}
+
+	for _, onMissing := range []string{"error", "empty"} {
+		t.Run("on_missing="+onMissing, func(t *testing.T) {
+			res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{
+				"agent_id":   "corrupt-agent",
+				"on_missing": onMissing,
+			}))
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			if !res.IsError || res.StructuredContent != nil {
+				t.Fatalf("result = %+v, want text-only tool error", res)
+			}
+			if got := resultText(t, res); !strings.Contains(got, "decode checkpoint") {
+				t.Errorf("error text = %q, want decode diagnostic", got)
+			}
+			if got := resultText(t, res); strings.Contains(got, "not_found") {
+				t.Errorf("corrupt checkpoint was misclassified as not_found: %q", got)
+			}
+		})
 	}
 }
 

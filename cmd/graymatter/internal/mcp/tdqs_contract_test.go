@@ -171,7 +171,7 @@ func TestToolSchemaContract(t *testing.T) {
 		"memory_add":          {props: []string{"agent_id", "text"}, required: []string{"agent_id", "text"}},
 		"memory_alias":        {props: []string{"agent_id", "term", "equivalents"}, required: []string{"agent_id", "term", "equivalents"}},
 		"checkpoint_save":     {props: []string{"agent_id", "state"}, required: []string{"agent_id"}},
-		"checkpoint_resume":   {props: []string{"agent_id"}, required: []string{"agent_id"}},
+		"checkpoint_resume":   {props: []string{"agent_id", "on_missing"}, required: []string{"agent_id"}},
 		"memory_reflect":      {props: []string{"action", "agent", "agent_id", "text", "target"}, required: []string{"action"}},
 	}
 
@@ -225,6 +225,20 @@ func TestToolSchemaContract(t *testing.T) {
 			case "memory_search":
 				if d, ok := schema.Properties["top_k"].Default.(float64); !ok || d != 8 {
 					t.Errorf("memory_search.top_k default = %v, want 8", schema.Properties["top_k"].Default)
+				}
+			case "checkpoint_resume":
+				if d, ok := schema.Properties["on_missing"].Default.(string); !ok || d != "error" {
+					t.Errorf("checkpoint_resume.on_missing default = %v, want \"error\"", schema.Properties["on_missing"].Default)
+				}
+				wantEnum := []string{"error", "empty"}
+				got := schema.Properties["on_missing"].Enum
+				if len(got) != len(wantEnum) {
+					t.Fatalf("checkpoint_resume.on_missing enum = %v, want %v", got, wantEnum)
+				}
+				for i, v := range wantEnum {
+					if got[i] != v {
+						t.Errorf("checkpoint_resume.on_missing enum[%d] = %v, want %q", i, got[i], v)
+					}
 				}
 			case "memory_reflect":
 				wantEnum := []string{"add", "update", "forget", "link", "pin", "unpin"}

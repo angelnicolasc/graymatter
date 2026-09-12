@@ -11,8 +11,8 @@ import (
 )
 
 // The issue-#76 acceptance requires that handler outputs validate against the
-// declared outputSchema. These tests enforce that contract deterministically,
-// without pulling a schema validator dependency:
+// declared outputSchema. These tests enforce that contract deterministically
+// for flat object schemas:
 //
 //  1. every tool declares an outputSchema (type object) in tools/list;
 //  2. every success result carries structuredContent whose key set is a
@@ -20,6 +20,10 @@ import (
 //     schema property (omitempty fields may be absent, nothing else);
 //  3. every present key has the JSON type the schema declares;
 //  4. resume errors set isError and omit structuredContent on the wire.
+//
+// Point 2/3's hand-rolled checks cannot evaluate a oneOf union, so tools whose
+// output schema is a union (checkpoint_resume, ADR-015) are validated with a
+// real JSON Schema engine instead — see validateAgainstSchema.
 
 type schemaShape struct {
 	Type       string `json:"type"`
@@ -29,6 +33,10 @@ type schemaShape struct {
 		Type any `json:"type"`
 	} `json:"properties"`
 	Required []string `json:"required"`
+	// OneOf is set on output schemas that declare more than one successful
+	// result shape. Each branch is a flat object shape; the root carries no
+	// properties/required of its own.
+	OneOf []schemaShape `json:"oneOf"`
 }
 
 func outputSchemas(t *testing.T) map[string]schemaShape {
@@ -52,6 +60,20 @@ func TestToolsDeclareObjectOutputSchemas(t *testing.T) {
 	for name, schema := range outputSchemas(t) {
 		if schema.Type != "object" {
 			t.Errorf("%s: outputSchema.type = %q, want object", name, schema.Type)
+		}
+		// A union root declares its shapes in oneOf branches and must not
+		// constrain the branches with properties/required of its own
+		// (a root additionalProperties:false would reject both).
+		if len(schema.OneOf) > 0 {
+			for i, branch := range schema.OneOf {
+				if branch.Type != "object" {
+					t.Errorf("%s: oneOf[%d].type = %q, want object", name, i, branch.Type)
+				}
+				if len(branch.Properties) == 0 {
+					t.Errorf("%s: oneOf[%d] has no properties", name, i)
+				}
+			}
+			continue
 		}
 		if len(schema.Properties) == 0 {
 			t.Errorf("%s: outputSchema has no properties", name)
@@ -196,8 +218,14 @@ func TestCheckpointResumeWrappedAbsence(t *testing.T) {
 
 // validateAgainstSchema checks the payload against the declared schema shape:
 // key subset of properties, required keys present, primitive types matching.
+// Union schemas need branch selection and cannot be evaluated by those
+// hand-rolled checks, so they go through a real JSON Schema engine.
 func validateAgainstSchema(t *testing.T, toolName string, schema schemaShape, structured any) {
 	t.Helper()
+	if len(schema.OneOf) > 0 {
+		validateStructuredAgainstToolSchema(t, toolName, structured)
+		return
+	}
 	raw, err := json.Marshal(structured)
 	if err != nil {
 		t.Fatalf("%s: marshal structured content: %v", toolName, err)

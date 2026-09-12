@@ -70,6 +70,21 @@ type checkpointResumeResult struct {
 	MessageCount int            `json:"message_count,omitempty"`
 }
 
+// checkpointResumeEmpty is checkpoint_resume's successful absence result,
+// returned when the caller passes on_missing="empty" and the agent has no
+// checkpoint (ADR-015). A separate type rather than checkpointResumeResult
+// with empty fields: absence is a different result shape, and the union
+// output schema validates it as its own branch.
+//
+// Found deliberately carries no omitempty. encoding/json drops a false bool
+// behind omitempty, which would serialise {"found": false} as {} — a success
+// result with no machine-readable marker, which is the strict-client failure
+// this payload exists to fix (#117). The wire-level test pins the key.
+type checkpointResumeEmpty struct {
+	Found   bool   `json:"found"`
+	AgentID string `json:"agent_id"`
+}
+
 type reflectResult struct {
 	Action string `json:"action"`
 	Agent  string `json:"agent"`
