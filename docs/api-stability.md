@@ -136,9 +136,10 @@ all — compiles against the payloads below. Within the v0.x series:
 
 - **Tool names, parameter names, and required parameters** will not be removed or renamed.
 - **`outputSchema` objects are authoritative**: a success result's
-  `structuredContent` conforms to the tool's declared schema, which sets
-  `additionalProperties: false`. New keys arrive only through a schema
-  revision, never silently.
+  `structuredContent` conforms to the tool's declared schema. Each result
+  shape sets `additionalProperties: false` — on a `oneOf` union, each branch,
+  since a root-level constraint would apply to every branch. New keys arrive
+  only through a schema revision, never silently.
 - **Text content** remains functionally equivalent to `structuredContent` per
   the MCP compatibility guidance. Exact prose wording is best-effort and may
   be reworded; clients should read the structured payload.

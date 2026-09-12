@@ -193,9 +193,10 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		return toolError("agent_id is required")
 	}
 
-	// on_missing is an input enum in the schema, but mcp-go does not enforce
-	// enums at call time, so the handler validates it explicitly. Missing means
-	// the historical behaviour; the types are checked before the value so a
+	// on_missing is an input enum in the schema; mcp-go can enforce it with the
+	// server.WithInputSchemaValidation option, but this server does not enable
+	// that option, so the handler validates it explicitly. Missing means the
+	// historical behaviour; the types are checked before the value so a
 	// non-string argument cannot slip through as the default.
 	onMissing := "error"
 	if raw, present := args["on_missing"]; present {

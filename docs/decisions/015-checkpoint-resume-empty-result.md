@@ -68,8 +68,9 @@ single permissive object declaring all six keys (`id`, `created_at`, `state`,
 `message_count`, `found`, `agent_id`), none required,
 `additionalProperties: false`, while keeping `structuredContent` on both
 paths. The wire payloads do not change; only the schema's validation strength
-does. The release gate before the default flip is a real OpenChamber/OpenCode
-smoke run against this schema, not just the contract tests.
+does. The release gate is a real OpenChamber/OpenCode smoke run against this
+schema — not just the contract tests — and it must pass before v0.20.0 ships,
+because the union is validated on every structured result from that release.
 
 ## Consequences
 
@@ -107,11 +108,15 @@ smoke run against this schema, not just the contract tests.
 
 ## Reversal condition
 
-If the OpenChamber/OpenCode smoke run (or field reports from other strict
-clients) shows `oneOf` output schemas being rejected or mis-handled, apply the
-permissive single-object fallback above in the same commit that enables the
-default flip, and record the client/version evidence in this ADR. If no such
-report appears, flip the default in v0.21.0 as announced. If the flip then
-produces reports of behavioural breakage that opt-in adoption did not reveal,
-keep `"error"` as the default for the remainder of v0.x and reopen the
-contract question with the breakage evidence rather than extending the flip.
+The real-client gate must pass before v0.20.0 ships: the union schema ships in
+that release and strict clients validate it on every structured result. If the
+OpenChamber/OpenCode smoke run (or field reports from other strict clients)
+shows `oneOf` output schemas being rejected or mis-handled, apply the
+permissive single-object fallback above in the next release after detection
+(at latest with the v0.21.0 default flip), and record the client/version
+evidence in this ADR. Keep `"error"` as the default until a smoke run re-proves
+the schema on a real client. If no such report appears, flip the default in
+v0.21.0 as announced. If the flip then produces reports of behavioural
+breakage that opt-in adoption did not reveal, keep `"error"` as the default
+for the remainder of v0.x and reopen the contract question with the breakage
+evidence rather than extending the flip.
