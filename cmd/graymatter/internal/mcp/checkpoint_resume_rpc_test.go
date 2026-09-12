@@ -178,7 +178,7 @@ func TestCheckpointResumeJSONRPCWireContract(t *testing.T) {
 		t.Fatalf("absence structuredContent = %s, want the false marker on the wire", raw)
 	}
 
-	// Invalid values are rejected before the backend is consulted.
+	// Invalid values are rejected with a text-only error result.
 	bad := callToolJSONRPC(t, s, 5, "checkpoint_resume", map[string]any{
 		"agent_id":   "rpc-ghost",
 		"on_missing": "sometimes",

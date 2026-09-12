@@ -92,6 +92,21 @@ func TestCheckpointResumeOutputSchemaIsUnion(t *testing.T) {
 	}
 	assertJSONEquivalent(t, "success branch", branches[0], generated)
 
+	// The branches must stay disjoint for oneOf matching: a future field
+	// addition that brings found or agent_id into checkpointResumeResult would
+	// make some payloads match both branches.
+	var successBranch struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(branches[0], &successBranch); err != nil {
+		t.Fatalf("decode success branch properties: %v", err)
+	}
+	for _, key := range []string{"found", "agent_id"} {
+		if _, present := successBranch.Properties[key]; present {
+			t.Errorf("success branch must not declare absence key %q", key)
+		}
+	}
+
 	// Branch 2 is the exact absence contract (ADR-015).
 	assertJSONEquivalent(t, "absence branch", branches[1],
 		json.RawMessage(`{"type":"object","additionalProperties":false,"required":["found","agent_id"],"properties":{"found":{"type":"boolean","enum":[false]},"agent_id":{"type":"string"}}}`))
