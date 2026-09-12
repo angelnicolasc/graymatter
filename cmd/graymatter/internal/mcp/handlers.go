@@ -193,9 +193,31 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		return toolError("agent_id is required")
 	}
 
+	// Absence of a checkpoint is the only case on_missing governs, and the
+	// default keeps the historical isError result so no existing caller changes
+	// (issue #123). An unrecognized value is refused rather than quietly
+	// defaulted: silently treating on_missing="Empty" as "error" would hand the
+	// caller the very result it asked not to get.
+	onMissing, ok := getString(args, "on_missing")
+	if !ok || onMissing == "" {
+		onMissing = checkpointOnMissingError
+	}
+	if onMissing != checkpointOnMissingError && onMissing != checkpointOnMissingEmpty {
+		return toolError(fmt.Sprintf("on_missing must be %q or %q, got %q",
+			checkpointOnMissingError, checkpointOnMissingEmpty, onMissing))
+	}
+
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
 		if errors.Is(err, session.ErrNoCheckpoint) {
+			if onMissing == checkpointOnMissingEmpty {
+				// A fresh agent with nothing saved: an ordinary session-start
+				// state, reported as a successful result the caller can branch
+				// on. Only this one error is converted; everything below stays
+				// an error in either mode.
+				return toolStructured(checkpointAbsentResult{Found: false, AgentID: agentID},
+					fmt.Sprintf("No checkpoint found for agent %q.\n", agentID))
+			}
 			return toolError(fmt.Sprintf("no checkpoint found for agent %q: %v", agentID, err))
 		}
 		return toolError(fmt.Sprintf("checkpoint resume error: %v", err))
