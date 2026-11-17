@@ -9,8 +9,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/angelnicolasc/graymatter/internal/anthropicclient"
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 // ExtractorConfig configures an EntityExtractor.
@@ -56,7 +57,15 @@ func NewLLMExtractor(apiKey, model string) EntityExtractor {
 	if model == "" {
 		model = "claude-haiku-4-5-20251001"
 	}
-	return &llmFallback{llm: &llmExtractor{apiKey: apiKey, model: model}, fallback: &regexExtractor{}}
+	llm := &llmExtractor{apiKey: apiKey, model: model}
+	base := providerurl.Select("", providerurl.AnthropicEnv, providerurl.AnthropicDefault)
+	endpoint, err := providerurl.Parse("anthropic", base)
+	if err != nil {
+		llm.initErr = err
+	} else {
+		llm.baseURL = endpoint.String()
+	}
+	return &llmFallback{llm: llm, fallback: &regexExtractor{}}
 }
 
 // ExtractorFromEnv honours GRAYMATTER_KG_LLM_EXTRACT=1 as the opt-in switch
@@ -341,8 +350,10 @@ func (f *llmFallback) Extract(text string) ([]Node, []Edge, error) {
 }
 
 type llmExtractor struct {
-	apiKey string
-	model  string
+	apiKey  string
+	model   string
+	baseURL string
+	initErr error
 }
 
 const extractionPrompt = `Extract named entities from the following text.
@@ -355,16 +366,15 @@ Only include entities that are clearly identifiable. Return valid JSON only, no 
 Text: %s`
 
 func (e *llmExtractor) Extract(text string) ([]Node, []Edge, error) {
-	prompt := fmt.Sprintf(extractionPrompt, text)
-
-	var client anthropic.Client
-	if e.apiKey != "" {
-		client = anthropic.NewClient(option.WithAPIKey(e.apiKey))
-	} else {
-		client = anthropic.NewClient()
+	if e.initErr != nil {
+		return nil, nil, e.initErr
 	}
-
-	msg, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
+	client, err := anthropicclient.NewMessages(e.baseURL, e.apiKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	prompt := fmt.Sprintf(extractionPrompt, text)
+	msg, err := client.New(context.Background(), anthropic.MessageNewParams{
 		Model:     anthropic.Model(e.model),
 		MaxTokens: 1024,
 		Messages: []anthropic.MessageParam{

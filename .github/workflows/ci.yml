@@ -10,19 +10,21 @@ on:
 permissions:
   contents: read
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   test:
     name: Test (${{ matrix.os }} / go${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # 1.25 is the minimum the CLI module's go.mod declares (mcp-go v0.58
-        # requires it), so it stays in the matrix to keep that promise
-        # honest. Release builds, snapshots and install-smoke use the same
-        # patched 1.26.9 toolchain tested here.
-        go: ["1.25", "1.26.9"]
+        # Pin one patch in the Go 1.25 compatibility line. Release builds,
+        # snapshots and install-smoke use the distribution toolchain.
+        go: ["1.25.14", "1.26.11"]
 
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
@@ -87,6 +89,10 @@ jobs:
       - name: Test root package
         shell: bash
         run: go test -race -count=1 -timeout=300s .
+
+      - name: Test provider configuration and transports
+        shell: bash
+        run: go test -race -count=1 -timeout=300s ./pkg/embedding/... ./internal/providerurl/... ./internal/providerhttp/... ./internal/anthropicclient/...
 
       - name: Test CLI entrypoint package
         working-directory: cmd/graymatter
@@ -176,17 +182,19 @@ jobs:
           if-no-files-found: ignore
 
   # These correctness tests guard published retrieval/revision claims. They
-  # retain all six platforms/toolchains and -race, but run concurrently with
-  # the core/CLI matrix: revision_currency alone took 517s on Windows in
-  # run 36960880220. They are blocking, unlike the timing-only bench job.
+  # run with -race on all six platform/toolchain combinations after the
+  # core/CLI matrix. These checks are blocking. The timing-only bench job
+  # remains non-blocking.
   benchmark-tests:
+    needs: test
     name: Benchmark correctness (${{ matrix.os }} / go${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.25", "1.26.9"]
+        go: ["1.25.14", "1.26.11"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -224,7 +232,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache-dependency-path: |
             go.sum
             cmd/graymatter/go.sum
@@ -253,7 +261,7 @@ jobs:
           core=()
           cli=()
           for os in ubuntu-latest macos-latest windows-latest; do
-            for version in 1.25 1.26.9; do
+            for version in 1.25.14 1.26.11; do
               for module in core cli; do
                 profile="cov/coverage-${module}.${os}.go${version}.out"
                 if [ ! -s "$profile" ]; then
@@ -303,6 +311,7 @@ jobs:
   # and asking both surfaces catches a wrong value handed over at the call
   # site, which is where the original defect lived.
   version-consistency:
+    needs: coverage-union
     name: Version consistency
     runs-on: ubuntu-latest
     steps:
@@ -311,7 +320,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache: true
           cache-dependency-path: |
             go.sum
@@ -379,6 +388,7 @@ jobs:
   # call path reachable from this code, so a failure here means a vulnerability
   # someone can actually reach, not a version-number mismatch.
   vulncheck:
+    needs: version-consistency
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
@@ -387,7 +397,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache: true
           cache-dependency-path: |
             go.sum
@@ -417,7 +427,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache: true
           cache-dependency-path: |
             go.sum

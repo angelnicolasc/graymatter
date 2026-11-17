@@ -14,7 +14,7 @@ import (
 )
 
 // Coverage-gap tests for the consolidation edges: the Anthropic wire paths
-// (mocked through the SDK's base-URL override), the Ollama client's remaining
+// (mocked through the provider's base URL), the Ollama client's remaining
 // failure modes, and the closed-store error branches. The empty-Anthropic-
 // response regression here guards a real defect: an empty model reply used to
 // become an empty summary fact that consumed its whole batch.
@@ -29,9 +29,7 @@ const anthropicMessageShape = `{
   "usage": {"input_tokens": 1, "output_tokens": 1}
 }`
 
-// anthropicServer returns a Messages-API mock and points the SDK at it via
-// ANTHROPIC_BASE_URL, which anthropic.NewClient honours. handler receives the
-// raw request body; it replies with whatever text it is given.
+// anthropicServer returns a Messages API mock and sets ANTHROPIC_BASE_URL to it.
 func anthropicServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

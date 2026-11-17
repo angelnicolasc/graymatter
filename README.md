@@ -609,6 +609,11 @@ GrayMatter degrades gracefully across four modes, always finding a way to work:
 | Voyage AI | `VOYAGE_API_KEY` set — Anthropic's recommended embeddings partner (voyage-3, 1024 dims) |
 | Keyword-only | Nothing available — TF-IDF + recency, zero deps |
 
+Set `OPENAI_BASE_URL` or `VOYAGE_BASE_URL` for a compatible embeddings
+gateway. `ANTHROPIC_BASE_URL` configures Anthropic Messages, including fact
+extraction and consolidation. See [provider endpoints](docs/integrations.md#provider-endpoints)
+for base paths, Go configuration and daemon restarts.
+
 ---
 
 ## Contributing

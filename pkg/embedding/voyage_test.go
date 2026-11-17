@@ -43,10 +43,7 @@ func newVoyageServer(t *testing.T, status int, respBody string) *voyageServer {
 }
 
 func newTestVoyage(serverURL string) *VoyageProvider {
-	p := NewVoyage(Config{VoyageAPIKey: "test-key"})
-	// The seam carries the full request target, exactly as production uses it.
-	p.endpoint = serverURL + "/v1/embeddings"
-	return p
+	return NewVoyage(Config{VoyageAPIKey: "test-key", VoyageBaseURL: serverURL + "/v1"})
 }
 
 func TestVoyageEmbedSuccess(t *testing.T) {
