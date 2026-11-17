@@ -1,0 +1,459 @@
+name: Native validation
+'on':
+  push:
+    branches:
+    - validation/issue-145-c04
+permissions:
+  contents: read
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: '1'
+  GOFLAGS: -p=1
+  VALIDATION_COMMIT: c3911dc654d03ae5ac3aba037b37c16ef1e0b56b
+  VALIDATION_TREE: 78723a920d43b584893e76a5a51970c3504bfc94
+jobs:
+  test-macos:
+    name: Tests (macOS / Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os:
+        - macos-latest
+        go:
+        - 1.25.14
+        - 1.26.11
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        ref: c3911dc654d03ae5ac3aba037b37c16ef1e0b56b
+        persist-credentials: false
+    - name: Set up Go ${{ matrix.go }}
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version: ${{ matrix.go }}
+        cache: false
+        cache-dependency-path: |
+          go.sum
+          cmd/graymatter/go.sum
+    - name: Verify checkout and toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$VALIDATION_COMMIT"
+        test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATION_TREE"
+        test "$(go env GOVERSION)" = "go$VALIDATION_GO"
+        test "$(go env GOOS)" = "$VALIDATION_GOOS"
+        test "$(go env CGO_ENABLED)" = 1
+        git cat-file -e 'bb71971419070c07d36ad91eb1e3a5a9302d8c6a^{commit}'
+        {
+          printf 'commit=%s\ntree=%s\nworkflow_commit=%s\nrun_id=%s\nrun_attempt=%s\nrunner_os=%s\nrunner_arch=%s\n' \
+            "$VALIDATION_COMMIT" "$VALIDATION_TREE" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_OS" "$RUNNER_ARCH"
+          go version
+          git --version
+          go env -json GOOS GOARCH GOVERSION GOTOOLCHAIN CGO_ENABLED GOWORK CC GOFLAGS
+        } | tee validation-identity.txt
+    - name: Source-replace the library into the CLI module
+      working-directory: cmd/graymatter
+      run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+    - name: Download dependencies
+      run: go mod download
+    - name: Vet
+      run: go vet ./...
+    - name: Vet CLI module
+      working-directory: cmd/graymatter
+      run: go vet ./...
+    - name: Build the core workspace
+      run: go build ./...
+    - name: Build the CLI module
+      run: go build ./cmd/graymatter
+    - name: Test the core workspace
+      run: go test -count=1 ./...
+    - name: Test the CLI module
+      working-directory: cmd/graymatter
+      run: go test -count=1 ./...
+    - name: Test workflow and timing contracts
+      run: go test -count=1 ./tools/workflowcontract ./tools/testtiming
+    - name: Test core library with coverage
+      shell: bash
+      run: go test -race -count=1 -timeout=600s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
+    - name: Test CLI module with coverage
+      working-directory: cmd/graymatter
+      shell: bash
+      run: go test -race -count=1 -timeout=300s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/...
+        ./internal/kg/... ./internal/server/... ./internal/plugin/... ./internal/mcp/... ./internal/session/...
+        ./internal/daemon/... ./internal/httpauth/... ./internal/hookpacket/... ./internal/usage/...
+    - name: Test root package
+      shell: bash
+      run: go test -race -count=1 -timeout=300s .
+    - name: Test provider configuration and transports
+      shell: bash
+      run: go test -race -count=1 -timeout=300s ./pkg/embedding/... ./internal/providerurl/... ./internal/providerhttp/...
+        ./internal/anthropicclient/...
+    - name: Test CLI entrypoint package
+      working-directory: cmd/graymatter
+      shell: bash
+      run: |
+        set -euo pipefail
+        go test -json -race -count=1 -timeout=600s . |
+          tee ../../cli-tests.json |
+          go run ../../tools/testtiming -summary "$GITHUB_STEP_SUMMARY"
+    - name: Upload CLI test timings
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: cli-test-timings-${{ matrix.os }}-go${{ matrix.go }}
+        path: cli-tests.json
+        archive: true
+        retention-days: 14
+        if-no-files-found: ignore
+    - name: Test hook benchmark validation
+      shell: bash
+      run: go test -race -short -count=1 ./benchmarks/hook_latency/
+    - name: Coverage gate — core library (≥70%)
+      shell: bash
+      run: |
+        TOTAL=$(go tool cover -func=coverage-core.out \
+          | grep '^total:' | awk '{print $3}' | tr -d '%')
+        echo "Core coverage: ${TOTAL}%"
+        if awk "BEGIN{exit !($TOTAL < 70)}"; then
+          echo "::error::Core coverage ${TOTAL}% is below the 70% threshold."
+          exit 1
+        fi
+    - name: Coverage gate — CLI module (≥65%)
+      shell: bash
+      run: |
+        TOTAL=$(go tool cover -func=coverage-cli.out \
+          | grep '^total:' | awk '{print $3}' | tr -d '%')
+        echo "CLI coverage: ${TOTAL}%"
+        if awk "BEGIN{exit !($TOTAL < 65)}"; then
+          echo "::error::CLI coverage ${TOTAL}% is below the 65% threshold."
+          exit 1
+        fi
+    - name: Build with CGO disabled and record build info
+      shell: bash
+      run: |
+        set -euo pipefail
+        suffix=
+        if [[ "$RUNNER_OS" == Windows ]]; then suffix=.exe; fi
+        CGO_ENABLED=0 go build -ldflags="-s -w" -o "./validation-graymatter$suffix" ./cmd/graymatter
+        go version -m "./validation-graymatter$suffix" | tee validation-buildinfo.txt
+    - name: Rename coverage profiles per platform
+      if: always()
+      shell: bash
+      run: |
+        [ -f coverage-core.out ] && cp coverage-core.out "coverage-core.${{ matrix.os }}.go${{ matrix.go }}.out"
+        [ -f coverage-cli.out ] && cp coverage-cli.out "coverage-cli.${{ matrix.os }}.go${{ matrix.go }}.out"
+        exit 0
+    - name: Upload coverage profiles
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: coverage-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          coverage-core.${{ matrix.os }}.go${{ matrix.go }}.out
+          coverage-cli.${{ matrix.os }}.go${{ matrix.go }}.out
+        archive: true
+        retention-days: 14
+        if-no-files-found: ignore
+    - name: Upload execution identity
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: native-test-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          validation-identity.txt
+          validation-buildinfo.txt
+        retention-days: 14
+        if-no-files-found: error
+    env:
+      VALIDATION_GO: ${{ matrix.go }}
+      VALIDATION_GOOS: darwin
+  test-windows:
+    name: Tests (Windows / Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os:
+        - windows-latest
+        go:
+        - 1.25.14
+        - 1.26.11
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+        ref: c3911dc654d03ae5ac3aba037b37c16ef1e0b56b
+        persist-credentials: false
+    - name: Set up Go ${{ matrix.go }}
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version: ${{ matrix.go }}
+        cache: false
+        cache-dependency-path: |
+          go.sum
+          cmd/graymatter/go.sum
+    - name: Verify checkout and toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$VALIDATION_COMMIT"
+        test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATION_TREE"
+        test "$(go env GOVERSION)" = "go$VALIDATION_GO"
+        test "$(go env GOOS)" = "$VALIDATION_GOOS"
+        test "$(go env CGO_ENABLED)" = 1
+        git cat-file -e 'bb71971419070c07d36ad91eb1e3a5a9302d8c6a^{commit}'
+        {
+          printf 'commit=%s\ntree=%s\nworkflow_commit=%s\nrun_id=%s\nrun_attempt=%s\nrunner_os=%s\nrunner_arch=%s\n' \
+            "$VALIDATION_COMMIT" "$VALIDATION_TREE" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_OS" "$RUNNER_ARCH"
+          go version
+          git --version
+          go env -json GOOS GOARCH GOVERSION GOTOOLCHAIN CGO_ENABLED GOWORK CC GOFLAGS
+        } | tee validation-identity.txt
+    - name: Source-replace the library into the CLI module
+      working-directory: cmd/graymatter
+      run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+    - name: Download dependencies
+      run: go mod download
+    - name: Vet
+      run: go vet ./...
+    - name: Vet CLI module
+      working-directory: cmd/graymatter
+      run: go vet ./...
+    - name: Build the core workspace
+      run: go build ./...
+    - name: Build the CLI module
+      run: go build ./cmd/graymatter
+    - name: Test the core workspace
+      run: go test -count=1 ./...
+    - name: Test the CLI module
+      working-directory: cmd/graymatter
+      run: go test -count=1 ./...
+    - name: Test workflow and timing contracts
+      run: go test -count=1 ./tools/workflowcontract ./tools/testtiming
+    - name: Test core library with coverage
+      shell: bash
+      run: go test -race -count=1 -timeout=600s -coverprofile=coverage-core.out -covermode=atomic ./pkg/memory/...
+    - name: Test CLI module with coverage
+      working-directory: cmd/graymatter
+      shell: bash
+      run: go test -race -count=1 -timeout=300s -coverprofile=../../coverage-cli.out -covermode=atomic ./internal/harness/...
+        ./internal/kg/... ./internal/server/... ./internal/plugin/... ./internal/mcp/... ./internal/session/...
+        ./internal/daemon/... ./internal/httpauth/... ./internal/hookpacket/... ./internal/usage/...
+    - name: Test root package
+      shell: bash
+      run: go test -race -count=1 -timeout=300s .
+    - name: Test provider configuration and transports
+      shell: bash
+      run: go test -race -count=1 -timeout=300s ./pkg/embedding/... ./internal/providerurl/... ./internal/providerhttp/...
+        ./internal/anthropicclient/...
+    - name: Test CLI entrypoint package
+      working-directory: cmd/graymatter
+      shell: bash
+      run: |
+        set -euo pipefail
+        go test -json -race -count=1 -timeout=600s . |
+          tee ../../cli-tests.json |
+          go run ../../tools/testtiming -summary "$GITHUB_STEP_SUMMARY"
+    - name: Upload CLI test timings
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: cli-test-timings-${{ matrix.os }}-go${{ matrix.go }}
+        path: cli-tests.json
+        archive: true
+        retention-days: 14
+        if-no-files-found: ignore
+    - name: Test hook benchmark validation
+      shell: bash
+      run: go test -race -short -count=1 ./benchmarks/hook_latency/
+    - name: Coverage gate — core library (≥70%)
+      shell: bash
+      run: |
+        TOTAL=$(go tool cover -func=coverage-core.out \
+          | grep '^total:' | awk '{print $3}' | tr -d '%')
+        echo "Core coverage: ${TOTAL}%"
+        if awk "BEGIN{exit !($TOTAL < 70)}"; then
+          echo "::error::Core coverage ${TOTAL}% is below the 70% threshold."
+          exit 1
+        fi
+    - name: Coverage gate — CLI module (≥65%)
+      shell: bash
+      run: |
+        TOTAL=$(go tool cover -func=coverage-cli.out \
+          | grep '^total:' | awk '{print $3}' | tr -d '%')
+        echo "CLI coverage: ${TOTAL}%"
+        if awk "BEGIN{exit !($TOTAL < 65)}"; then
+          echo "::error::CLI coverage ${TOTAL}% is below the 65% threshold."
+          exit 1
+        fi
+    - name: Build with CGO disabled and record build info
+      shell: bash
+      run: |
+        set -euo pipefail
+        suffix=
+        if [[ "$RUNNER_OS" == Windows ]]; then suffix=.exe; fi
+        CGO_ENABLED=0 go build -ldflags="-s -w" -o "./validation-graymatter$suffix" ./cmd/graymatter
+        go version -m "./validation-graymatter$suffix" | tee validation-buildinfo.txt
+    - name: Rename coverage profiles per platform
+      if: always()
+      shell: bash
+      run: |
+        [ -f coverage-core.out ] && cp coverage-core.out "coverage-core.${{ matrix.os }}.go${{ matrix.go }}.out"
+        [ -f coverage-cli.out ] && cp coverage-cli.out "coverage-cli.${{ matrix.os }}.go${{ matrix.go }}.out"
+        exit 0
+    - name: Upload coverage profiles
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: coverage-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          coverage-core.${{ matrix.os }}.go${{ matrix.go }}.out
+          coverage-cli.${{ matrix.os }}.go${{ matrix.go }}.out
+        archive: true
+        retention-days: 14
+        if-no-files-found: ignore
+    - name: Upload execution identity
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: native-test-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          validation-identity.txt
+          validation-buildinfo.txt
+        retention-days: 14
+        if-no-files-found: error
+    needs: test-macos
+    env:
+      VALIDATION_GO: ${{ matrix.go }}
+      VALIDATION_GOOS: windows
+  benchmarks-macos:
+    needs: test-windows
+    name: Benchmark correctness (macOS / Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os:
+        - macos-latest
+        go:
+        - 1.25.14
+        - 1.26.11
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: c3911dc654d03ae5ac3aba037b37c16ef1e0b56b
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Go ${{ matrix.go }}
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version: ${{ matrix.go }}
+        cache: false
+        cache-dependency-path: |
+          go.sum
+          cmd/graymatter/go.sum
+    - name: Verify checkout and toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$VALIDATION_COMMIT"
+        test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATION_TREE"
+        test "$(go env GOVERSION)" = "go$VALIDATION_GO"
+        test "$(go env GOOS)" = "$VALIDATION_GOOS"
+        test "$(go env CGO_ENABLED)" = 1
+        git cat-file -e 'bb71971419070c07d36ad91eb1e3a5a9302d8c6a^{commit}'
+        {
+          printf 'commit=%s\ntree=%s\nworkflow_commit=%s\nrun_id=%s\nrun_attempt=%s\nrunner_os=%s\nrunner_arch=%s\n' \
+            "$VALIDATION_COMMIT" "$VALIDATION_TREE" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_OS" "$RUNNER_ARCH"
+          go version
+          git --version
+          go env -json GOOS GOARCH GOVERSION GOTOOLCHAIN CGO_ENABLED GOWORK CC GOFLAGS
+        } | tee validation-identity.txt
+    - name: Source-replace the library into the CLI module
+      working-directory: cmd/graymatter
+      run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+    - name: Test benchmark packages
+      shell: bash
+      run: go test -race -count=1 -timeout=1200s ./benchmarks/token_count/... ./benchmarks/retrieval_quality/...
+        ./benchmarks/revision_currency/...
+    - name: Upload execution identity
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: native-benchmark-tests-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          validation-identity.txt
+        retention-days: 14
+        if-no-files-found: error
+    env:
+      VALIDATION_GO: ${{ matrix.go }}
+      VALIDATION_GOOS: darwin
+  benchmarks-windows:
+    needs: benchmarks-macos
+    name: Benchmark correctness (Windows / Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        os:
+        - windows-latest
+        go:
+        - 1.25.14
+        - 1.26.11
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: c3911dc654d03ae5ac3aba037b37c16ef1e0b56b
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Go ${{ matrix.go }}
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version: ${{ matrix.go }}
+        cache: false
+        cache-dependency-path: |
+          go.sum
+          cmd/graymatter/go.sum
+    - name: Verify checkout and toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$VALIDATION_COMMIT"
+        test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATION_TREE"
+        test "$(go env GOVERSION)" = "go$VALIDATION_GO"
+        test "$(go env GOOS)" = "$VALIDATION_GOOS"
+        test "$(go env CGO_ENABLED)" = 1
+        git cat-file -e 'bb71971419070c07d36ad91eb1e3a5a9302d8c6a^{commit}'
+        {
+          printf 'commit=%s\ntree=%s\nworkflow_commit=%s\nrun_id=%s\nrun_attempt=%s\nrunner_os=%s\nrunner_arch=%s\n' \
+            "$VALIDATION_COMMIT" "$VALIDATION_TREE" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_OS" "$RUNNER_ARCH"
+          go version
+          git --version
+          go env -json GOOS GOARCH GOVERSION GOTOOLCHAIN CGO_ENABLED GOWORK CC GOFLAGS
+        } | tee validation-identity.txt
+    - name: Source-replace the library into the CLI module
+      working-directory: cmd/graymatter
+      run: go mod edit -replace github.com/angelnicolasc/graymatter=../..
+    - name: Test benchmark packages
+      shell: bash
+      run: go test -race -count=1 -timeout=1200s ./benchmarks/token_count/... ./benchmarks/retrieval_quality/...
+        ./benchmarks/revision_currency/...
+    - name: Upload execution identity
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: native-benchmark-tests-${{ matrix.os }}-go${{ matrix.go }}
+        path: |
+          validation-identity.txt
+        retention-days: 14
+        if-no-files-found: error
+    env:
+      VALIDATION_GO: ${{ matrix.go }}
+      VALIDATION_GOOS: windows
