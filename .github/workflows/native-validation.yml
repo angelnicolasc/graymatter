@@ -20,7 +20,7 @@ jobs:
       max-parallel: 1
       matrix:
         os:
-        - macos-latest
+        - macos-26-intel
         go:
         - 1.25.14
         - 1.26.11
@@ -340,7 +340,7 @@ jobs:
       max-parallel: 1
       matrix:
         os:
-        - macos-latest
+        - macos-26-intel
         go:
         - 1.25.14
         - 1.26.11
