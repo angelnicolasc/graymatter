@@ -14,20 +14,16 @@
   <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-core%2090%25%20%C2%B7%20cli%2081%25-brightgreen" alt="Coverage (multi-platform union): core 90%, CLI 81%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
+</p>
 <div align="center">
 <br />
 
-<strong>AI agents forget everything between sessions. GrayMatter gives them persistent memory, a self-building knowledge graph, and cuts context tokens by 90%.</strong>
+<strong>Persistent, searchable memory for AI agents across sessions.</strong>
 <br /><br />
-One binary. Drop it in. Run it. No Docker, no databases, no config files, no cloud accounts, no bullshit.
+GrayMatter keeps facts, their sources, and a knowledge graph in a local store.
 <br /><br />
-<strong>General-purpose MCP server. Zero vendor lock-in.</strong>
-<br />
-Works with Claude Code, Cursor, Codex, OpenCode, Antigravity — and any MCP-compatible client.
-<br />
-Also a plain Go library if you don't use MCP.
-<br /><br />
-Free. Offline. No account required.
+Run the MCP server with Claude Code, Cursor, Codex, OpenCode, or another MCP client.
+You can also embed the Go library directly. Storage and keyword recall work offline.
 
 <br />
 </div>
@@ -36,25 +32,13 @@ Free. Offline. No account required.
 
 ## Why
 
-Every AI agent is **stateless by default**. Each run re-injects the full conversation history — and that history grows linearly. Two prompts in and you've already burned half of your daily quota.
+When a deployment window changes, the next agent needs the new date and the decision that established it. With GrayMatter’s optional `core` profile, the agent can replace the date, save the source and its exact wording, and retrieve them in a later session.
 
-That's not just a memory problem. That's a money and performance problem.
+Compared with an organized notes folder, GrayMatter reduced mean inference cost per task by **8.4% with empty memory** and **10.4% with 1,000 prior facts** in a three-session study. GrayMatter solved **50 of 113 tasks**, compared with **44** for the folder.
 
-**Mem0, Zep, Supermemory** solve this — but they're Python/TypeScript-only and require a running server. The Go ecosystem has no production-ready, embeddable, zero-dependency memory layer for agents.
+![Mean inference cost was lower in all eight task families at both memory sizes. Across the 113 paired tasks, 94 cost less with GrayMatter.](.github/assets/graymatter-inference-by-family.png)
 
-That gap is GrayMatter.
-
-<p align="center">
-  <img src=".github/assets/token-reduction.png" alt="Context tokens per query vs full-history injection" width="800px" style="max-width: 900px;">
-</p>
-
-<p align="center">
-<strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
-Remembers what a sliding window forgets: facts planted 96 sessions back come back <strong>83%</strong> of the time.<br>
-Recall selects relevant facts and keeps the injected context small.<br>
-No Docker. No Redis. No API key required for storage.<br><br>
-Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
-</p>
+[Study design, costs, and completion rates](benchmarks/agent_memory/RESULTS.md)
 
 ---
 
@@ -152,7 +136,7 @@ explicit `--html` path.
 | **Persistent memory** | Facts survive across sessions. Recall by meaning, not just keyword |
 | **90% token reduction** | Top-8 relevant facts instead of full-history injection |
 | **Automatic hooks** | Claude Code injects routine recall every turn; MCP remains available for writes and focused searches (`graymatter hooks install`) |
-| **Receipts, not vibes** | `recall --explain` returns why each fact ranked: per-signal ranks, fused score, provenance |
+| **Explainable recall** | `recall --explain` shows each fact’s ranking signals, fused score, and provenance |
 | **Knowledge graph** | Typed entities and co-mention edges, auto-populated from ordinary use |
 | **Self-curation** | `memory_reflect` lets the agent add, update, forget, and link its own memories |
 | **Context block** | Projects top facts into CLAUDE.md / AGENTS.md inside a token budget (`context-sync`) |
@@ -329,6 +313,10 @@ keyword embedder, no LLM required:
 | 30       | ~1,880 tokens | ~550 tokens | 71% |
 | 100      | ~6,960 tokens | ~670 tokens | **90%** |
 
+<p align="center">
+  <img src=".github/assets/token-reduction.png" alt="At 100 sessions, GrayMatter injects about 670 context tokens per query, compared with 6,960 for full history." width="800">
+</p>
+
 ### Does it return the *right* facts?
 
 Tokens are only half the question. A second benchmark checks whether the
@@ -341,11 +329,17 @@ returned facts actually answer the query, against a real sliding window:
 | Tokens per query | 95 | 114 | **64** |
 
 At equal fact count, relevance-selected facts cost slightly more tokens than a
-window's newest-first picks. With `MinRelevance`, GrayMatter drops below the
-window's cost while keeping full recall of old facts. Method and per-query
-detail in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+window's newest-first picks. With `MinRelevance`, GrayMatter uses 64 tokens per
+query and retains the observed 83% hit rate on old facts. CI checks the token
+and retrieval tables above against their benchmark outputs. [Retrieval methodology and per-query results](benchmarks/RESULTS.md)
 
-Every figure on this page is machine-checked against a live run in CI.
+### What happens when a fact changes?
+
+A separate keyword-retrieval benchmark made the same 35 queries against 600 facts. Storing corrections as independent facts let retired values appear **35 times** in the top eight. Recording explicit revisions brought that count to **zero**. The current value both reached the top eight and outranked every retired version in **25 of 35** queries, up from **8 of 35**.
+
+![Seventeen more queries returned the current value ahead of every retired version after explicit revisions. A separate MCP check shows that a valid write with text, source, and quote stores the fact text in full and retains the source and exact quote in core.](.github/assets/graymatter-revisions-and-citations.png)
+
+[Revision benchmark and per-group results](benchmarks/revision_currency/RESULTS.md) · [How citations are stored and retrieved](docs/citation-evidence.md)
 
 ---
 

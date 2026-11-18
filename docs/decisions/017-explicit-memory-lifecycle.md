@@ -22,4 +22,3 @@ The context selector keeps its existing priority. The ordinary weight floor can 
 ## Verification and reversal
 
 Regression checks cover scoped activity, marker selection and corrupt resume, confirmed identity and single dispatch, current-age pruning, cancellation, reopen and transaction counts. Reconsider context priority only after a separate experiment demonstrates that necessary context survives without displacing durable constraints. Reconsider batch size if a representative local measurement shows reader latency or writer contention exceeds the deployment budget.
-
