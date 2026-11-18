@@ -94,6 +94,11 @@ func TestMaintenanceBatchesMatchPerRowAfterReopen(t *testing.T) {
 			reference := openLineageStore(t, t.TempDir(), indexed)
 			seedMaintenanceFacts(t, batched, 260)
 			facts := seedMaintenanceFacts(t, reference, 260)
+			if indexed {
+				if usable, err := batched.idxUsable(lineageAgent); err != nil || !usable {
+					t.Fatalf("seeded index must be verified before decay: usable=%v err=%v", usable, err)
+				}
+			}
 			// The reference measures equivalence of state, not durable I/O.
 			reference.db.NoSync = true
 			now := lineageTime

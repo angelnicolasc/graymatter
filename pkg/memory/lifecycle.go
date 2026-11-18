@@ -161,6 +161,9 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 		if rows == nil {
 			return errFactUnchanged
 		}
+		state, indexed := idxReadState(tx, namespace)
+		keepPostings := s.cfg.CandidateRetrieval && indexed && state.Version == indexVersion &&
+			state.Stemmed == s.cfg.StemKeywords && s.idxCounted(namespace)
 		changed := false
 		for _, entry := range selected {
 			if rows.Get([]byte(entry.ID)) == nil {
@@ -178,7 +181,12 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 				continue
 			}
 			current.Weight = weight
-			if err := s.persistFactTx(tx, rows, namespace, current); err != nil {
+			if keepPostings {
+				err = s.persistDecayedFactTx(tx, rows, namespace, current)
+			} else {
+				err = s.persistFactTx(tx, rows, namespace, current)
+			}
+			if err != nil {
 				return fmt.Errorf("decay fact %s: %w", entry.ID, err)
 			}
 			changed = true
@@ -195,6 +203,23 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 		return nil
 	}
 	return err
+}
+
+// persistDecayedFactTx changes only Weight, which affects neither postings
+// nor the recency spine. Preserve citation validation and the index write
+// stamp used by cached readers.
+func (s *Store) persistDecayedFactTx(tx *bolt.Tx, rows *bolt.Bucket, namespace string, fact Fact) error {
+	if err := hydrateCitationTx(tx, &fact); err != nil {
+		return err
+	}
+	data, err := fact.marshal()
+	if err != nil {
+		return err
+	}
+	if err := rows.Put([]byte(fact.ID), data); err != nil {
+		return err
+	}
+	return idxBumpCount(tx, namespace, 0, s.cfg.StemKeywords)
 }
 
 func (s *Store) pruneFact(agentID, id string, now time.Time, lambda float64) error {
