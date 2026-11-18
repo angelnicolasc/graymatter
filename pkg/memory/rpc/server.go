@@ -461,6 +461,9 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 	resp.Protocol = Protocol
 	resp.Capabilities = s.confidenceCapabilities()
 	resp.Capabilities = append(resp.Capabilities, s.inspectionCapabilities()...)
+	if s.supportsConsolidationReporting() {
+		resp.Capabilities = append(resp.Capabilities, ConsolidationReportV1)
+	}
 	weight := memory.DefaultConfidenceWeight
 	if provider, ok := s.backend.(DefaultConfidenceProvider); ok {
 		weight = provider.DefaultConfidenceWeight()

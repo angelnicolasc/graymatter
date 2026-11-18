@@ -41,11 +41,16 @@ func factInTx(tx *bolt.Tx, agentID, id string) (Fact, error) {
 // Returning errFactUnchanged without modifying the fact skips persistence and
 // returns the current fact successfully after rolling back the transaction.
 func (s *Store) patchFact(agentID, id string, patch func(*Fact) error) (Fact, error) {
+	fact, _, err := s.patchFactWithReceipt(agentID, id, patch, nil)
+	return fact, err
+}
+
+func (s *Store) patchFactWithReceipt(agentID, id string, patch func(*Fact) error, update commitUpdate) (Fact, commitReceipt, error) {
 	if s.readOnly {
-		return Fact{}, ErrStoreReadOnly
+		return Fact{}, notCommitted, ErrStoreReadOnly
 	}
 	var updated Fact
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	receipt, err := s.trackCommit(update, func(tx *bolt.Tx) error {
 		current, err := factInTx(tx, agentID, id)
 		if err != nil {
 			return err
@@ -65,7 +70,7 @@ func (s *Store) patchFact(agentID, id string, patch func(*Fact) error) (Fact, er
 	if err == errFactUnchanged {
 		err = nil
 	}
-	return updated, err
+	return updated, receipt, err
 }
 
 func (s *Store) retireFact(agentID string, victim Fact, replacementID string, requireUnpinned bool) error {
@@ -80,17 +85,22 @@ func (s *Store) retireDerivedFact(agentID string, victim Fact, replacementID str
 }
 
 func (s *Store) retireSnapshotFact(agentID string, victim Fact, replacementID string, requireUnpinned, requireConfidence bool) error {
+	_, err := s.retireSnapshotFactWithReceipt(agentID, victim, replacementID, requireUnpinned, requireConfidence, nil)
+	return err
+}
+
+func (s *Store) retireSnapshotFactWithReceipt(agentID string, victim Fact, replacementID string, requireUnpinned, requireConfidence bool, update commitUpdate) (commitReceipt, error) {
 	if victim.AgentID != agentID {
-		return fmt.Errorf("retire: fact belongs to another agent")
+		return notCommitted, fmt.Errorf("retire: fact belongs to another agent")
 	}
-	_, err := s.patchFact(agentID, victim.ID, func(current *Fact) error {
+	_, receipt, err := s.patchFactWithReceipt(agentID, victim.ID, func(current *Fact) error {
 		if current.IsSuperseded() || current.Text != victim.Text || current.Kind != victim.Kind || (requireUnpinned && current.Pinned) || (requireConfidence && current.Confidence != victim.Confidence) {
 			return fmt.Errorf("%w: cannot retire fact %s", ErrFactChanged, victim.ID)
 		}
 		current.SupersededBy = replacementID
 		return nil
-	})
-	return err
+	}, update)
+	return receipt, err
 }
 
 // SetPinned changes pin metadata on exact live IDs without replaying a stale

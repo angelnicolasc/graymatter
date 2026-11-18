@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -102,12 +103,19 @@ func (s *Store) MaybeConsolidate(ctx context.Context, agentID string, cfg Consol
 //  2. If fact count > threshold, LLM-summarise the weakest batch.
 //  3. Prune facts with weight < 0.01.
 func (s *Store) Consolidate(ctx context.Context, agentID string, cfg ConsolidateConfig) error {
+	_, err := s.consolidate(ctx, agentID, cfg, consolidationWrites{})
+	return err
+}
+
+func (s *Store) consolidate(ctx context.Context, agentID string, cfg ConsolidateConfig, writes consolidationWrites) (consolidationOutcome, error) {
+	out := consolidationOutcome{report: ConsolidationReport{Status: ConsolidationNotAttempted, Reason: "aborted_before_summary"}}
 	facts, err := s.List(agentID)
 	if err != nil {
-		return err
+		return out, err
 	}
 	if len(facts) == 0 {
-		return nil
+		out.report = skippedConsolidation("no_facts")
+		return out, nil
 	}
 
 	halfLife := cfg.GetDecayHalfLife()
@@ -143,47 +151,13 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		}
 	}
 	if len(decayErrs) > 0 {
-		return errors.Join(decayErrs...)
+		return out, errors.Join(decayErrs...)
 	}
 
-	// Step 2: LLM summarisation when enabled and threshold exceeded.
-	// Strictly greater, unlike MaybeConsolidate's >= — see the note there.
-	//
-	// Propose/apply discipline (ADR-011): the LLM only ever proposes; the
-	// application is deterministic. A proposal that fails to arrive or fails
-	// validation is discarded with a hook and the store is untouched — decay
-	// and pruning already ran, so a broken summariser degrades to the exact
-	// behaviour of ConsolidateLLM="".
-	if len(facts) > cfg.GetConsolidateThreshold() && cfg.GetConsolidateLLM() != "" {
-		batch := summarisationBatch(facts)
-
-		prop, err := summariseFacts(ctx, batch, cfg)
-		switch {
-		case err != nil:
-			// Report rather than swallow. Summarisation failing is not fatal —
-			// the facts are still there — but a caller who configured an LLM
-			// and gets nothing back has no other way to find out. Unreachable
-			// Ollama and discarded proposals both arrive here; neither may
-			// touch the store.
-			if s.cfg.OnConsolidateError != nil {
-				s.cfg.OnConsolidateError(agentID, err)
-			}
-		case prop != nil:
-			applied, applyErr := s.applyProposal(ctx, agentID, batch, prop)
-			if applied > 0 {
-				if cErr := recordConsolidation(s.db, applied); cErr != nil && s.cfg.OnConsolidateError != nil {
-					s.cfg.OnConsolidateError(agentID, fmt.Errorf("record consolidation counters: %w", cErr))
-				}
-			}
-			if applyErr != nil && s.cfg.OnConsolidateError != nil {
-				s.cfg.OnConsolidateError(agentID, applyErr)
-			}
-			if errors.Is(applyErr, ErrConsolidationRetirement) {
-				return applyErr
-			}
-		}
-		// prop == nil && err == nil: summariser produced nothing to apply by
-		// configuration (unknown provider name) — silence stays correct.
+	// Step 2: report summary activity independently of the remaining maintenance.
+	out, err = s.consolidateSummary(ctx, agentID, facts, cfg, writes)
+	if err != nil {
+		return out, err
 	}
 
 	// Step 3: prune dead facts. Pinned facts are exempt (invariant I-1):
@@ -191,7 +165,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	// didn't stop pruning would be a promise the store breaks.
 	facts, err = s.List(agentID)
 	if err != nil {
-		return err
+		return out, err
 	}
 	for _, f := range facts {
 		if f.Pinned {
@@ -303,7 +277,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		}
 	}
 
-	return nil
+	return out, nil
 }
 
 // GraphDecayer is an optional GraphAccessor capability: lifecycle-driven
@@ -400,12 +374,18 @@ func stripCodeFence(s string) string {
 // It returns how many facts were actually tombstoned; per-fact write failures
 // are joined into the returned error without stopping the remaining ones.
 func (s *Store) applyProposal(ctx context.Context, agentID string, batch []Fact, prop *consolidationProposal) (int, error) {
+	applied, err := s.applyProposalWithReceipt(ctx, agentID, batch, prop, consolidationWrites{})
+	return applied.retired, err
+}
+
+func (s *Store) applyProposalWithReceipt(ctx context.Context, agentID string, batch []Fact, prop *consolidationProposal, writes consolidationWrites) (proposalApplication, error) {
+	var applied proposalApplication
 	// Defence in depth: parseProposal validates Ollama output, but the
 	// Anthropic path wraps plain text into a proposal directly. No caller
 	// reaches here with an unusable proposal any more — keeping the check at
 	// the mutation boundary is what makes that true for future paths too.
 	if prop == nil || strings.TrimSpace(prop.Summary) == "" || len(prop.Consumes) == 0 {
-		return 0, fmt.Errorf("%w: empty summary or empty consumes", ErrInvalidProposal)
+		return applied, fmt.Errorf("%w: empty summary or empty consumes", ErrInvalidProposal)
 	}
 	byID := make(map[string]Fact, len(batch))
 	for _, f := range batch {
@@ -423,29 +403,31 @@ func (s *Store) applyProposal(ctx context.Context, agentID string, batch []Fact,
 		}
 	}
 	if len(consumed) == 0 {
-		return 0, fmt.Errorf("%w: no valid live consumed IDs", ErrInvalidProposal)
+		return applied, fmt.Errorf("%w: no valid live consumed IDs", ErrInvalidProposal)
 	}
 
-	summary, err := s.putReturningFactPrepared(ctx, agentID, prop.Summary, KindFact, "", WriteOptions{}, func(tx *bolt.Tx, summary *Fact) error {
+	summary, receipt, err := s.putReturningFactPreparedWithReceipt(ctx, agentID, prop.Summary, KindFact, "", WriteOptions{}, func(tx *bolt.Tx, summary *Fact) error {
 		if err := validateSourcesTx(tx, agentID, consumed, true); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidProposal, err)
 		}
 		summary.Confidence = derivedConfidence(consumed)
 		return nil
-	})
+	}, writes.summary)
 	if err != nil {
-		return 0, fmt.Errorf("put consolidation summary: %w", err)
+		applied.summaryUnconfirmed = receipt == commitUnconfirmed
+		return applied, fmt.Errorf("put consolidation summary: %w", err)
 	}
-	summaryID := summary.ID
+	applied.summaryID = summary.ID
 
 	var errs []error
-	applied := 0
 	for _, f := range consumed {
-		if err := s.retireDerivedFact(agentID, f, summaryID, true); err != nil {
-			errs = append(errs, fmt.Errorf("summary %s committed; %w: tombstone consolidated fact %s: %w", summaryID, ErrConsolidationRetirement, f.ID, err))
+		receipt, err := s.retireSnapshotFactWithReceipt(agentID, f, applied.summaryID, true, true, writes.retirement)
+		if err != nil {
+			applied.retirementUnconfirmed = applied.retirementUnconfirmed || receipt == commitUnconfirmed
+			errs = append(errs, fmt.Errorf("summary %s committed; %w: tombstone consolidated fact %s: %w", applied.summaryID, ErrConsolidationRetirement, f.ID, err))
 			continue
 		}
-		applied++
+		applied.retired++
 	}
 	return applied, errors.Join(errs...)
 }
@@ -501,7 +483,7 @@ func (s *Store) markExtracted(agentID, factID, sig string) error {
 	})
 }
 
-func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (*consolidationProposal, error) {
+func summariseFacts(ctx context.Context, facts []Fact, provider string, cfg ConsolidateConfig, responseStatus *int) (*consolidationProposal, error) {
 	if len(facts) == 0 {
 		return nil, nil
 	}
@@ -511,15 +493,19 @@ func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (*
 		texts = append(texts, "- "+f.Text)
 		rows = append(rows, fmt.Sprintf("- %s: %s", f.ID, f.Text))
 	}
-	switch cfg.GetConsolidateLLM() {
+	switch provider {
 	case "anthropic":
 		prompt := fmt.Sprintf(
 			"The following are memory facts for an AI agent. "+
 				"Produce a single concise paragraph (≤5 sentences) that preserves all key information:\n\n%s",
 			strings.Join(texts, "\n"),
 		)
-		summary, err := consolidateViaAnthropic(ctx, prompt, cfg)
+		var response *http.Response
+		summary, err := consolidateViaAnthropic(ctx, prompt, cfg, option.WithResponseInto(&response))
 		if err != nil {
+			if response != nil {
+				*responseStatus = response.StatusCode
+			}
 			return nil, err
 		}
 		summary = strings.TrimSpace(summary)
@@ -548,7 +534,7 @@ func summariseFacts(ctx context.Context, facts []Fact, cfg ConsolidateConfig) (*
 				"\n\n%s",
 			strings.Join(rows, "\n"),
 		)
-		return consolidateViaOllama(ctx, prompt, cfg)
+		return consolidateViaOllama(ctx, prompt, cfg, responseStatus)
 	default:
 		// Unknown provider name. Summarisation is skipped; decay and pruning
 		// still run, and that is the configured behaviour rather than a
@@ -569,7 +555,7 @@ var ollamaHTTPTimeout = 120 * time.Second
 // then validated as a strict proposal. One retry on transient failures
 // (transport errors, 5xx, 408, 429); deterministic rejections (4xx) and
 // invalid proposals fail immediately because retrying reproduces them.
-func consolidateViaOllama(ctx context.Context, prompt string, cfg ConsolidateConfig) (*consolidationProposal, error) {
+func consolidateViaOllama(ctx context.Context, prompt string, cfg ConsolidateConfig, responseStatus *int) (*consolidationProposal, error) {
 	base := strings.TrimRight(cfg.GetOllamaURL(), "/")
 	if base == "" {
 		base = "http://localhost:11434"
@@ -591,6 +577,7 @@ func consolidateViaOllama(ctx context.Context, prompt string, cfg ConsolidateCon
 	client := &http.Client{Timeout: ollamaHTTPTimeout}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
+		*responseStatus = 0
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/generate", bytes.NewReader(payload))
 		if err != nil {
 			return nil, fmt.Errorf("ollama: build request: %w", err)
@@ -608,6 +595,7 @@ func consolidateViaOllama(ctx context.Context, prompt string, cfg ConsolidateCon
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
+			*responseStatus = resp.StatusCode
 			lastErr = fmt.Errorf("ollama: status %d: %s", resp.StatusCode, truncateForLog(body))
 			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests {
 				continue
@@ -633,7 +621,7 @@ func truncateForLog(b []byte) string {
 	return s
 }
 
-func consolidateViaAnthropic(ctx context.Context, prompt string, cfg ConsolidateConfig) (string, error) {
+func consolidateViaAnthropic(ctx context.Context, prompt string, cfg ConsolidateConfig, opts ...option.RequestOption) (string, error) {
 	key := cfg.GetAnthropicAPIKey()
 	if key == "" {
 		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
@@ -648,9 +636,12 @@ func consolidateViaAnthropic(ctx context.Context, prompt string, cfg Consolidate
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 		},
-	})
+	}, opts...)
 	if err != nil {
 		return "", err
+	}
+	if msg == nil {
+		return "", errMissingProviderMessage
 	}
 	if len(msg.Content) == 0 {
 		return "", nil

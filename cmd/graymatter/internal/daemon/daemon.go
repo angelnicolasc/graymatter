@@ -105,7 +105,7 @@ func Run(opts RunOptions) error {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := rpc.NewServer(rememberBackend{AdvancedStore: adv, mem: mem}, cfg)
+	srv := rpc.NewServer(withConsolidationReporting(rememberBackend{AdvancedStore: adv, mem: mem}), cfg)
 	srv.SetAuthToken(token)
 	srv.RegisterExtra(HostServiceName, &Host{
 		mem:     mem,

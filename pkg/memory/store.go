@@ -539,18 +539,23 @@ func (s *Store) putReturningFactKind(ctx context.Context, agentID, text, kind, s
 // write. Derived writes use it to validate their source snapshot and stamp the
 // conservative label without a transient unlabeled fact.
 func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kind, source string, options WriteOptions, prepare func(*bolt.Tx, *Fact) error) (Fact, error) {
+	fact, _, err := s.putReturningFactPreparedWithReceipt(ctx, agentID, text, kind, source, options, prepare, nil)
+	return fact, err
+}
+
+func (s *Store) putReturningFactPreparedWithReceipt(ctx context.Context, agentID, text, kind, source string, options WriteOptions, prepare func(*bolt.Tx, *Fact) error, update commitUpdate) (Fact, commitReceipt, error) {
 	if options.Confidence != nil {
 		confidence := *options.Confidence
 		options.Confidence = &confidence
 	}
 	if err := options.Validate(); err != nil {
-		return Fact{}, err
+		return Fact{}, notCommitted, err
 	}
 	if s.readOnly {
-		return Fact{}, ErrStoreReadOnly
+		return Fact{}, notCommitted, ErrStoreReadOnly
 	}
 	if err := ctx.Err(); err != nil {
-		return Fact{}, err
+		return Fact{}, notCommitted, err
 	}
 	start := time.Now()
 
@@ -571,7 +576,7 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 	}
 	hasEmbedding := len(emb) > 0
 
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	receipt, err := s.trackCommit(update, func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -625,8 +630,9 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 			}
 		}
 		return nil
-	}); err != nil {
-		return Fact{}, fmt.Errorf("put fact: %w", err)
+	})
+	if err != nil {
+		return Fact{}, receipt, fmt.Errorf("put fact: %w", err)
 	}
 
 	if hasEmbedding {
@@ -648,7 +654,7 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 	if s.cfg.OnPut != nil {
 		s.cfg.OnPut(agentID, f.ID, time.Since(start))
 	}
-	return f, nil
+	return f, receipt, nil
 }
 
 // Delete removes a fact by ID for agentID, together with its KG extraction

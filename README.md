@@ -434,7 +434,7 @@ graymatter forget "agent" "fact"       # retire a fact with no replacement
 graymatter hooks install         # Claude Code auto-memory (merge, never
                                  # overwrite)
 graymatter hooks doctor          # verify hooks, binary path, latency
-graymatter consolidate "agent"   # one consolidation cycle
+graymatter consolidate "agent" --json  # report a consolidation cycle
 
 # knowledge graph
 graymatter kg render --out g.html    # self-contained page (or .dot)

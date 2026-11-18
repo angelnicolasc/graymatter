@@ -14,6 +14,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   uses its startup configuration. Provider redirects preserve POST and stay on
   the configured origin.
 
+### Changed
+
+- **Manual consolidation reports its result.** `graymatter consolidate --json`
+  reports a summary that was applied, skipped, failed, or left an uncertain or
+  partial result. Restart an older running daemon after updating the CLI.
+
 ---
 
 ## [0.20.1] - 2026-10-09

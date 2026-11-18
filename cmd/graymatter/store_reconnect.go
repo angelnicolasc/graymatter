@@ -43,6 +43,7 @@ type reconnectingStore struct {
 	mu     sync.Mutex
 	cur    cliStore
 	reopen func() (cliStore, error)
+	report *daemonReportingStore
 }
 
 func newReconnectingStore(initial cliStore) *reconnectingStore {
@@ -50,7 +51,13 @@ func newReconnectingStore(initial cliStore) *reconnectingStore {
 }
 
 func newReconnectingStoreAt(initial cliStore, reopen func() (cliStore, error)) *reconnectingStore {
-	return &reconnectingStore{cur: initial, reopen: reopen}
+	store := &reconnectingStore{cur: initial, reopen: reopen}
+	if owner, ok := initial.(interface{ reportingDataDir() string }); ok {
+		if dir := owner.reportingDataDir(); dir != "" {
+			store.report = &daemonReportingStore{dir: dir}
+		}
+	}
+	return store
 }
 
 // reopenStore returns a fresh, unwrapped daemon handle.

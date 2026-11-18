@@ -128,6 +128,28 @@ environment. Stop and restart it with the new environment to change its destinat
 Anthropic, OpenAI and Voyage follow only HTTP 307 and 308 redirects to the same
 origin, preserving POST. This policy applies to official and custom URLs.
 
+## Consolidation results
+
+Run `graymatter consolidate AGENT --json` to get a versioned result for the
+summary phase. `summary.status` distinguishes applied, skipped, failed, partial,
+uncertain and not-attempted outcomes. `summary.summary_fact_id` identifies a
+confirmed summary commit, and `summary.sources_retired` counts confirmed source
+retirements. With uncertain retirement, that count is a lower bound. Decay,
+pruning and graph maintenance can run independently of the summary phase.
+
+The command exits 0 for an applied or skipped summary without an operation
+error. Other reported outcomes exit 1. An unconfirmed storage operation keeps
+its known report. A lost daemon response returns `summary: null` with an
+`outcome_unknown` error. Inspect the store before retrying either case.
+`--quiet` suppresses successful human output. `--json` still writes its result.
+On Unix, a broken output pipe can terminate the process with `SIGPIPE`.
+
+With a daemon, update and restart the daemon when updating the CLI if the
+running daemon lacks consolidation reporting. During a mixed-version upgrade,
+a new hook can still save its session checkpoint while its detached
+consolidation command is rejected by the older daemon. Direct operation remains
+available with `--no-daemon` or `GRAYMATTER_NO_DAEMON=1`.
+
 ## Prepared-store admission for MCP (opt-in)
 
 The default `graymatter mcp serve` can create a valid missing store. To require

@@ -30,6 +30,7 @@ import (
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
+	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
 // HostServiceName is the net/rpc service name for the host-level service,
@@ -370,6 +371,26 @@ func (h *Host) Shutdown(req *ShutdownRequest, resp *ShutdownResponse) error {
 type rememberBackend struct {
 	graymatter.AdvancedStore
 	mem *graymatter.Memory
+}
+
+// Advertise reporting only when the actual store implements it. Keep the
+// method off rememberBackend itself so wrappers cannot create false support.
+type reportingRememberBackend struct {
+	rememberBackend
+	memory.ReportingConsolidator
+}
+
+func (b reportingRememberBackend) SupportsConsolidationReport() bool {
+	return rpc.SupportsConsolidationReporting(b.ReportingConsolidator)
+}
+
+func withConsolidationReporting(backend rememberBackend) rpc.Backend {
+	if rpc.SupportsConsolidationReporting(backend.AdvancedStore) {
+		return reportingRememberBackend{
+			rememberBackend: backend, ReportingConsolidator: backend.AdvancedStore.(memory.ReportingConsolidator),
+		}
+	}
+	return backend
 }
 
 func (b rememberBackend) Put(ctx context.Context, agentID, text string) error {
