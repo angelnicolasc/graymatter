@@ -2,9 +2,14 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
+	netrpc "net/rpc"
+	"net/rpc/jsonrpc"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -159,5 +164,95 @@ func TestLineageArchiveRPCRejectsOversizedSnapshotWithoutPartialRows(t *testing.
 	}
 	if err := client.Ping(); err != nil {
 		t.Fatalf("oversize rejection damaged connection: %v", err)
+	}
+}
+
+func TestPU07LineageArchiveBoundsSubjectMetadata(t *testing.T) {
+	ctx := t.Context()
+	archive := memory.LineageArchive{Version: memory.LineageArchiveVersion, Facts: []memory.Fact{{Text: ""}}}
+	initial, err := encodeLineageArchive(ctx, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialJSON, err := json.Marshal(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive.Facts[0].Text = strings.Repeat("x", maxLineageArchiveBytes-len(initialJSON)-16)
+	nearLimit, err := encodeLineageArchive(ctx, archive)
+	if err != nil {
+		t.Fatalf("archive below the limit was rejected: %v", err)
+	}
+	nearLimitJSON, err := json.Marshal(nearLimit)
+	if err != nil || len(nearLimitJSON) != maxLineageArchiveBytes-16 {
+		t.Fatalf("archive fixture size: %d bytes, %v", len(nearLimitJSON), err)
+	}
+
+	withHead := archive
+	withHead.SubjectHeads = []memory.SubjectHeadInspection{{
+		Namespace: "project", Name: "current release", State: "active",
+		Reference: memory.LineageReference{FactID: "01ABCDEFGHIJKLMNOPQRSTUVWX", ContentHash: strings.Repeat("a", 64)},
+	}}
+	withIssue := archive
+	withIssue.SubjectIssues = &memory.SubjectIssues{Total: 1, Subjects: []memory.SubjectIssue{{
+		Namespace: "project", Name: "deployment policy", HeadFactID: "01ABCDEFGHIJKLMNOPQRSTUVWX",
+	}}}
+	for _, tc := range []struct {
+		name    string
+		archive memory.LineageArchive
+	}{
+		{"subject_heads", withHead},
+		{"subject_issues", withIssue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := encodeLineageArchive(t.Context(), tc.archive)
+			if !errors.Is(err, ErrLineageArchiveTooLarge) || !reflect.DeepEqual(got, LineageArchiveResponse{}) {
+				t.Fatalf("oversized metadata returned a partial archive or hid its reason: err=%v", err)
+			}
+		})
+	}
+}
+
+type preSubjectArchiveService struct{ exportCalls atomic.Int32 }
+
+func (*preSubjectArchiveService) Ping(_ *PingRequest, out *PingResponse) error {
+	out.Protocol = Protocol
+	out.Capabilities = []string{AuthoritativeLineageV1, InspectionContextV1}
+	return nil
+}
+
+func (*preSubjectArchiveService) InspectLineage(_ *LineageInspectionRequest, out *LineageInspectionResponse) error {
+	out.Lineage.ContentHash = "available"
+	return nil
+}
+
+func (s *preSubjectArchiveService) ExportLineage(_ *LineageArchiveRequest, out *LineageArchiveResponse) error {
+	s.exportCalls.Add(1)
+	out.Version = memory.LineageArchiveVersion
+	return nil
+}
+
+func TestPU07LineageArchiveRejectsPartialLegacyPeer(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	service := &preSubjectArchiveService{}
+	server := netrpc.NewServer()
+	if err := server.RegisterName(ServiceName, service); err != nil {
+		t.Fatal(err)
+	}
+	go server.ServeCodec(jsonrpc.NewServerCodec(serverConn))
+	client := &Client{rpc: netrpc.NewClientWithCodec(jsonrpc.NewClientCodec(clientConn)), conn: clientConn, callTimeout: time.Second}
+	t.Cleanup(func() { _ = client.Close(); _ = serverConn.Close() })
+
+	ctx := t.Context()
+	if lineage, err := client.InspectLineage(ctx, "project", "kept", ""); err != nil || lineage.ContentHash != "available" {
+		t.Fatalf("old peer should still support inspection: %+v, %v", lineage, err)
+	}
+	archive, err := client.ExportLineage(ctx, "project")
+	if !errors.Is(err, ErrLineageUnsupported) || !strings.Contains(err.Error(), "subject heads and diagnostics") ||
+		!strings.Contains(err.Error(), "Update and restart") || !reflect.DeepEqual(archive, memory.LineageArchive{}) {
+		t.Fatalf("old peer did not report an explicit rejection: archive=%+v err=%v", archive, err)
+	}
+	if service.exportCalls.Load() != 0 {
+		t.Fatalf("export dispatched to old peer %d times", service.exportCalls.Load())
 	}
 }

@@ -14,6 +14,10 @@ import (
 // updates, and versioned lineage inspection on this connection.
 const AuthoritativeLineageV1 = "lineage-v1"
 
+// LineageSubjectArchiveV1 guarantees that audit exports include subject heads
+// and diagnostics from the same snapshot as facts and evidence.
+const LineageSubjectArchiveV1 = "lineage-subject-archive-v1"
+
 var (
 	// ErrLineageUnsupported means no lineage operation was dispatched to the peer.
 	ErrLineageUnsupported = errors.New("daemon does not support authoritative lineage. Update and restart the daemon")
@@ -46,12 +50,14 @@ type LineageArchiveRequest struct {
 }
 
 // LineageArchiveResponse holds pre-encoded rows so the server can bound the
-// complete response before the JSON-RPC codec writes it.
+// complete archive payload before the JSON-RPC codec writes it.
 type LineageArchiveResponse struct {
-	Version   int
-	Namespace string
-	Facts     []json.RawMessage
-	Evidence  []json.RawMessage
+	Version       int
+	Namespace     string
+	Facts         []json.RawMessage
+	Evidence      []json.RawMessage
+	SubjectHeads  []json.RawMessage     `json:"subject_heads"`
+	SubjectIssues *memory.SubjectIssues `json:"subject_issues,omitempty"`
 }
 
 func (s *Server) lineageBackend() LineageBackend {
@@ -134,7 +140,9 @@ func (s *Server) ExportLineage(req *LineageArchiveRequest, resp *LineageArchiveR
 }
 
 func encodeLineageArchive(ctx context.Context, archive memory.LineageArchive) (LineageArchiveResponse, error) {
-	resp := LineageArchiveResponse{Version: archive.Version, Namespace: archive.Namespace}
+	resp := LineageArchiveResponse{
+		Version: archive.Version, Namespace: archive.Namespace, SubjectIssues: archive.SubjectIssues,
+	}
 	header, err := json.Marshal(resp)
 	if err != nil {
 		return LineageArchiveResponse{}, err
@@ -142,11 +150,18 @@ func encodeLineageArchive(ctx context.Context, archive memory.LineageArchive) (L
 	// The header includes null for each array, which takes at least as much
 	// space as empty brackets. Budget an extra byte per row for separators.
 	remaining := maxLineageArchiveBytes - len(header)
+	if remaining < 0 {
+		return LineageArchiveResponse{}, ErrLineageArchiveTooLarge
+	}
 	resp.Facts, err = encodeLineageRows(ctx, archive.Facts, &remaining)
 	if err != nil {
 		return LineageArchiveResponse{}, err
 	}
 	resp.Evidence, err = encodeLineageRows(ctx, archive.Evidence, &remaining)
+	if err != nil {
+		return LineageArchiveResponse{}, err
+	}
+	resp.SubjectHeads, err = encodeLineageRows(ctx, archive.SubjectHeads, &remaining)
 	if err != nil {
 		return LineageArchiveResponse{}, err
 	}
@@ -198,6 +213,9 @@ func (c *Client) ExportLineage(ctx context.Context, namespace string) (memory.Li
 	defer cancel()
 	if err := c.requireLineage(ctx); err != nil {
 		return memory.LineageArchive{}, err
+	}
+	if supported, _ := c.Capability(LineageSubjectArchiveV1); !supported {
+		return memory.LineageArchive{}, fmt.Errorf("complete lineage export requires daemon support for subject heads and diagnostics: %w", ErrLineageUnsupported)
 	}
 	meta, err := newInspectionContext(ctx)
 	if err != nil {

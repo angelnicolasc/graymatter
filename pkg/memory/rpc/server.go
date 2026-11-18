@@ -480,7 +480,7 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 		resp.Capabilities = append(resp.Capabilities, ReviewJournalV1)
 	}
 	if lineage {
-		resp.Capabilities = append(resp.Capabilities, AuthoritativeLineageV1)
+		resp.Capabilities = append(resp.Capabilities, AuthoritativeLineageV1, LineageSubjectArchiveV1)
 	}
 	if (review || lineage) && !slices.Contains(resp.Capabilities, InspectionContextV1) {
 		resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
