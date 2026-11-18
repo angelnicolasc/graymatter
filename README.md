@@ -51,7 +51,7 @@ That gap is GrayMatter.
 <p align="center">
 <strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
 Remembers what a sliding window forgets: facts planted 96 sessions back come back <strong>83%</strong> of the time.<br>
-Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
+Recall selects relevant facts and keeps the injected context small.<br>
 No Docker. No Redis. No API key required for storage.<br><br>
 Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
 </p>
@@ -88,8 +88,13 @@ produced it:
 ```bash
 graymatter kg render --out graph.html
 graymatter kg render --out graph.dot    # Graphviz, for your own layout
-graymatter doctor --graph --html        # analytics + this render in one go
+graymatter doctor --graph --html graph.html
+graymatter kg inspect --json            # edge provenance and pending reasons
 ```
+
+Status and graph doctor report complete and pending provenance. Historical
+edges with uncertain support stay available to graph navigation. The inventory
+can finish with edges still pending review.
 
 Watch it build, one frame per session:
 
@@ -133,9 +138,10 @@ they are reported or estimated. Missing data remains unavailable, and failed
 refreshes keep the last observation marked stale. No account is connected
 automatically. See the [workbench guide](docs/tui.md) and [Usage setup](docs/usage.md).
 
-`graymatter doctor --graph` extends visibility to the knowledge graph itself:
-hubs by degree, articulation points, orphans, and a declared connectivity
-ratio — printed or emitted as JSON.
+`graymatter doctor --graph` reports hubs, articulation points, orphans,
+connectivity and provenance in text or JSON. It reads the graph through an
+existing daemon or a read-only store and only writes a render when given an
+explicit `--html` path.
 
 ---
 
@@ -151,7 +157,7 @@ ratio — printed or emitted as JSON.
 | **Self-curation** | `memory_reflect` lets the agent add, update, forget, and link its own memories |
 | **Context block** | Projects top facts into CLAUDE.md / AGENTS.md inside a token budget (`context-sync`) |
 | **Free auditor** | `doctor --audit` measures tokens, duplicates, staleness, and marker conflicts in any instruction file |
-| **Deterministic decay** | 30-day half-life; facts fade when nothing touches them. Tombstones, never deletes |
+| **Deterministic decay** | Unpinned facts decay with a default 30-day half-life. Pruning can remove live facts and tombstones |
 | **Single binary** | ~10 MB static. No Docker, no Redis, no config files, no cloud accounts |
 
 ---
@@ -172,8 +178,8 @@ Standard `doctor` does not write a probe, start a daemon, execute a binary on
 PATH, or test whether the data directory is writable. Its config checks find
 references in files; they do not prove which settings a client loaded. In JSON,
 `ok` means no check failed, while `readiness: not_evaluated` keeps readiness
-separate from the observations. The `--health`, `--graph`, `--audit`, and
-`--embeddings` modes have separate contracts; graph rendering can write HTML.
+separate from the observations. The `--health`, `--audit`, and `--embeddings`
+modes have separate contracts.
 
 `graymatter init --global` still performs that normal setup in the current
 directory. It additionally installs the managed memory instructions in Claude
@@ -354,10 +360,39 @@ Agent runs
     ↓
 Remember(agent, observation) ← store key facts during/after run
     ↓
-Consolidate() [async]        ← summarise + decay + prune + extract entities
+Consolidate() [async]        ← apply decay, prune, and extract entities when enabled
 ```
 
-Consolidation is the only "smart" step. Everything else is deterministic.
+Consolidation runs memory maintenance. Generative compaction is disabled
+for Anthropic and Ollama. Configured embeddings and knowledge-graph extraction
+continue to operate. Historical summaries and counters remain available
+subject to the usual retention rules. Update or restart a running legacy
+daemon before using operations that can trigger maintenance.
+
+
+### Review memory evidence
+
+Use `review analyze` to explicitly send one namespace's eligible facts to a
+configured Anthropic or Ollama provider. Review writes versioned evidence,
+candidate summaries, and conflict records to a separate journal. Active
+memory, its recall eligibility, and routine maintenance are unchanged.
+
+```bash
+graymatter review analyze project --provider ollama
+graymatter review list project
+graymatter review inspect project record-id
+graymatter review reject project summary-id --decision "Needs more evidence"
+graymatter review resolve project conflict-id --decision "The runbook governs" --reference "runbook/retention"
+graymatter review dismiss project conflict-id --decision "Separate environments" --reference "runbook/environments"
+graymatter review purge project closed-record-id
+```
+
+The daemon owns provider configuration and credentials. Use `--model` to
+override the configured model for one request. `list`, `inspect`, `status`,
+and `doctor` read an existing store without starting a writer. Inspect
+emits JSON with the preserved evidence and recorded decisions. A source can
+be current, retired, changed, or missing independently of the conflict's
+resolution. Purge releases the journal record's claim on its evidence.
 
 ### Hooks (Claude Code, opt-in)
 
@@ -369,7 +404,7 @@ and after that the hook runner supplies routine recall automatically:
 | `SessionStart` | Injects the freshest live facts plus project-wide `__shared__` conventions — and re-injects after `/compact` (your memory survives compaction) |
 | `UserPromptSubmit` | Short per-turn recall (top-3 agent + top-3 shared), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save, `remember shared: <text>` saves into the shared namespace every agent reads |
 | `PreCompact` | Deterministic checkpoint before context compaction |
-| `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
+| `SessionEnd` | Checkpoint + detached memory maintenance (survives the editor closing) |
 
 Hooks and MCP are complementary. Every non-empty hook recall begins with a
 bracketed `GrayMatter hook recall ran` marker naming the namespace it actually
@@ -434,7 +469,7 @@ graymatter forget "agent" "fact"       # retire a fact with no replacement
 graymatter hooks install         # Claude Code auto-memory (merge, never
                                  # overwrite)
 graymatter hooks doctor          # verify hooks, binary path, latency
-graymatter consolidate "agent"   # one consolidation cycle
+graymatter consolidate "agent"   # one maintenance cycle
 
 # knowledge graph
 graymatter kg render --out g.html    # self-contained page (or .dot)
@@ -445,12 +480,13 @@ graymatter unpin "agent" "fact"      # restore normal decay
 graymatter tui                       # memory workbench: six views
 graymatter status                    # facts, recalls, KG state
 graymatter doctor                    # read-only setup observations; readiness not evaluated
-graymatter doctor --graph --html     # KG analytics + visual render
+graymatter doctor --graph --html graph.html
 graymatter doctor --health           # store health audit
 graymatter doctor --audit [path]     # audit any instruction file
 
 # export / serve / measure
 graymatter export --format obsidian --include-graph
+graymatter export --format json --include-lineage   # versioned audit archive
 graymatter mcp serve                 # MCP over stdio
 graymatter server                    # REST API server (127.0.0.1:8080)
 graymatter bench                     # audit published numbers (--hooks, --store)
@@ -576,11 +612,11 @@ condition under which it should be reversed.
 | [004](docs/decisions/004-local-first-single-node.md) | Local-first single node, deliberately not multi-tenant |
 | [005](docs/decisions/005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword |
 | [006](docs/decisions/006-configurable-signal-weights.md) | Signal weights are configurable — a sliding window is the special case |
-| [007](docs/decisions/007-supersede-tombstones.md) | Contradictions resolved by tombstone, never delete |
+| [007](docs/decisions/007-supersede-tombstones.md) | Corrections retire prior facts as tombstones |
 | [008](docs/decisions/008-knowledge-graph-wiring.md) | KG auto-population ships gated and measured |
 | [009](docs/decisions/009-kg-sentinel-activation.md) | `init --kg` persists activation via sentinel file |
-| [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation |
-| [011](docs/decisions/011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally |
+| [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay and pruning |
+| [011](docs/decisions/011-consolidation-propose-apply.md) | Historical propose/apply design. Generative compaction is disabled |
 | [012](docs/decisions/012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests |
 | [013](docs/decisions/013-structured-tool-results.md) | Tool results carry structuredContent twins with declared output schemas |
 
@@ -594,7 +630,12 @@ condition under which it should be reversed.
 | Vector index | chromem-go (pure Go) | Semantic embeddings, hybrid retrieval |
 | Export | Markdown files | Human-readable, git-friendly, Obsidian-compatible |
 
-Single file: `.graymatter/gray.db`. No migrations. Append-only with decay-based eviction.
+Facts are stored in `.graymatter/gray.db`. Revision and retirement remove facts
+from recall immediately and keep the old records as tombstones. Automatic
+pruning can remove unpinned facts, including tombstones, once their weight
+falls below 0.01. Explicit deletion through the Go store or REST API removes
+the fact record even when it is recent or pinned.
+See [fact retention and deletion](docs/api-stability.md#fact-retention-and-deletion).
 
 ---
 
@@ -676,7 +717,7 @@ It is exactly one thing: **the missing stateful layer for Go agents**, packaged 
 
 ## Roadmap
 
-- [x] Ollama-backed consolidation LLM — shipped in [v0.14.0](CHANGELOG.md): propose/apply with tombstone receipts, fully local ([ADR-011](docs/decisions/011-consolidation-propose-apply.md))
+- [x] Explicit proposal and conflict review with an evidence journal ([review memory evidence](#review-memory-evidence)).
 - [ ] Cross-project memory federation (read-only) — [#12](https://github.com/angelnicolasc/graymatter/issues/12), deferred until a multi-project store demonstrates the need
 - [ ] WebSocket streaming for REST API
 - [ ] MCP 2026-07-28 stateless protocol support

@@ -120,6 +120,15 @@ unknown flag fails visibly rather than falling back to eager creation.
 Command: `graymatter` (must be on PATH — check with
 `graymatter doctor`); args: `mcp serve`.
 
+## Refresh MCP tool discovery after an upgrade
+
+Restart the process serving `graymatter mcp serve` after upgrading the binary,
+then reconnect the MCP client to fetch the current tool descriptions and
+schemas. For stdio, restart the server through the client or start a fresh
+client session. For HTTP, restart the MCP service and refresh the client's
+cached discovery if needed. The MCP frontend serves tool discovery, while
+the data daemon handles storage requests.
+
 ## Status legend
 
 | Mark | Meaning |

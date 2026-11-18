@@ -8,6 +8,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Security
+
+- Build CI and release binaries with Go 1.26.10, which fixes [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) in the standard library.
+- **Generative compaction is disabled.** Automatic and explicit consolidation run maintenance only. Anthropic and Ollama summariser settings remain accepted for compatibility, and responses from those providers cannot publish active summaries or retire their sources. Decay, pruning, and configured graph extraction continue. Status distinguishes effective maintenance mode from historical summary counters.
+
+### Fixed
+
+- **Explicit memory revisions commit atomically.** CLI, MCP, and TUI revisions store the replacement and retire the selected sources in one transaction. A source conflict or write failure leaves the revision unapplied. Daemon clients require atomic revision support before dispatch.
+
 ---
 
 ## [0.20.1] - 2026-10-09

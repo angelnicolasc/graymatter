@@ -98,26 +98,58 @@ func TestDecayGraph_PrunesBelowFloorAndKeepsEdgesConsistent(t *testing.T) {
 	g, cleanup := seedDecayGraph(t)
 	defer cleanup()
 
-	// Drive the node under the floor with an ancient LastSeen.
-	if err := g.Upsert(Node{ID: "person:ghost", Label: "ghost", EntityType: "person", Weight: 0.02, LastSeen: time.Now().Add(-8760 * time.Hour)}); err != nil {
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	stale := now.Add(-8760 * time.Hour)
+	source := SourceSupport{Namespace: "agent", FactID: "fact", Digest: "generation-1"}
+	if err := g.Upsert(Node{ID: "person:ghost", Label: "ghost", EntityType: "person", Weight: 0.02, LastSeen: stale}); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.Link(Edge{From: "person:ghost", To: "concept:y", Relation: "co_mentioned", Weight: 0.001, CreatedAt: time.Now().Add(-8760 * time.Hour)}); err != nil {
+	if err := g.Upsert(Node{ID: "concept:orphan", Label: "orphan", EntityType: "concept", Weight: 0.02, LastSeen: stale}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.LinkDerived(Edge{From: "person:ghost", To: "concept:y", Relation: "co_mentioned", Weight: 0.001, CreatedAt: stale}, source); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := g.DecayGraph(720 * time.Hour); err != nil {
+	if err := g.DecayGraphAt(now, 720*time.Hour); err != nil {
 		t.Fatal(err)
 	}
+	nodes, edges, err := g.Neighbors("person:ghost", 1)
+	if err != nil || len(nodes) != 1 || len(edges) != 1 || edges[0].Weight >= 0.01 {
+		t.Fatalf("low-weight supported edge must remain traversable: %v, %v, %v", nodes, edges, err)
+	}
+	requireNodePresence(t, g, "person:ghost", true)
+	requireNodePresence(t, g, "concept:orphan", false)
 
-	nodes, _ := g.AllNodes()
-	for _, n := range nodes {
-		if n.ID == "person:ghost" {
-			t.Error("sub-floor node survived pruning")
+	if err := g.Link(Edge{From: "person:other", To: "concept:y", Relation: "manual", CreatedAt: stale}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.RemoveSupport(source); err != nil {
+		t.Fatal(err)
+	}
+	requireNodePresence(t, g, "person:ghost", true)
+	if err := g.DecayGraphAt(now, 720*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	requireNodePresence(t, g, "person:ghost", false)
+	requireNodePresence(t, g, "concept:y", true)
+}
+
+func requireNodePresence(t *testing.T, g *Graph, id string, want bool) {
+	t.Helper()
+	nodes, err := g.AllNodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range nodes {
+		if node.ID == id {
+			if !want {
+				t.Fatalf("orphan node %q survived decay", id)
+			}
+			return
 		}
 	}
-	// The healthy node and its edge remain traversable.
-	if w := nodeWeight(t, g, "person:maria"); w <= 0 {
-		t.Error("healthy node wrongly pruned")
+	if want {
+		t.Fatalf("node %q was pruned", id)
 	}
 }

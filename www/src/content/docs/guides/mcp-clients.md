@@ -105,10 +105,12 @@ See [Claude Code's schema guidance](https://code.claude.com/docs/en/mcp#tool-inp
 3. Check the client's MCP/server log for an exclusion or schema-validation
    reason. In Claude Code, inspect the server in `/mcp`; use the debug log if
    the tool list and loaded catalog differ.
-4. Upgrade the binary actually configured or running the HTTP service, then
-   reconnect the MCP client or start a fresh session to reload discovery. For
-   HTTP clients that cache discovery, refresh or disable that cache during
-   verification. Confirm all seven tools in the refreshed catalog.
+4. Upgrade the configured binary and restart the process serving
+   `graymatter mcp serve`. Reconnect the MCP client or start a fresh session
+   to reload the descriptions and schemas. For HTTP clients that cache
+   discovery, refresh or disable that cache during verification. The MCP
+   frontend serves tool discovery, while the data daemon handles storage
+   requests. Confirm all seven tools in the refreshed catalog.
 
 If it still fails, report the server and client versions, transport, redacted
 effective config, `tools/list` names/schema, and the relevant exclusion log.

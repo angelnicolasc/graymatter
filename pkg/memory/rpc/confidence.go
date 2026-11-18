@@ -17,6 +17,7 @@ const (
 	ConfidenceRecallV1      = "confidence-recall-v1"
 	ConfidenceLifecycleV1   = "confidence-lifecycle-v1"
 	ConfidenceSharedWriteV1 = "confidence-shared-write-v1"
+	FactIdentityV1          = "fact-identity-v1"
 )
 
 // ErrUnsupportedCapability is semantic: reconnecting cannot make the request
@@ -68,10 +69,12 @@ type PutWithOptionsResponse struct {
 	Fact memory.Fact
 	// A known committed fact must survive a later-phase backend error.
 	// net/rpc otherwise discards the reply when the method returns an error.
-	Error string `json:",omitempty"`
+	Error     string `json:",omitempty"`
+	ErrorCode string `json:",omitempty"`
 }
 
 type ReviseWithOptionsRequest struct {
+	Context InspectionContext
 	AgentID string
 	Target  string
 	Text    string
@@ -81,6 +84,7 @@ type ReviseWithOptionsRequest struct {
 type ReviseWithOptionsResponse = PutWithOptionsResponse
 
 type ReviseFactsWithOptionsRequest struct {
+	Context InspectionContext
 	AgentID string
 	Text    string
 	Options memory.WriteOptions
@@ -278,17 +282,16 @@ func (s *Server) ReviseWithOptions(req *ReviseWithOptionsRequest, resp *ReviseWi
 	if !ok || !s.hasConfidenceCapability(ConfidenceWriteV1) {
 		return unsupported(ConfidenceWriteV1)
 	}
-	fact, err := writer.ReviseWithOptions(context.Background(), req.AgentID, req.Target, req.Text, req.Options)
-	resp.Fact = fact
+	if !s.supportsAtomicRevision() {
+		return unsupported(AtomicRevisionV1)
+	}
+	ctx, finish, err := s.beginRevision(req.Context)
 	if err != nil {
-		if fact.ID != "" {
-			resp.Error = err.Error()
-			return nil
-		}
 		return err
 	}
-	resp.Fact = fact
-	return nil
+	defer finish()
+	fact, err := writer.ReviseWithOptions(ctx, req.AgentID, req.Target, req.Text, req.Options)
+	return revisionResponse(resp, fact, err, req.Context == (InspectionContext{}))
 }
 
 func (s *Server) RecallWithOptions(req *RecallWithOptionsRequest, resp *RecallWithOptionsResponse) error {
@@ -317,17 +320,82 @@ func (s *Server) ReviseFactsWithOptions(req *ReviseFactsWithOptionsRequest, resp
 	if !ok || !s.hasConfidenceCapability(ConfidenceWriteV1) {
 		return unsupported(ConfidenceWriteV1)
 	}
-	fact, err := writer.ReviseFactsWithOptions(context.Background(), req.AgentID, req.Text, req.Options, req.Victims...)
-	resp.Fact = fact
+	if !s.supportsAtomicRevision() {
+		return unsupported(AtomicRevisionV1)
+	}
+	ctx, finish, err := s.beginRevision(req.Context)
 	if err != nil {
-		if fact.ID != "" {
-			resp.Error = err.Error()
-			return nil
-		}
 		return err
 	}
+	defer finish()
+	fact, err := writer.ReviseFactsWithOptions(ctx, req.AgentID, req.Text, req.Options, req.Victims...)
+	return revisionResponse(resp, fact, err, req.Context == (InspectionContext{}))
+}
+
+// Older typed clients omitted context metadata. The patched server can honor
+// those requests safely because the backend still commits the revision atomically.
+func (s *Server) beginRevision(meta InspectionContext) (context.Context, context.CancelFunc, error) {
+	if meta == (InspectionContext{}) {
+		return context.Background(), func() {}, nil
+	}
+	return s.beginInspection(meta)
+}
+
+func revisionResponse(resp *ReviseWithOptionsResponse, fact memory.Fact, err error, legacy bool) error {
 	resp.Fact = fact
+	if err != nil {
+		if legacy && fact.ID == "" {
+			return err
+		}
+		resp.Error, resp.ErrorCode = err.Error(), revisionErrorCode(err)
+	}
 	return nil
+}
+
+// Preserve typed errors even when the store wraps them with transaction context.
+func revisionErrorCode(err error) string {
+	switch {
+	case errors.Is(err, memory.ErrFactChanged):
+		return "fact_changed"
+	case errors.Is(err, memory.ErrRevisionRequired):
+		return "revision_required"
+	case errors.Is(err, memory.ErrEvidenceQuota):
+		return "evidence_quota"
+	case errors.Is(err, memory.ErrStoreReadOnly):
+		return "read_only"
+	case errors.Is(err, memory.ErrInspectionUnsupported):
+		return "unsupported"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return ""
+	}
+}
+
+func revisionError(code, message string) error {
+	var cause error
+	switch code {
+	case "fact_changed":
+		cause = memory.ErrFactChanged
+	case "revision_required":
+		cause = memory.ErrRevisionRequired
+	case "evidence_quota":
+		cause = memory.ErrEvidenceQuota
+	case "read_only":
+		cause = memory.ErrStoreReadOnly
+	case "unsupported":
+		cause = memory.ErrInspectionUnsupported
+	case "deadline_exceeded":
+		cause = context.DeadlineExceeded
+	case "canceled":
+		cause = context.Canceled
+	}
+	if cause == nil {
+		return errors.New(message)
+	}
+	return fmt.Errorf("%w: %s", cause, message)
 }
 
 func (s *Server) Retire(req *RetireRequest, resp *LifecycleResponse) error {
@@ -407,11 +475,44 @@ func (c *Client) requireCapability(capability string) error {
 	return nil
 }
 
+// PutWithOptionalIdentity chooses one write route after verifying daemon policy.
+// A safe daemon with no identity endpoint may still accept an ordinary write
+// without options. That route returns a zero Fact by contract.
+func (c *Client) PutWithOptionalIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if err := opts.Validate(); err != nil {
+		return memory.Fact{}, err
+	}
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
+		return memory.Fact{}, err
+	}
+	withOptions, _ := c.Capability(ConfidenceWriteV1)
+	withIdentity, _ := c.Capability(FactIdentityV1)
+	var fact memory.Fact
+	var err error
+	switch {
+	case withOptions:
+		fact, err = c.putWithOptionsReturningFact(agentID, text, opts)
+	case opts.Confidence != nil:
+		return memory.Fact{}, unsupported(ConfidenceWriteV1)
+	case withIdentity:
+		fact, err = c.PutReturningFact(ctx, agentID, text)
+	default:
+		return memory.Fact{}, c.Put(ctx, agentID, text)
+	}
+	if err == nil && fact.ID == "" {
+		return memory.Fact{}, errors.New("rpc: write returned no committed fact identity")
+	}
+	return fact, err
+}
+
 func (c *Client) PutWithOptionsReturningFact(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
 	if err := ctx.Err(); err != nil {
 		return memory.Fact{}, err
 	}
 	if err := opts.Validate(); err != nil {
+		return memory.Fact{}, err
+	}
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
 		return memory.Fact{}, err
 	}
 	if err := c.requireCapability(ConfidenceWriteV1); err != nil {
@@ -420,6 +521,10 @@ func (c *Client) PutWithOptionsReturningFact(ctx context.Context, agentID, text 
 		}
 		return memory.Fact{}, err
 	}
+	return c.putWithOptionsReturningFact(agentID, text, opts)
+}
+
+func (c *Client) putWithOptionsReturningFact(agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
 	var resp PutWithOptionsResponse
 	err := c.call("PutWithOptionsReturningFact", &PutWithOptionsRequest{AgentID: agentID, Text: text, Options: opts}, &resp)
 	if err == nil && resp.Error != "" {
@@ -447,39 +552,67 @@ func (c *Client) PutSharedWithOptionsReturningFact(ctx context.Context, text str
 }
 
 func (c *Client) ReviseWithOptions(ctx context.Context, agentID, target, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	ctx, cancel := c.inspectionContext(ctx)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return memory.Fact{}, err
 	}
 	if err := opts.Validate(); err != nil {
 		return memory.Fact{}, err
 	}
-	if err := c.requireCapability(ConfidenceWriteV1); err != nil {
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
 		return memory.Fact{}, err
 	}
-	var resp ReviseWithOptionsResponse
-	err := c.call("ReviseWithOptions", &ReviseWithOptionsRequest{AgentID: agentID, Target: target, Text: text, Options: opts}, &resp)
-	if err == nil && resp.Error != "" {
-		err = errors.New(resp.Error)
+	if err := c.requireAtomicRevision(ctx); err != nil {
+		return memory.Fact{}, err
 	}
-	return resp.Fact, mapCapabilityError(err)
+	if err := c.requireLineage(ctx); err != nil {
+		return memory.Fact{}, err
+	}
+	meta, err := newInspectionContext(ctx)
+	if err != nil {
+		return memory.Fact{}, err
+	}
+	req := &ReviseWithOptionsRequest{Context: meta, AgentID: agentID, Target: target, Text: text, Options: opts}
+	resp, err := rpcInspectionCall[ReviseWithOptionsResponse](c, ctx, "ReviseWithOptions", req, &meta, true)
+	return revisionResult(resp, err)
 }
 
 func (c *Client) ReviseFactsWithOptions(ctx context.Context, agentID, text string, opts memory.WriteOptions, victims ...memory.Fact) (memory.Fact, error) {
+	ctx, cancel := c.inspectionContext(ctx)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return memory.Fact{}, err
 	}
 	if err := opts.Validate(); err != nil {
 		return memory.Fact{}, err
 	}
-	if err := c.requireCapability(ConfidenceWriteV1); err != nil {
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
 		return memory.Fact{}, err
 	}
-	var resp ReviseWithOptionsResponse
-	err := c.call("ReviseFactsWithOptions", &ReviseFactsWithOptionsRequest{AgentID: agentID, Text: text, Options: opts, Victims: victims}, &resp)
-	if err == nil && resp.Error != "" {
-		err = errors.New(resp.Error)
+	if err := c.requireAtomicRevision(ctx); err != nil {
+		return memory.Fact{}, err
 	}
-	return resp.Fact, mapCapabilityError(err)
+	if err := c.requireLineage(ctx); err != nil {
+		return memory.Fact{}, err
+	}
+	meta, err := newInspectionContext(ctx)
+	if err != nil {
+		return memory.Fact{}, err
+	}
+	req := &ReviseFactsWithOptionsRequest{Context: meta, AgentID: agentID, Text: text, Options: opts, Victims: victims}
+	resp, err := rpcInspectionCall[ReviseWithOptionsResponse](c, ctx, "ReviseFactsWithOptions", req, &meta, true)
+	return revisionResult(resp, err)
+}
+
+func revisionResult(resp ReviseWithOptionsResponse, err error) (memory.Fact, error) {
+	if err != nil {
+		return resp.Fact, lineageRPCError(inspectionError(mapCapabilityError(err)))
+	}
+	if resp.Error != "" {
+		return resp.Fact, revisionError(resp.ErrorCode, resp.Error)
+	}
+	return resp.Fact, nil
 }
 
 func (c *Client) Retire(agentID string, victims ...memory.Fact) error {
@@ -543,7 +676,7 @@ func (c *Client) RecallWithOptions(ctx context.Context, agentID, query string, t
 	var resp RecallWithOptionsResponse
 	wireOptions, legacyMetadata := c.resolveClientRecallOptions(opts)
 	err := c.call("RecallWithOptions", &RecallWithOptionsRequest{AgentID: agentID, Query: query, TopK: topK, Options: wireOptions}, &resp)
-	if legacyMetadata {
+	if legacyMetadata && (resp.Result.Retrieval == nil || resp.Result.Retrieval.VectorFallback == "") {
 		resp.Result.Retrieval = nil
 	}
 	return resp.Result, mapCapabilityError(err)
@@ -567,7 +700,9 @@ func (c *Client) RecallExplainWithOptions(ctx context.Context, agentID, query st
 	wireOptions, legacyMetadata := c.resolveClientRecallOptions(opts)
 	err := c.call("RecallExplainWithOptions", &RecallWithOptionsRequest{AgentID: agentID, Query: query, TopK: topK, Options: wireOptions}, &resp)
 	if legacyMetadata {
-		resp.Result.Retrieval = nil
+		if resp.Result.Retrieval == nil || resp.Result.Retrieval.VectorFallback == "" {
+			resp.Result.Retrieval = nil
+		}
 		for i := range resp.Result.Receipts {
 			resp.Result.Receipts[i].Ranking = nil
 		}
@@ -592,7 +727,7 @@ func (c *Client) RecallAllWithOptions(ctx context.Context, agentID, query string
 	var resp RecallWithOptionsResponse
 	wireOptions, legacyMetadata := c.resolveClientRecallOptions(opts)
 	err := c.call("RecallAllWithOptions", &RecallWithOptionsRequest{AgentID: agentID, Query: query, TopK: topK, Options: wireOptions}, &resp)
-	if legacyMetadata {
+	if legacyMetadata && (resp.Result.Retrieval == nil || resp.Result.Retrieval.VectorFallback == "") {
 		resp.Result.Retrieval = nil
 	}
 	return resp.Result, mapCapabilityError(err)

@@ -12,10 +12,11 @@ import (
 
 func exportCmd() *cobra.Command {
 	var (
-		format       string
-		outDir       string
-		agentID      string
-		includeGraph bool
+		format         string
+		outDir         string
+		agentID        string
+		includeGraph   bool
+		includeLineage bool
 	)
 
 	cmd := &cobra.Command{
@@ -24,10 +25,14 @@ func exportCmd() *cobra.Command {
 		Example: `  graymatter export --format obsidian --out ~/vault
   graymatter export --format obsidian --out ~/vault --include-graph
   graymatter export --format json
+  graymatter export --format json --include-lineage
   graymatter export --format markdown --agent sales-closer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if includeGraph && format != "obsidian" {
 				return fmt.Errorf("--include-graph requires --format obsidian (the graph renders as entity notes + canvas)")
+			}
+			if includeLineage && format != "json" {
+				return fmt.Errorf("--include-lineage requires --format json")
 			}
 			store, err := openStore()
 			if err != nil {
@@ -42,6 +47,25 @@ func exportCmd() *cobra.Command {
 
 			if outDir == "" {
 				outDir = filepath.Join(dataDir, "export", format)
+			}
+
+			if includeLineage {
+				lineage, ok := store.(lineageExporter)
+				if !ok {
+					return fmt.Errorf("complete lineage export is unavailable on this store")
+				}
+				archive, err := lineage.ExportLineage(cmd.Context(), agentID)
+				if err != nil {
+					return fmt.Errorf("collect lineage archive: %w", err)
+				}
+				if err := export.WriteLineageArchive(archive, outDir); err != nil {
+					return fmt.Errorf("write lineage archive: %w", err)
+				}
+				if !quiet {
+					fmt.Printf("Exported %d fact rows and %d evidence versions to %s\n",
+						len(archive.Facts), len(archive.Evidence), filepath.Join(outDir, "memory-lineage.json"))
+				}
+				return nil
 			}
 
 			agents := []string{agentID}
@@ -82,15 +106,18 @@ func exportCmd() *cobra.Command {
 			}
 			if !quiet {
 				fmt.Printf("Exported %d facts for %s to %s (format: %s)%s\n", len(facts), from, outDir, format, graphNote)
+				fmt.Println("Lineage scope · fact projections. Use --format json --include-lineage for retained evidence.")
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&format, "format", "markdown", "output format: markdown, obsidian, json")
+	cmd.Flags().StringVar(&format, "format", "markdown", "output format: markdown, obsidian, json (fact projections unless --include-lineage is set)")
 	cmd.Flags().StringVar(&outDir, "out", "", "output directory (default: .graymatter/export/<format>)")
 	cmd.Flags().StringVar(&agentID, "agent", "", "export only this agent (default: all)")
 	cmd.Flags().BoolVar(&includeGraph, "include-graph", false,
 		"also write knowledge-graph entities and canvas (requires --format obsidian)")
+	cmd.Flags().BoolVar(&includeLineage, "include-lineage", false,
+		"write a versioned audit archive with retained snapshots and relationships (requires --format json)")
 	return cmd
 }

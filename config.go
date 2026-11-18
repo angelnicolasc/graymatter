@@ -56,12 +56,12 @@ type Config struct {
 	// Default: value of GRAYMATTER_OLLAMA_MODEL env var, or "nomic-embed-text"
 	OllamaModel string
 
-	// OllamaConsolidateModel is the local model used for consolidation
-	// summarisation when ConsolidateLLM is "ollama".
+	// OllamaConsolidateModel is a legacy compaction setting. Maintenance does
+	// not use this model.
 	// Default: value of GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL env var, or "llama3.2"
 	OllamaConsolidateModel string
 
-	// AnthropicAPIKey for the Anthropic consolidation endpoints.
+	// AnthropicAPIKey is used for explicit Anthropic fact extraction.
 	// Default: value of ANTHROPIC_API_KEY env var.
 	AnthropicAPIKey string
 
@@ -80,17 +80,15 @@ type Config struct {
 	// Default: value of GRAYMATTER_OPENAI_MODEL env var, or "text-embedding-3-small"
 	OpenAIModel string
 
-	// ConsolidateLLM specifies which LLM provider drives memory consolidation.
-	// Values: "anthropic", "ollama", "" (disable consolidation).
-	// Default: "anthropic" if ANTHROPIC_API_KEY is set, else "" (disabled).
-	// To use Ollama as the consolidation LLM, set this field explicitly to "ollama".
+	// ConsolidateLLM retains the configured compaction provider for compatibility.
+	// Automatic generative compaction is disabled for every value.
 	ConsolidateLLM string
 
-	// ConsolidateModel is the model used for consolidation summarisation.
+	// ConsolidateModel is used for explicit Anthropic fact extraction.
 	// Default: "claude-haiku-4-5-20251001"
 	ConsolidateModel string
 
-	// ConsolidateThreshold is the minimum fact count that triggers consolidation.
+	// ConsolidateThreshold is the minimum fact count that triggers maintenance.
 	// Default: 20
 	ConsolidateThreshold int
 
@@ -99,7 +97,7 @@ type Config struct {
 	// Default: 720h (30 days)
 	DecayHalfLife time.Duration
 
-	// AsyncConsolidate runs consolidation in a background goroutine after Remember.
+	// AsyncConsolidate runs maintenance in a background goroutine after Remember.
 	// Default: true
 	AsyncConsolidate bool
 
@@ -254,18 +252,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// resolveConsolidateLLM returns the best available consolidation LLM based on
-// environment variables. It does NOT probe network endpoints at startup.
-//
-// Detection order:
-//  1. "anthropic" — if ANTHROPIC_API_KEY is set
-//  2. ""          — disabled (set ConsolidateLLM="ollama" explicitly for Ollama)
-//
-// Ollama is excluded from auto-detection because probing the Ollama endpoint on
-// every process startup would add 500 ms+ of latency. Configure it explicitly:
-//
-//	cfg := graymatter.DefaultConfig()
-//	cfg.ConsolidateLLM = "ollama"
+// resolveConsolidateLLM retains the legacy provider default for callers
+// that inspect the configuration. It does not enable compaction.
 func resolveConsolidateLLM() string {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return "anthropic"

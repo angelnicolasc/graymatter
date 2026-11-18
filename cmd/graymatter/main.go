@@ -96,6 +96,7 @@ func main() {
 		aliasCmd(),
 		hooksCmd(),
 		consolidateCmd(),
+		reviewCmd(),
 		demoCmd(),
 		kgCmd(),
 	)

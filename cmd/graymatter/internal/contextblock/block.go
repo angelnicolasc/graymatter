@@ -65,13 +65,13 @@ const heading = "## Memory context (GrayMatter)"
 
 // Stats reports what a selection did, for command output and tests.
 type Stats struct {
-	Considered int // live, non-empty facts ranked before budgeting
+	Considered int // injectable facts ranked before budgeting
 	Selected   int // facts that fit the budget
 	TokensUsed int // approx tokens of the rendered body
 	Skipped    int // ranked but left out: budget exhausted or oversized
 }
 
-// Selection ranks live facts by weight (descending), breaks ties oldest-first
+// Select ranks injectable facts by weight (descending), breaks ties oldest-first
 // then by ID — the same total order the retrieval contract documents — and
 // keeps the prefix of that ranking that fits the token budget. A fact larger
 // than what remains is skipped, and smaller ones behind it may still fit:
@@ -83,7 +83,7 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 	}
 	cands := make([]cand, 0, len(facts))
 	for _, f := range facts {
-		if f.IsSuperseded() || strings.TrimSpace(f.Text) == "" {
+		if !f.Injectable() {
 			continue
 		}
 		line := bullet(f.Text)

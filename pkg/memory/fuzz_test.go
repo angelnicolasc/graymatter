@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ func FuzzTokenize(f *testing.F) {
 		"The quick brown fox jumps over the lazy dog",
 		"Paris is the capital of France",
 		"日本語テスト unicode テキスト",
+		"alias: Broker—café = acquiring, 日本語",
 		"a b c d e f g",
 		"!@#$%^&*()_+",
 		"   whitespace   only   ",
@@ -55,12 +57,20 @@ func FuzzTokenize(f *testing.F) {
 // FuzzUnmarshalFact ensures unmarshalFact never panics on arbitrary bytes.
 // Run the fuzzer: go test -fuzz=FuzzUnmarshalFact ./pkg/memory/
 func FuzzUnmarshalFact(f *testing.F) {
-	// Seed corpus: valid JSON, truncated JSON, empty, binary garbage.
+	// Seed corpus: valid facts and aliases, malformed JSON, and binary garbage.
 	validFact, _ := json.Marshal(newFact("agent", "some text", nil, time.Now()))
+	validAlias, _ := (Fact{
+		ID: "alias-1", AgentID: "agent", Text: "alias: broker = acquiring, café",
+		Kind: KindAlias, AliasSource: AliasSourceUsage, Weight: 1,
+	}).marshal()
 	seeds := [][]byte{
 		validFact,
+		validAlias,
 		[]byte(`{}`),
 		[]byte(`{"id":"x","agent_id":"a","text":"t","weight":1.0}`),
+		[]byte(`{"id":"x","agent_id":"a","text":"日本語","lineage_status":"versioned","content_hash":"hash","replaces":[{"fact_id":"y","content_hash":"previous"}]}`),
+		[]byte(`{"lineage_status":"legacy_incomplete","legacy_sources":[{"fact_id":"unversioned"}]}`),
+		[]byte(`{"replaces":[{"content_hash":[]}]}`),
 		[]byte(`null`),
 		[]byte(`[]`),
 		[]byte(``),
@@ -73,8 +83,14 @@ func FuzzUnmarshalFact(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Must not panic; errors are acceptable and expected for bad input.
-		_, _ = unmarshalFact(data)
+		full, err := unmarshalFact(data)
+		if err != nil {
+			return
+		}
+		lite, err := unmarshalFactLite(data)
+		if err != nil || !reflect.DeepEqual(full.LineageProjection, lite.LineageProjection) {
+			t.Fatalf("full/lite lineage projection mismatch: %v", err)
+		}
 	})
 }
 
@@ -88,6 +104,7 @@ func FuzzKeywordScore(f *testing.F) {
 		"the is a an",
 		"hello world foo bar",
 		"日本語",
+		"Broker—acquiring café",
 		"123 456",
 		"!!! ???",
 		"a",
@@ -102,6 +119,7 @@ func FuzzKeywordScore(f *testing.F) {
 		{ID: "f2", Text: "London is the capital of England."},
 		{ID: "f3", Text: ""},
 		{ID: "f4", Text: "日本語テキスト"},
+		{ID: "f5", Text: "Acquiring brokers handle café payments."},
 	}
 
 	f.Fuzz(func(t *testing.T, query string) {

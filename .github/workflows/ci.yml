@@ -21,8 +21,8 @@ jobs:
         # 1.25 is the minimum the CLI module's go.mod declares (mcp-go v0.58
         # requires it), so it stays in the matrix to keep that promise
         # honest. Release builds, snapshots and install-smoke use the same
-        # patched 1.26.9 toolchain tested here.
-        go: ["1.25", "1.26.9"]
+        # patched 1.26.10 toolchain tested here.
+        go: ["1.25", "1.26.10"]
 
     steps:
       # Actions are pinned by commit SHA. A tag like @v4 points at whatever
@@ -186,7 +186,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.25", "1.26.9"]
+        go: ["1.25", "1.26.10"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -224,7 +224,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: |
             go.sum
             cmd/graymatter/go.sum
@@ -253,7 +253,7 @@ jobs:
           core=()
           cli=()
           for os in ubuntu-latest macos-latest windows-latest; do
-            for version in 1.25 1.26.9; do
+            for version in 1.25 1.26.10; do
               for module in core cli; do
                 profile="cov/coverage-${module}.${os}.go${version}.out"
                 if [ ! -s "$profile" ]; then
@@ -311,7 +311,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: |
             go.sum
@@ -387,7 +387,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: |
             go.sum
@@ -417,7 +417,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: |
             go.sum

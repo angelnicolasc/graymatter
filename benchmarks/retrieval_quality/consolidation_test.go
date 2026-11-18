@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,17 +13,8 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
-// The consolidation quality gate (hardening playbook W3, test plan item 5):
-// consolidation must not degrade retrieval of canonical facts on a
-// 500-fact store. The summariser under test is a *lossless* local merge —
-// every consumed fact's text enters the summary verbatim — so this measures
-// the mechanism itself (tombstone receipts + summary replacement), not the
-// eloquence of any model. A regression here means the pipeline loses what it
-// was given, which no amount of model quality can excuse.
-//
-// Deterministic: frozen store clock, keyword embedder, scripted HTTP
-// summariser. No network, no key, no Ollama install required.
-
+// Repeated maintenance must preserve exact recall of canonical facts on a
+// 500-fact store, even with a legacy Ollama configuration.
 const (
 	gateAgent      = "gate-agent"
 	canonicalCount = 50
@@ -33,33 +22,11 @@ const (
 	consolidations = 6
 )
 
-var promptRowRe = regexp.MustCompile(`^- ([0-9A-Za-z]+): (.*)$`)
-
-type gateRequest struct {
-	Prompt string `json:"prompt"`
-}
-
 func TestConsolidationGate_CanonicalRecallDoesNotRegress(t *testing.T) {
-	// Scripted lossless summariser: consume everything shown, echo every
-	// shown text into one paragraph.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req gateRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		var texts []string
-		var ids []string
-		for _, line := range strings.Split(req.Prompt, "\n") {
-			if m := promptRowRe.FindStringSubmatch(line); m != nil {
-				ids = append(ids, m[1])
-				texts = append(texts, m[2])
-			}
-		}
-		if len(ids) == 0 {
-			t.Errorf("summariser received no parsable rows:\n%s", req.Prompt)
-		}
-		summary := "consolidated digest: " + strings.Join(texts, " | ")
-		prop, _ := json.Marshal(map[string]any{"summary": summary, "consumes": ids})
-		env, _ := json.Marshal(map[string]any{"response": string(prop)})
-		_, _ = w.Write(env)
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unexpected summary request", http.StatusBadRequest)
 	}))
 	defer srv.Close()
 
@@ -100,7 +67,7 @@ func TestConsolidationGate_CanonicalRecallDoesNotRegress(t *testing.T) {
 				t.Fatalf("recall %s: %v", c.marker, err)
 			}
 			for _, got := range res {
-				if strings.Contains(got, c.marker) {
+				if got == c.text {
 					hits++
 					break
 				}
@@ -124,12 +91,14 @@ func TestConsolidationGate_CanonicalRecallDoesNotRegress(t *testing.T) {
 
 	after := recallHits()
 
-	cycles, _ := s.ConsolidationCounters()
-	if cycles == 0 {
-		t.Fatal("gate ran no consolidations; nothing was measured")
+	if generated, consumed := s.ConsolidationCounters(); generated != 0 || consumed != 0 {
+		t.Fatalf("generated cycles = %d, consumed facts = %d, want zeros", generated, consumed)
 	}
-	t.Logf("canonical recall@8 before=%.3f after=%.3f across %d applied cycles (%d facts seeded)",
-		before, after, cycles, canonicalCount+fillerCount)
+	if got := requests.Load(); got != 0 {
+		t.Errorf("automatic summariser requests = %d, want 0", got)
+	}
+	t.Logf("canonical recall@8 before=%.3f after=%.3f across %d maintenance cycles (%d facts seeded)",
+		before, after, consolidations, canonicalCount+fillerCount)
 
 	if after < before {
 		t.Errorf("consolidation regressed canonical recall@8: %.3f -> %.3f", before, after)

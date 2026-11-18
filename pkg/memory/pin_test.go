@@ -95,36 +95,6 @@ func TestPinnedSurvivesConsolidationCycles(t *testing.T) {
 	}
 }
 
-// The summariser consumes the weakest half of the unpinned facts; a pinned
-// fact is never eligible, whatever its weight.
-func TestSummarisationBatchExcludesPinned(t *testing.T) {
-	facts := []Fact{
-		{ID: "pinned-heavy", Text: "pinned", Weight: 0.9, Pinned: true},
-		{ID: "weak-1", Text: "w1", Weight: 0.1},
-		{ID: "weak-2", Text: "w2", Weight: 0.2},
-		{ID: "strong", Text: "s", Weight: 0.8},
-	}
-	batch := summarisationBatch(facts)
-	// Weakest half of the 3 unpinned facts = 1 fact (floor semantics, same
-	// as the pre-pin implementation's len/2).
-	if len(batch) != 1 {
-		t.Fatalf("expected weakest half of unpinned (1), got %d: %v", len(batch), batch)
-	}
-	for _, f := range batch {
-		if f.Pinned {
-			t.Errorf("pinned fact %q in summarisation batch", f.ID)
-		}
-		if f.ID != "weak-1" {
-			t.Errorf("unexpected batch member %q (weight %.2f)", f.ID, f.Weight)
-		}
-	}
-
-	allPinned := []Fact{{ID: "a", Pinned: true}, {ID: "b", Pinned: true}}
-	if batch := summarisationBatch(allPinned); batch != nil {
-		t.Errorf("all-pinned store must yield an empty batch, got %v", batch)
-	}
-}
-
 // Unpinning restores normal decay. While pinned, elapsed time does not move
 // the weight; once unpinned, the fact decays again from its current weight.
 // (Decay recomputes from last access, so a fact pinned for a year then

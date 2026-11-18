@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -10,6 +11,7 @@ import (
 // Fact is a single unit of memory: a piece of text an agent observed,
 // enriched with metadata used for retrieval scoring and decay.
 type Fact struct {
+	LineageProjection
 	ID          string    `json:"id"`
 	AgentID     string    `json:"agent_id"`
 	Text        string    `json:"text"`
@@ -29,11 +31,9 @@ type Fact struct {
 	// when there is a replacement, or SupersededByAgent when an agent retired
 	// it with nothing to put in its place.
 	//
-	// This is a tombstone, not a delete. The fact stays in the store, stays
-	// visible to List, export and the TUI, and keeps decaying; pruning by
-	// weight remains the only thing that ever removes it. That is what keeps
-	// the storage model append-only while still letting a contradiction take
-	// effect at once — see docs/decisions/007-supersede-tombstones.md.
+	// Retirement leaves a tombstone visible to List, export and the TUI
+	// while the row exists. An unpinned tombstone continues to decay and
+	// may be pruned. Delete can explicitly remove the row.
 	//
 	// Added in v0.10.0. Facts written by earlier versions have no
 	// superseded_by key and load as live.
@@ -64,11 +64,9 @@ type Fact struct {
 	// and every alias written before v0.18.1 — is agent-written: the
 	// deliberate act of memory_alias. "usage" marks an alias the store
 	// promoted itself from observed reformulation pairs (see
-	// UsageAliasLearning). The distinction is what keeps autonomy from
-	// becoming pollution: usage aliases carry the promotion evidence in the
-	// reform_pairs bucket and can be pruned by it, agent aliases are
-	// curation. A revision always writes the replacement as agent-authored —
-	// the new wording is the revising agent's decision.
+	// UsageAliasLearning). Live authored aliases are exempt from automatic
+	// aging. Live, unpinned usage aliases age normally between activations,
+	// which renew their weight. A revision writes an authored replacement.
 	AliasSource string `json:"alias_source,omitempty"`
 
 	// Pinned exempts the fact from decay, pruning and summarisation: the
@@ -78,7 +76,7 @@ type Fact struct {
 	// marked in the TUI, counted by status, flagged in exports, and reported
 	// by doctor — because an invisible exemption would reintroduce the stale-
 	// fact problem ADR-001 exists to prevent, just where it hurts most.
-	// Unpinning restores normal decay from the fact's current weight.
+	// Unpinning restores the aging policy for the fact's class.
 	//
 	// Added in v0.14.0. Facts written by earlier versions have no pinned key
 	// and load as unpinned.
@@ -111,6 +109,20 @@ func (f Fact) IsAlias() bool { return f.Kind == KindAlias }
 // IsSuperseded reports whether the fact has been retired and must be kept out
 // of retrieval.
 func (f Fact) IsSuperseded() bool { return f.SupersededBy != "" }
+
+// Injectable reports whether a fact contains live content for context.
+func (f Fact) Injectable() bool {
+	return !f.IsSuperseded() && !f.IsAlias() && strings.TrimSpace(f.Text) != ""
+}
+
+// Summarisable reports whether a fact can be shown to a summariser.
+func (f Fact) Summarisable() bool { return !f.Pinned && f.Injectable() }
+
+// Extractable reports whether a fact carries live content for entity extraction.
+func (f Fact) Extractable() bool { return f.Injectable() }
+
+// Embeddable reports whether the fact's kind carries content for embeddings.
+func (f Fact) Embeddable() bool { return !f.IsAlias() }
 
 // newFact creates a Fact with a new ULID and weight=1.0.
 //
@@ -152,6 +164,7 @@ func unmarshalFact(data []byte) (Fact, error) {
 // write-back goes through touchFacts' read-modify-write, which reads the
 // stored fact fresh rather than trusting a snapshot.
 type factLite struct {
+	LineageProjection
 	ID           string    `json:"id"`
 	AgentID      string    `json:"agent_id"`
 	Text         string    `json:"text"`
@@ -171,16 +184,17 @@ func unmarshalFactLite(data []byte) (Fact, error) {
 		return Fact{}, err
 	}
 	return Fact{
-		ID:           l.ID,
-		AgentID:      l.AgentID,
-		Text:         l.Text,
-		CreatedAt:    l.CreatedAt,
-		Weight:       l.Weight,
-		SupersededBy: l.SupersededBy,
-		Confidence:   l.Confidence,
-		Kind:         l.Kind,
-		AliasSource:  l.AliasSource,
-		Pinned:       l.Pinned,
+		LineageProjection: l.LineageProjection,
+		ID:                l.ID,
+		AgentID:           l.AgentID,
+		Text:              l.Text,
+		CreatedAt:         l.CreatedAt,
+		Weight:            l.Weight,
+		SupersededBy:      l.SupersededBy,
+		Confidence:        l.Confidence,
+		Kind:              l.Kind,
+		AliasSource:       l.AliasSource,
+		Pinned:            l.Pinned,
 	}, nil
 }
 

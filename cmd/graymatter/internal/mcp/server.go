@@ -160,6 +160,21 @@ func (b *DirectBackend) Recall(ctx context.Context, agentID, query string, topK 
 	return store.Recall(ctx, agentID, query, topK)
 }
 
+func (b *DirectBackend) BatchRecallScoped(ctx context.Context, agentID string, queries []string, topK int, all bool, opts *memory.RecallOptions) ([]memory.BatchResult, error) {
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	recaller, ok := store.(memory.ScopedBatchRecaller)
+	if !ok {
+		return nil, memory.ErrBatchRecallUnsupported
+	}
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	return recaller.BatchRecallScoped(ctx, agentID, queries, topK, all, opts)
+}
+
 // RecallDetailed reaches the concrete store the same way RecallExplain does:
 // AdvancedStore deliberately does not grow a method for every retrieval
 // variant, and the concrete store implements this one.
@@ -357,9 +372,8 @@ func readOnlyTool() mcp.ToolOption {
 // into gating every self-edit behind an approval prompt — including plain
 // adds — which is how unattended agents quietly stop calling the tool. The
 // guardrail lives in the handler instead, where it is testable: forget
-// requires an exact-text match and both retiring actions leave a tombstone
-// pointing at the replacement (never a hard delete), with every action
-// recorded in the audit trail.
+// requires an exact-text match, and both retiring actions mark matching
+// rows as tombstones. Ordinary pruning can remove those rows.
 func writeTool() mcp.ToolOption {
 	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
 		ReadOnlyHint:    mcp.ToBoolPtr(false),
@@ -374,7 +388,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_search",
 			mcp.WithToolTitle("Search agent memory"),
-			mcp.WithDescription("Search one agent's stored facts and return the most relevant ones ranked by hybrid recall (semantic + keyword + recency). Call once with your agent_id, then again with agent_id \"__shared__\" for project-wide conventions. Returns a numbered list with a count header, or a \"No memories found\" notice when nothing matches; superseded and decayed facts never appear. Results may carry a weak-match note naming the store's nearby vocabulary: reformulate once with those terms, and declare a lasting synonym with memory_alias instead of retrying synonyms blindly. To store new facts use memory_add; to correct, remove, or pin existing ones use memory_reflect."),
+			mcp.WithDescription("Search one agent's stored facts and return the most relevant ones ranked by hybrid recall (semantic + keyword + recency). Call once with your agent_id, then again with agent_id \"__shared__\" for project-wide conventions. Returns a numbered list with a count header, or a \"No memories found\" notice when nothing matches. Retired facts are excluded immediately. Results may carry a weak-match note naming the store's nearby vocabulary: reformulate once with those terms, and declare a lasting synonym with memory_alias instead of retrying synonyms blindly. To store new facts use memory_add; to correct, remove, or pin existing ones use memory_reflect. Open conflicts may carry review notices."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
@@ -389,11 +403,11 @@ func (s *Server) registerTools() {
 				mcp.DefaultNumber(8),
 			),
 			mcp.WithBoolean("explain",
-				mcp.Description("Set true to receive per-fact receipts instead of bare text: each fact under `explained` carries the per-signal ranks (vector/keyword/recency, 0 = signal absent) that produced its fused RRF score, the stored weight, its age in days, and provenance (fact_id, written_at, tombstone state, and `supersedes` — the ids of the earlier versions this fact replaced, empty when it revised nothing). The ranking is identical either way — explain only reads it out. Use it when the caller wants to know WHY a fact was returned."),
+				mcp.Description("Set true to receive ranking receipts under `explained`. Each receipt carries signal ranks, fused RRF score, retention weight, age, and provenance. Recorded lineage includes exact content versions, typed relationships, and lineage status. The `supersedes` compatibility field includes legacy IDs reachable through retained tombstones. Explain uses the same ranking as ordinary search."),
 			),
 			confidenceFilterSchema(),
 			confidenceWeightSchema(),
-			outputSchemaOf[searchResult](),
+			reviewOutputSchemaOf[searchResult](2),
 		),
 		s.confidenceGuard("memory_search", s.handleMemorySearch),
 	)
@@ -409,7 +423,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_search_batch",
 			mcp.WithToolTitle("Search agent memory with several queries at once"),
-			mcp.WithDescription("Answer SEVERAL questions against one agent's memory in a single call, run concurrently. Use it whenever you hold more than one open question; use memory_search when you have exactly one. Put EVERY open question into ONE call: queries run in parallel server-side and splitting them costs a model round trip each. A query may come back with a weak-match note naming nearby vocabulary: reformulate those once with the suggested terms; lasting synonyms belong in memory_alias. Returns `merged`, a deduplicated best-first block ready to read where a fact answering several queries appears once, plus `per_query` for the individual lists. Ranking per query is identical to calling memory_search alone; this changes how many turns you spend, not what comes back."),
+			mcp.WithDescription("Answer SEVERAL questions against one agent's memory in a single call, run concurrently. Use it whenever you hold more than one open question; use memory_search when you have exactly one. Put EVERY open question into ONE call: queries run in parallel server-side and splitting them costs a model round trip each. A query may come back with a weak-match note naming nearby vocabulary: reformulate those once with the suggested terms; lasting synonyms belong in memory_alias. Returns `merged`, a deduplicated best-first block ready to read where a fact answering several queries appears once, plus `per_query` for the individual lists. Ranking per query is identical to calling memory_search alone; this changes how many turns you spend, not what comes back. Open conflicts may carry review notices."),
 			readOnlyTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
@@ -426,7 +440,7 @@ func (s *Server) registerTools() {
 			),
 			confidenceFilterSchema(),
 			confidenceWeightSchema(),
-			outputSchemaOf[batchResult](),
+			reviewOutputSchemaOf[batchResult](1),
 		),
 		s.confidenceGuard("memory_search_batch", s.handleMemorySearchBatchTool),
 	)
@@ -435,7 +449,7 @@ func (s *Server) registerTools() {
 	s.mcpSrv.AddTool(
 		mcp.NewTool("memory_add",
 			mcp.WithToolTitle("Store a durable fact"),
-			mcp.WithDescription("Store one durable fact for an agent so future sessions can recall it. Use for conclusions worth keeping — decisions, preferences, gotchas — one atomic sentence per call, not transcripts or conversation logs. To correct or retire an existing fact use memory_reflect instead. Nothing is hard-deleted: untouched facts decay on a 30-day half-life unless pinned. Returns a confirmation naming the agent."),
+			mcp.WithDescription("Store one durable fact for an agent so future sessions can recall it. Use for conclusions worth keeping — decisions, preferences, gotchas — one atomic sentence per call, not transcripts or conversation logs. To correct or retire an existing fact use memory_reflect instead. Unpinned facts decay (30-day default half-life) and may eventually be pruned. Returns the agent and committed fact_id when supported."),
 			writeTool(),
 			mcp.WithString("agent_id",
 				mcp.Required(),
@@ -536,7 +550,7 @@ func (s *Server) registerTools() {
 	// raw one takes its place before registration.
 	reflectTool := mcp.NewTool("memory_reflect",
 		mcp.WithToolTitle("Curate your own memory"),
-		mcp.WithDescription("Curate an agent's memory: add a fact, update (supersede) an existing one, forget, pin or unpin against decay, or link two knowledge-graph nodes. Supply agent_id or deprecated alias agent: at least one is required at runtime, every supplied identity must be a non-empty string containing non-whitespace characters, and agent_id wins when both are valid. Use it mid-task when you notice a contradiction, finish a task, or learn a durable preference; for a brand-new fact memory_add is simpler. update requires the exact old fact text in target; forget, pin and unpin accept the fact via target or text, with target winning when both are set. Retired facts keep a tombstone receipt in the audit log — nothing is ever hard-deleted. Returns a per-action confirmation."),
+		mcp.WithDescription("Curate an agent's memory: add a fact, update (supersede) an existing one, forget, pin or unpin against decay, or link two knowledge-graph nodes. Supply agent_id or deprecated alias agent: at least one is required at runtime, every supplied identity must be a non-empty string containing non-whitespace characters, and agent_id wins when both are valid. Use it mid-task when you notice a contradiction, finish a task, or learn a durable preference; for a brand-new fact memory_add is simpler. update requires the exact old fact text in target; forget, pin and unpin accept the fact via target or text, with target winning when both are set. Retirement leaves a tombstone that ordinary pruning can remove. Add/update report the committed fact_id when supported."),
 		writeTool(),
 		outputSchemaOf[reflectResult](),
 	)

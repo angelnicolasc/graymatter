@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -21,7 +22,8 @@ func statusCmd() *cobra.Command {
 		Short: "One-screen answer to: is my memory actually being used?",
 		Long: `Print what GrayMatter knows, what it has been doing, and what a recall
 costs today — facts, recalls per agent, knowledge-graph state, the token
-ledger, and an injection-cost estimate against your own store.
+ledger, memory maintenance mode, review journal counts, and an injection-cost estimate.
+It reads an existing store or daemon without opening a writer.
 
 The token ledger covers 'graymatter run' sessions only; MCP sessions run
 entirely inside your editor and are never measured anywhere. Injection
@@ -36,38 +38,40 @@ your chat history to compare against.`,
 func runStatus(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 
-	store, err := openStore()
-	if err != nil {
-		return fmt.Errorf("open memory: %w", err)
+	store, mode, err := openStatusReader()
+	if err != nil && !errors.Is(err, errDoctorNoDatabase) {
+		return fmt.Errorf("open memory read-only: %w", err)
 	}
-	defer func() { _ = store.Close() }()
-
-	overview, err := store.StoreOverview()
-	if err != nil {
-		return fmt.Errorf("store overview: %w", err)
+	overview := &daemon.StoreOverviewResponse{
+		MaintenanceMode: daemon.MaintenanceOnly,
+		Agents:          []daemon.AgentSummary{},
+		Review:          &memory.ReviewOverview{},
 	}
-	kgState, err := store.KGState()
-	if err != nil {
-		return fmt.Errorf("knowledge graph state: %w", err)
-	}
-	tokSummary, tokErr := store.TokenSummary(30)
-	if tokErr != nil {
-		tokSummary.Loaded = false // degrade loudly rather than half-printing
-	}
-
-	mode := "via daemon"
-	if _, direct := store.(*directStore); direct {
-		mode = "in-process"
-	}
-
-	view := statusView{Mode: mode, Overview: overview, KG: kgState, Tokens: tokSummary, Facts: map[string][]memory.Fact{}}
-	for _, a := range overview.Agents {
-		facts, ferr := store.List(a.Agent)
-		if ferr != nil {
-			return fmt.Errorf("list facts for %q: %w", a.Agent, ferr)
+	kgState := &daemon.KGStateResponse{}
+	var tokSummary harness.TokenUsageSummary
+	factsByAgent := make(map[string][]memory.Fact)
+	if store != nil {
+		defer func() { _ = store.Close() }()
+		overview, err = store.StoreOverview()
+		if err != nil {
+			return fmt.Errorf("store overview: %w", err)
 		}
-		view.Facts[a.Agent] = facts
+		kgState, err = store.KGState()
+		if err != nil {
+			return fmt.Errorf("knowledge graph state: %w", err)
+		}
+		if tokSummary, err = store.TokenSummary(30); err != nil {
+			tokSummary.Loaded = false
+		}
+		for _, a := range overview.Agents {
+			facts, err := store.List(a.Agent)
+			if err != nil {
+				return fmt.Errorf("list facts for %q: %w", a.Agent, err)
+			}
+			factsByAgent[a.Agent] = facts
+		}
 	}
+	view := statusView{Mode: mode, Overview: overview, KG: kgState, Tokens: tokSummary, Facts: factsByAgent}
 
 	if jsonOut {
 		pinned := 0
@@ -97,11 +101,18 @@ func renderStatus(out io.Writer, view statusView) error {
 	ov, kg, tok := view.Overview, view.KG, view.Tokens
 	mode := view.Mode
 	fmt.Fprintf(out, "\nGrayMatter status · %s\n\n", mode)
+	if ov != nil {
+		fmt.Fprintf(out, "MAINTENANCE %s\n", maintenanceModeLabel(ov.MaintenanceMode))
+		fmt.Fprintf(out, "REVIEW     %s\n", reviewOverviewText(ov.Review))
+	}
 
 	if ov == nil || ov.TotalAgents == 0 {
 		fmt.Fprintln(out, "STORE      empty. Get started:")
 		fmt.Fprintln(out, "           graymatter init                     # wire your MCP clients")
 		fmt.Fprintln(out, "           graymatter remember \"my-agent\" \"a fact\"")
+		if kg != nil && (kg.Nodes != 0 || kg.Edges != 0 || kg.Provenance != nil) {
+			writeStatusGraph(out, kg)
+		}
 		return nil
 	}
 
@@ -137,7 +148,7 @@ func renderStatus(out io.Writer, view statusView) error {
 		ov.TotalAgents, ov.TotalLiveFacts, ov.TotalTombstones, pinnedTotal, avgWeight)
 	fmt.Fprintf(out, "           oldest fact %s · newest %s · pending vector ops: %d\n",
 		relTime(oldest), relTime(newest), ov.PendingVectorOps)
-	fmt.Fprintf(out, "           consolidations %d · facts consolidated %d\n",
+	fmt.Fprintf(out, "           historical generated cycles %d · historical facts consumed %d\n",
 		ov.Consolidations, ov.FactsConsumed)
 
 	totalRecalls := 0
@@ -149,18 +160,7 @@ func renderStatus(out io.Writer, view statusView) error {
 		fmt.Fprintln(out, "           nothing recalled yet — restart your MCP client so the tools exist, and check the memory block in CLAUDE.md/AGENTS.md")
 	}
 
-	state, hint := "OFF", ""
-	if kg != nil && kg.AutoPopulate {
-		state = "ON"
-	} else {
-		hint = " — enable: graymatter init --kg"
-	}
-	nodes, edges := 0, 0
-	if kg != nil {
-		nodes, edges = kg.Nodes, kg.Edges
-	}
-	fmt.Fprintf(out, "KG         auto-population %s%s\n", state, hint)
-	fmt.Fprintf(out, "           graph: %d nodes / %d edges\n", nodes, edges)
+	writeStatusGraph(out, kg)
 
 	fmt.Fprintln(out, "TOKENS     last 30d — recorded by 'graymatter run' sessions only:")
 	if tok.Loaded && tok.Requests > 0 {
@@ -221,6 +221,23 @@ func renderStatus(out io.Writer, view statusView) error {
 	return nil
 }
 
+func writeStatusGraph(out io.Writer, state *daemon.KGStateResponse) {
+	if state == nil {
+		state = &daemon.KGStateResponse{}
+	}
+	if state.AutoPopulate {
+		fmt.Fprintln(out, "KG         auto-population ON")
+	} else {
+		fmt.Fprintln(out, "KG         auto-population OFF — enable: graymatter init --kg")
+	}
+	fmt.Fprintf(out, "           graph: %d nodes / %d edges\n", state.Nodes, state.Edges)
+	if state.Provenance != nil {
+		fmt.Fprintf(out, "           %s\n", graphProvenanceSummary(*state.Provenance))
+	} else if state.Edges != 0 {
+		fmt.Fprintln(out, "           provenance unavailable")
+	}
+}
+
 func relTime(t time.Time) string {
 	if t.IsZero() {
 		return "never"
@@ -245,7 +262,18 @@ func pct(part, whole uint64) float64 {
 	return float64(part) / float64(whole) * 100
 }
 
+func maintenanceModeLabel(mode string) string {
+	if mode == daemon.MaintenanceOnly {
+		return "maintenance only · generative compaction disabled"
+	}
+	return "unknown · update or restart the store daemon"
+}
+
 func encodeStatusJSON(out io.Writer, mode string, ov *daemon.StoreOverviewResponse, kg *daemon.KGStateResponse, tok harness.TokenUsageSummary, pinned int) error {
+	summary := *ov
+	if summary.MaintenanceMode == "" {
+		summary.MaintenanceMode = "unknown"
+	}
 	payload := struct {
 		Mode           string                        `json:"mode"`
 		Store          *daemon.StoreOverviewResponse `json:"store"`
@@ -254,7 +282,7 @@ func encodeStatusJSON(out io.Writer, mode string, ov *daemon.StoreOverviewRespon
 		Pinned         int                           `json:"pinned"`
 		Consolidations int                           `json:"consolidations"`
 		FactsConsumed  int                           `json:"facts_consumed"`
-	}{Mode: mode, Store: ov, KG: kg, Tokens30: &tok, Pinned: pinned,
+	}{Mode: mode, Store: &summary, KG: kg, Tokens30: &tok, Pinned: pinned,
 		Consolidations: ov.Consolidations, FactsConsumed: ov.FactsConsumed}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")

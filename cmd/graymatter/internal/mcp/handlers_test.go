@@ -686,6 +686,7 @@ type reflectWriteFailureBackend struct {
 	Backend
 	direct          *DirectBackend
 	updates         int
+	revisions       int
 	failReplacement bool
 }
 
@@ -697,11 +698,12 @@ func (b *reflectWriteFailureBackend) UpdateFact(agentID string, f memory.Fact) e
 	return b.direct.UpdateFact(agentID, f)
 }
 
-func (b *reflectWriteFailureBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+func (b *reflectWriteFailureBackend) ReviseFactsWithOptions(context.Context, string, string, memory.WriteOptions, ...memory.Fact) (memory.Fact, error) {
+	b.revisions++
 	if b.failReplacement {
 		return memory.Fact{}, errors.New("injected replacement failure")
 	}
-	return b.direct.PutReturningFact(ctx, agentID, text)
+	return memory.Fact{}, errors.New("injected retirement write failure")
 }
 
 func TestMemoryReflect_DuplicateWriteFailure(t *testing.T) {
@@ -710,6 +712,10 @@ func TestMemoryReflect_DuplicateWriteFailure(t *testing.T) {
 			s, _ := newTestServer(t)
 			mustAdd(t, s, "a1", staleFact)
 			mustAdd(t, s, "a1", staleFact)
+			before, err := s.backend.List("a1")
+			if err != nil || len(before) != 2 {
+				t.Fatalf("seeded duplicates: %+v %v", before, err)
+			}
 			backend := &reflectWriteFailureBackend{Backend: s.backend, direct: s.backend.(*DirectBackend), failReplacement: action == "replacement_failure"}
 			s.backend = backend
 			if backend.failReplacement {
@@ -721,15 +727,16 @@ func TestMemoryReflect_DuplicateWriteFailure(t *testing.T) {
 			if err != nil || !res.IsError || !strings.Contains(resultText(t, res), "injected") {
 				t.Fatalf("write failure reported success: %v / %+v", err, res)
 			}
-			wantUpdates, wantFacts := 2, 2
-			if backend.failReplacement {
-				wantUpdates = 0
-			} else if action == "update" {
-				wantFacts++ // replacement must exist before any victim is retired
+			wantUpdates, wantRevisions := 2, 0
+			if action == "update" {
+				wantUpdates, wantRevisions = 0, 1
 			}
 			facts, err := backend.List("a1")
-			if err != nil || len(facts) != wantFacts || backend.updates != wantUpdates {
-				t.Fatalf("failure state: err=%v facts=%d updates=%d; want %d/%d", err, len(facts), backend.updates, wantFacts, wantUpdates)
+			if err != nil || len(facts) != 2 || backend.updates != wantUpdates || backend.revisions != wantRevisions {
+				t.Fatalf("failure state: err=%v facts=%d updates=%d revisions=%d; want 2/%d/%d", err, len(facts), backend.updates, backend.revisions, wantUpdates, wantRevisions)
+			}
+			if action == "update" && !reflect.DeepEqual(facts, before) {
+				t.Fatalf("failed revision changed facts: before=%+v after=%+v", before, facts)
 			}
 		})
 	}

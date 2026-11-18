@@ -119,7 +119,7 @@ func TestCurationDroppedResponseIsAmbiguousAndNeverReplayed(t *testing.T) {
 		t.Fatal(err)
 	}
 	go server.ServeCodec(jsonrpc.NewServerCodec(serverConn))
-	c := &Client{rpc: netrpc.NewClientWithCodec(jsonrpc.NewClientCodec(clientConn)), conn: clientConn, callTimeout: time.Second, capKnown: true, capabilities: map[string]bool{CurationV1: true, InspectionContextV1: true}}
+	c := &Client{rpc: netrpc.NewClientWithCodec(jsonrpc.NewClientCodec(clientConn)), conn: clientConn, callTimeout: time.Second, capKnown: true, capabilities: map[string]bool{CurationV1: true, InspectionContextV1: true, AtomicRevisionV1: true, AuthoritativeLineageV1: true}}
 	defer c.Close()
 	_, err = c.CurateFact(context.Background(), "a", f.ID, "revise", "new text", f)
 	if !errors.Is(err, memory.ErrMutationOutcomeUnknown) {

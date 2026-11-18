@@ -123,6 +123,7 @@ func writeObsidianNote(outDir string, f memory.Fact, noteName string) error {
 	sb.WriteString(fmt.Sprintf("tags:\n  - graymatter\n  - %s\n", sanitiseFilename(f.AgentID)))
 	sb.WriteString("---\n\n")
 	sb.WriteString(f.Text + "\n")
+	writeFactLineage(&sb, "\n## Lineage\n\n_Lineage scope · fact projection._\n\n", f.LineageProjection)
 
 	filename := fmt.Sprintf("%s.md", noteName)
 	return os.WriteFile(filepath.Join(agentDir, filename), []byte(sb.String()), 0o644)
@@ -145,6 +146,7 @@ func writeObsidianIndex(outDir string, facts []memory.Fact, names map[string]str
 	var sb strings.Builder
 	sb.WriteString("---\ntags: [graymatter, index]\n---\n\n")
 	sb.WriteString("# GrayMatter Memory Index\n\n")
+	sb.WriteString("_Lineage scope · fact projections. Retained evidence is available in the complete JSON audit export._\n\n")
 	sb.WriteString(fmt.Sprintf("_%d total facts across %d agents_\n\n", len(facts), len(agents)))
 
 	for _, agentID := range agents {

@@ -131,14 +131,14 @@ report, because rules read only store contents and never the wall clock.
 Exit code is 1 only when a finding is a failure; warnings exit 0.
 
 With --embeddings, audits the vector channel as the store observed it:
-how many live facts carry a vector, how many writes degraded to
+how many eligible live facts carry a vector, how many writes degraded to
 keyword-only because the embedder failed, the last failure's message,
 and the vector retry backlog. Deterministic like --health, and it works
 even when the daemon is down by opening the store directly.
 
-With --graph, computes graph analytics and can write an HTML render. --health,
---graph, --audit and --embeddings do not inherit the setup mode's read-only
-guarantee; hooks doctor is also a separate command.`,
+With --graph, reads graph analytics and provenance without starting a daemon.
+Add --html with an output path to write a separate graph render. --health,
+--audit, --embeddings and hooks doctor have separate contracts.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if graphMode {
@@ -191,8 +191,8 @@ guarantee; hooks doctor is also a separate command.`,
 		},
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "audit instruction documents (tokens, duplicates, staleness, markers) instead of setup checks")
-	cmd.Flags().BoolVar(&graphMode, "graph", false, "separate runtime graph analysis; with --html, can write an HTML render")
-	cmd.Flags().String("html", "kg-graph.html", "with --graph: also write the self-contained HTML graph render to this file")
+	cmd.Flags().BoolVar(&graphMode, "graph", false, "read graph analytics and provenance")
+	cmd.Flags().String("html", "", "with --graph: also write the self-contained HTML graph render to this file")
 	cmd.Flags().BoolVar(&health, "health", false, "separate runtime store audit: supersede loops, dumping bursts, near-prune criticals, duplicates")
 	cmd.Flags().BoolVar(&embeddings, "embeddings", false, "separate vector-channel audit: coverage, degraded writes, retry backlog")
 	return cmd
@@ -397,7 +397,8 @@ func checkKG(dir string) checkResult {
 		return c
 	}
 
-	nodes, edges, countErr := countGraphReadOnly(dir)
+	graph, countErr := doctorGraphState(dir)
+	nodes, edges := graph.Nodes, graph.Edges
 	switch {
 	case errors.Is(countErr, errDoctorNoDatabase):
 		c.Status, c.Detail = "info", "no database yet; the graph starts empty"
@@ -429,12 +430,12 @@ func checkKG(dir string) checkResult {
 		}
 		c.Detail = detail
 	}
+	if countErr == nil && graph.Provenance != nil {
+		c.Detail += " · " + graphProvenanceSummary(*graph.Provenance)
+	} else if countErr == nil && edges != 0 {
+		c.Detail += " · provenance unavailable"
+	}
 	return c
-}
-
-// countGraphReadOnly reads graph size without starting a runtime.
-func countGraphReadOnly(dir string) (nodes, edges int, err error) {
-	return doctorGraphCounts(dir)
 }
 
 // wiredAgents returns the known agents whose MCP config in this project

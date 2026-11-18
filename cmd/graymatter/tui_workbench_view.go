@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/lineageview"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -108,7 +109,7 @@ func formatFactDetail(f memory.Fact) string {
 	b.WriteString("\n\nMEMORY DETAILS\n")
 	b.WriteString(fmt.Sprintf("State: %s\nID: %s\nNamespace: %s\nCreated: %s\nLast accessed: %s\nAccesses: %d\nWeight: %.4f\nConfidence: %s\n", factState(f), tuiPlain(f.ID), tuiPlain(f.AgentID), f.CreatedAt.Format(time.RFC3339), f.AccessedAt.Format(time.RFC3339), f.AccessCount, f.Weight, confidenceDetail(f.Confidence)))
 	if f.Pinned {
-		b.WriteString("Pinned: yes (exempt from decay, pruning, summarisation)\n")
+		b.WriteString("Pinned: yes (exempt from decay and pruning)\n")
 	}
 	if f.IsAlias() {
 		b.WriteString("Kind: vocabulary alias (not injectable)\nSource: " + tuiPlain(f.AliasSource) + "\n")
@@ -116,7 +117,10 @@ func formatFactDetail(f memory.Fact) string {
 	if f.IsSuperseded() {
 		b.WriteString("Superseded by: " + tuiPlain(f.SupersededBy) + "\nThis record is excluded from retrieval.\n")
 	}
-	b.WriteString("\nFile/tool provenance: not recorded\nWeight is retention metadata, not probability of truth.\n")
+	for _, line := range lineageview.Lines(f.LineageProjection) {
+		b.WriteString(tuiPlain(line) + "\n")
+	}
+	b.WriteString("\nVersion lineage is scoped to this namespace. Weight measures retention.\n")
 	return b.String()
 }
 
@@ -151,6 +155,9 @@ func (m tuiModel) statusContent() string {
 		bottom += fitCells(m.muted(labels[i]), w, 1)
 	}
 	out := top + "\n" + bottom
+	if d.Loaded && m.store != nil {
+		out += m.detailSection("Memory maintenance", m.muted(maintenanceModeLabel(d.MaintenanceMode)))
+	}
 	if d.FactsN == 0 {
 		out += "\n\n" + m.muted("No memories yet. Add one from Memory.")
 	}
@@ -162,6 +169,9 @@ func (m tuiModel) statusContent() string {
 		}
 		provider = m.ink(provider) + m.muted(fmt.Sprintf(" · configured: %t · %s", h.ProviderConfigured, tuiPlain(h.ProviderReachability)))
 		provider += "\n" + m.muted(fmt.Sprintf("%d dimensions · %d degraded writes · %d pending vectors", h.Embedding.EmbedDims, h.Embedding.DegradedFacts, h.Embedding.PendingVectors))
+		if h.Embedding.VectorSearchDegraded {
+			provider += "\n" + m.tone("Affected namespaces use keyword and recency ranking while the vector index is unavailable", m.theme.Warning)
+		}
 		if h.Embedding.LastDegradError != "" {
 			provider += "\n" + m.tone(tuiPlain(h.Embedding.LastDegradError), m.theme.Warning)
 		}
@@ -256,7 +266,7 @@ func (m tuiModel) renderModal(w, h int) string {
 		body = m.editor.View()
 	case "revise":
 		title = "Revise memory · " + shortID(m.modalFact.ID)
-		body = m.editor.View() + "\n\n" + m.muted("The original stays in history when you save its replacement.")
+		body = m.editor.View() + "\n\n" + m.muted("Ordinary pruning can remove the retired row. The replacement records its source version as evidence.")
 	case "retire":
 		title = "Retire this memory?"
 		lines := strings.Split(ansi.Hardwrap(tuiPlain(m.modalFact.Text), max(1, w-6), false), "\n")
@@ -264,13 +274,15 @@ func (m tuiModel) renderModal(w, h int) string {
 		if len(lines) > limit {
 			lines = append(lines[:limit], "… (excerpt; full text remains in the inspector)")
 		}
-		body = m.ink(strings.Join(lines, "\n")) + "\n\n" + m.tone("Stops appearing in recall. Remains in history.", m.theme.Warning) + "\n\n" + m.muted("Namespace: "+tuiPlain(m.modalFact.AgentID)+"\nID: "+tuiPlain(m.modalFact.ID))
+		body = m.ink(strings.Join(lines, "\n")) + "\n\n" + m.tone("Leaves recall immediately. Ordinary pruning can remove the tombstone.", m.theme.Warning) + "\n\n" + m.muted("Namespace: "+tuiPlain(m.modalFact.AgentID)+"\nID: "+tuiPlain(m.modalFact.ID))
 	case "kill":
 		title = "Stop this running harness session?"
 		body = m.ink(tuiPlain(m.modalSession)) + "\n\n" + m.tone("The session's process will be terminated.", m.theme.Warning)
+	case "lineage":
+		return m.renderLineage(w, h)
 	case "help":
 		title = "Keyboard & scope"
-		body = "1–6 views · / or Ctrl+K commands · q quit\nTab / Shift+Tab focus · ↑↓ or j/k navigate\nEnter inspect · Esc return · y copy · Ctrl+L redraw\nMemory: n namespace · f filter · [ ] lifecycle\na add · e revise · p pin/unpin · d retire · Ctrl+N more\nRecall: Enter query (safe inspection)\nActivity: c runs/checkpoints · x confirmed stop\nGraph: o neighbors · s supporting facts\nUsage: a auto · l limits · s spend · c context\nGraph is store-wide; Activity covers harness runs.\nNO_COLOR or --theme light|dark|terminal\nOptional --mouse; copy falls back to OSC52.\nEsc returns to your current selection."
+		body = "1–6 views · / or Ctrl+K commands · q quit\nTab / Shift+Tab focus · ↑↓ or j/k navigate\nEnter inspect · Esc return · y copy · Ctrl+L redraw\nMemory: n namespace · f filter · [ ] lifecycle\na add · e revise · p pin/unpin · d retire · Ctrl+N more\nRecall: Enter query (safe inspection)\nMemory and Recall: v inspect retained lineage\nActivity: c runs/checkpoints · x confirmed stop\nGraph: o neighbors · s supporting facts\nUsage: a auto · l limits · s spend · c context\nGraph is store-wide; Activity covers harness runs.\nNO_COLOR or --theme light|dark|terminal\nOptional --mouse; copy falls back to OSC52.\nEsc returns to your current selection."
 	}
 	if m.busy {
 		body += "\n\n" + m.tone("◌ Saving…", m.theme.Info)

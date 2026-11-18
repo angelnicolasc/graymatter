@@ -15,8 +15,8 @@ import (
 // avoids copying stale caller metadata, but does not make the old read/modify/
 // write protocol atomic: another writer can still change it after List. The
 // stronger metadata-preservation guarantee requires the new daemon endpoint.
-// Revision is deliberately excluded because its conservative confidence rule
-// and source validation are new semantics, even when confidence is omitted.
+// The direct compatibility call is restricted to these fresh metadata patches.
+// General UpdateFact and revisions require a daemon that understands lineage.
 func (c *Client) legacyLifecycle(agentID string, pinned *bool, victims ...memory.Fact) error {
 	if len(victims) == 0 {
 		return nil
@@ -55,7 +55,8 @@ func (c *Client) legacyLifecycle(agentID string, pinned *bool, victims ...memory
 		updates = append(updates, current)
 	}
 	for _, current := range updates {
-		if err := c.UpdateFact(agentID, current); err != nil {
+		req := &UpdateFactRequest{AgentID: agentID, Fact: current}
+		if err := c.call("UpdateFact", req, &UpdateFactResponse{}); err != nil {
 			// Commit status may be unknown. Do not replay this update or send
 			// the remaining mutations after losing the response.
 			return fmt.Errorf("legacy lifecycle update %s failed: %w", current.ID, err)

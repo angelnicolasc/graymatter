@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/audit"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/lineageview"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -45,6 +46,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	var facts []string
 	var feedback string
 	var retrieval *memory.RetrievalMetadata
+	var notices []memory.ReviewNotice
 	if useConfidenceRecall(s.backend, opts) {
 		backend, ok := s.backend.(confidenceRecaller)
 		if !ok {
@@ -52,6 +54,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		}
 		result, callErr := backend.RecallWithOptions(ctx, agentID, query, topK, opts)
 		facts, feedback, retrieval, err = result.Facts, result.Feedback, result.Retrieval, callErr
+		notices = memory.MergeReviewNotices(result.ReviewNotices)
 	} else {
 		facts, feedback, err = s.backend.RecallDetailed(ctx, agentID, query, topK)
 	}
@@ -85,7 +88,8 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 	if retrieval != nil {
 		sb.WriteString("\n" + retrieval.Text() + "\n")
 	}
-	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts, Feedback: feedback, Retrieval: retrieval}, sb.String())
+	writeReviewNotices(&sb, notices)
+	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts, Feedback: feedback, Retrieval: retrieval, ReviewNotices: notices}, sb.String())
 }
 
 // handleMemoryAlias is the memory_alias entry point: it teaches the store's
@@ -149,7 +153,9 @@ func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query s
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Found %d relevant memories for agent %q (with receipts):\n\n", len(receipts), agentID))
+	var notices []memory.ReviewNotice
 	for i, r := range receipts {
+		notices = memory.MergeReviewNotices(notices, r.ReviewNotices)
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, r.Text))
 		sb.WriteString(fmt.Sprintf("   score %.4f = vector %d / keyword %d / recency %d (k %.0f) · weight %.3f · age %.1fd · written %s\n",
 			r.Ranks.FusedScore, r.Ranks.VectorRank, r.Ranks.KeywordRank, r.Ranks.RecencyRank, r.Ranks.K,
@@ -158,22 +164,17 @@ func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query s
 		if r.Ranking != nil {
 			sb.WriteString(fmt.Sprintf("   final score %.8f = base %.8f * factor %g; effective confidence %s, weight %g, policy %s\n", r.Ranking.FinalScore, r.Ranking.BaseScore, r.Ranking.Factor, r.Ranking.EffectiveConfidence, r.Ranking.ConfidenceWeight, r.Ranking.Policy))
 		}
-		// The structured payload carries this under `explained`, but the agent
-		// reads the prose. A value that replaced an earlier one is different
-		// information from a value nobody ever questioned, and leaving it out
-		// of the text is leaving it out.
-		if n := len(r.Provenance.Supersedes); n > 0 {
-			noun := "version"
-			if n > 1 {
-				noun = "versions"
-			}
-			sb.WriteString(fmt.Sprintf("   supersedes %d earlier %s: %s\n", n, noun,
-				strings.Join(r.Provenance.Supersedes, ", ")))
+		for _, line := range lineageview.Lines(r.Provenance.LineageProjection) {
+			fmt.Fprintf(&sb, "   %s\n", line)
+		}
+		if len(r.Provenance.Supersedes) > 0 {
+			fmt.Fprintf(&sb, "   Supersedes IDs (compatibility field) · %s\n", strings.Join(r.Provenance.Supersedes, ", "))
 		}
 	}
 	if retrieval != nil {
 		sb.WriteString("\n" + retrieval.Text() + "\n")
 	}
+	writeReviewNotices(&sb, notices)
 	return toolStructured(searchResult{
 		AgentID: agentID,
 		Query:   query,
@@ -204,20 +205,12 @@ func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (
 	}
 	out := addResult{AgentID: agentID, Stored: true}
 	notice := fmt.Sprintf("Memory stored for agent %q.", agentID)
-	if opts.Confidence != nil {
-		writer, ok := s.backend.(confidenceWriter)
-		if !ok {
-			return toolError(memory.ErrConfidenceUnsupported.Error())
-		}
-		f, err := writer.PutWithOptionsReturningFact(ctx, agentID, text, opts)
-		if err != nil {
-			return committedWriteError("remember", f, err)
-		}
-		out.FactID, out.Confidence = f.ID, f.Confidence
-		notice += fmt.Sprintf(" Confidence %s; fact_id %s.", f.Confidence, f.ID)
-	} else if err := s.backend.Remember(ctx, agentID, text); err != nil {
-		return toolError(fmt.Sprintf("remember error: %v", err))
+	fact, err := s.putWithIdentity(ctx, agentID, text, opts)
+	if err != nil {
+		return committedWriteError("remember", fact, err)
 	}
+	out.FactID, out.Confidence = fact.ID, fact.Confidence
+	notice += writeIdentityNotice(fact.ID, fact.Confidence)
 	return toolStructured(out, notice)
 }
 
@@ -367,19 +360,11 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the fact to add) is required for add")
 		}
-		if opts.Confidence != nil {
-			writer, ok := s.backend.(confidenceWriter)
-			if !ok {
-				return toolError(memory.ErrConfidenceUnsupported.Error())
-			}
-			f, err := writer.PutWithOptionsReturningFact(ctx, agentID, text, opts)
-			if err != nil {
-				return committedWriteError("add", f, err)
-			}
-			out.FactID, out.Confidence = f.ID, f.Confidence
-		} else if err := s.backend.Remember(ctx, agentID, text); err != nil {
-			return toolError(fmt.Sprintf("add failed: %v", err))
+		fact, err := s.putWithIdentity(ctx, agentID, text, opts)
+		if err != nil {
+			return committedWriteError("add", fact, err)
 		}
+		out.FactID, out.Confidence = fact.ID, fact.Confidence
 		resultMsg = fmt.Sprintf("Added fact for agent %q.", agentID)
 
 	case "update":
@@ -398,43 +383,22 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
 		oldText = target
-		if reviser, ok := s.backend.(confidenceReviser); ok {
-			replacement, err := reviser.ReviseFactsWithOptions(ctx, agentID, text, opts, victims...)
-			if err != nil {
-				return committedWriteError("update", replacement, err)
-			}
-			out.FactID, out.Confidence = replacement.ID, replacement.Confidence
-			resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
-			break
-		}
-		if opts.Confidence != nil {
-			return toolError(memory.ErrConfidenceUnsupported.Error())
-		}
-
-		// Write the correction before retiring what it corrects. The previous
-		// order zeroed the old fact's weight first, so a failing Remember left
-		// the agent with a retired fact and no replacement.
-		writer, ok := s.backend.(interface {
-			PutReturningFact(context.Context, string, string) (memory.Fact, error)
-		})
+		reviser, ok := s.backend.(confidenceReviser)
 		if !ok {
-			return toolError("add updated fact: backend does not expose identity-preserving writes")
+			return toolError("atomic revision is unavailable on this backend")
 		}
-		replacement, err := writer.PutReturningFact(ctx, agentID, text)
+		replacement, err := reviser.ReviseFactsWithOptions(ctx, agentID, text, opts, victims...)
 		if err != nil {
-			return toolError(fmt.Sprintf("add updated fact: %v", err))
+			if replacement.ID != "" {
+				return toolError(fmt.Sprintf("Update committed as fact_id %s (confidence %s). Follow-up error: %v",
+					replacement.ID, memory.EffectiveConfidence(replacement.Confidence), err))
+			}
+			return committedWriteError("update", replacement, err)
 		}
 		if replacement.ID == "" {
-			return toolError("add updated fact: backend returned an empty fact identity")
+			return toolError("atomic revision returned no committed fact")
 		}
-
-		// Point the tombstone at the replacement so the correction can be
-		// followed later, rather than only showing that something was retired.
-		for _, victim := range victims {
-			if err := s.supersedeFact(agentID, victim, replacement.ID); err != nil {
-				return toolError(fmt.Sprintf("supersede old fact: %v", err))
-			}
-		}
+		out.FactID, out.Confidence = replacement.ID, replacement.Confidence
 		resultMsg = fmt.Sprintf("Updated fact for agent %q.", agentID)
 
 	case "forget":
@@ -514,7 +478,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 			if err := patcher.SetPinned(agentID, action == "pin", victims...); err != nil {
 				return toolError(fmt.Sprintf("%s failed: %v", action, err))
 			}
-			resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay, pruning and summarisation.", action, agentID)
+			resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay and pruning.", action, agentID)
 			break
 		}
 		for _, victim := range victims {
@@ -528,7 +492,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 				return toolError(fmt.Sprintf("%s failed: %v", action, err))
 			}
 		}
-		resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay, pruning and summarisation.", action, agentID)
+		resultMsg = fmt.Sprintf("Fact %s for agent %q. Pinned facts are exempt from decay and pruning.", action, agentID)
 
 	default:
 		return toolError(fmt.Sprintf("unknown action %q", action))
@@ -543,10 +507,7 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		Source:    "agent_self",
 	})
 
-	if out.FactID != "" {
-		resultMsg += fmt.Sprintf(" Confidence %s; fact_id %s.", memory.EffectiveConfidence(out.Confidence), out.FactID)
-	}
-	return toolStructured(out, resultMsg)
+	return toolStructured(out, resultMsg+writeIdentityNotice(out.FactID, memory.EffectiveConfidence(out.Confidence)))
 }
 
 // findByText selects every exact match from one List snapshot: acting on just
@@ -563,14 +524,10 @@ func findByText(facts []memory.Fact, text string, includeRetired bool) []memory.
 	return matches
 }
 
-// supersedeFact retires a fact: it is tombstoned so Recall skips it from
-// the next query onward. Its weight is left exactly as decay left it —
-// zeroing it here would drop it below the prune floor (<0.01), so the next
-// consolidation cycle would collect the receipt milliseconds after writing
-// it, destroying the audit trail ADR-007 keeps tombstones for. The fact
-// itself is not deleted — storage is append-only, and an audit has to be
-// able to see what was retired and why; ordinary decay collects the receipt
-// in due course, on the same curve as every other fact.
+// supersedeFact marks a fact as retired so Recall skips it immediately.
+// It preserves the weight so the tombstone remains inspectable while the
+// row exists. Ordinary pruning can remove it when it meets the same
+// weight and pin criteria as any other fact.
 func (s *Server) supersedeFact(agentID string, f memory.Fact, supersededBy string) error {
 	f.SupersededBy = supersededBy
 	return s.backend.UpdateFact(agentID, f)
@@ -578,16 +535,8 @@ func (s *Server) supersedeFact(agentID string, f memory.Fact, supersededBy strin
 
 // handleMemorySearchBatch answers several queries in one tool call.
 //
-// The fan-out lives here rather than in pkg/memory because the MCP server
-// talks to the store through the Backend interface, which is either an
-// in-process store or an RPC client to the daemon — both already safe for
-// concurrent use, and both benefiting from the same fan-out. Putting it here
-// means the daemon needs no new method and the wire protocol does not change.
-//
-// Per-query failures are reported per query. An agent asking six questions
-// should get the five answers that worked rather than one error for all of
-// them; a batch only fails outright if the whole store is unreachable, which
-// each individual call would report anyway.
+// Current backends execute the whole batch as one store operation. Legacy
+// backends can still answer each query separately.
 func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, queries []string, topK int, options ...memory.RecallOptions) (*mcp.CallToolResult, error) {
 	var opts memory.RecallOptions
 	if len(options) > 0 {
@@ -596,78 +545,63 @@ func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, qu
 	if err := opts.Validate(); err != nil {
 		return toolError(err.Error())
 	}
-	backend, supports := s.backend.(confidenceRecaller)
 	opts, useOptions, err := batchRecallOptions(s.backend, opts)
 	if err != nil {
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
-	if useOptions && !supports {
-		return toolError(memory.ErrConfidenceUnsupported.Error())
+	confidenceMetadata := useOptions
+	if _, supports := s.backend.(confidenceRecaller); supports && reviewJournalSupported(s.backend) && !useOptions {
+		zero := 0.0
+		opts.ConfidenceWeight = &zero
+		useOptions = true
 	}
-	type row struct {
-		query     string
-		facts     []string
-		err       error
-		retrieval *memory.RetrievalMetadata
+	var scopedOptions *memory.RecallOptions
+	if useOptions {
+		scopedOptions = &opts
 	}
-	rows := make([]row, len(queries))
-
-	limit := runtime.GOMAXPROCS(0)
-	if limit > len(queries) {
-		limit = len(queries)
+	batch, err := s.recallBatch(ctx, agentID, queries, topK, scopedOptions)
+	if err != nil && len(batch) == 0 {
+		if errors.Is(err, memory.ErrConfidenceUnsupported) {
+			return toolError(memory.ErrConfidenceUnsupported.Error())
+		}
+		batch = make([]memory.BatchResult, len(queries))
+		for i, query := range queries {
+			batch[i] = memory.BatchResult{Query: query, Err: err}
+		}
 	}
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-	for i, q := range queries {
-		wg.Add(1)
-		go func(i int, q string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			rows[i].query = q
-			var facts []string
-			var err error
-			if useOptions {
-				result, callErr := backend.RecallWithOptions(ctx, agentID, q, topK, opts)
-				facts, rows[i].retrieval, err = result.Facts, result.Retrieval, callErr
-			} else {
-				facts, err = s.backend.Recall(ctx, agentID, q, topK)
-			}
-			if err != nil {
-				rows[i].err = err
-				return
-			}
-			if topK > 0 && topK < len(facts) {
-				facts = facts[:topK]
-			}
-			rows[i].facts = facts
-		}(i, q)
-	}
-	wg.Wait()
-
-	batch := make([]memory.BatchResult, 0, len(rows))
-	for _, r := range rows {
-		batch = append(batch, memory.BatchResult{Query: r.query, Facts: r.facts})
+	for i := range batch {
+		if batch[i].Err != nil {
+			batch[i].Facts = nil
+		} else if topK > 0 && topK < len(batch[i].Facts) {
+			batch[i].Facts = batch[i].Facts[:topK]
+		}
 	}
 	merged := memory.MergedFacts(batch)
 
 	out := batchResult{AgentID: agentID, Count: len(merged), Merged: merged}
-	for _, r := range rows {
-		if r.retrieval != nil {
-			out.Retrieval = r.retrieval
-			break
+	for _, r := range batch {
+		if len(r.Facts) > 0 {
+			out.ReviewNotices = memory.MergeReviewNotices(out.ReviewNotices, r.ReviewNotices)
 		}
 	}
-	for _, r := range rows {
+	for _, r := range batch {
+		if confidenceMetadata && r.Retrieval != nil && (out.Retrieval == nil || r.Retrieval.VectorFallback != "") {
+			out.Retrieval = r.Retrieval
+			if r.Retrieval.VectorFallback != "" {
+				break
+			}
+		}
+	}
+	for _, r := range batch {
 		e := ""
-		if r.err != nil {
-			e = r.err.Error()
+		if r.Err != nil {
+			e = r.Err.Error()
 		}
 		out.PerQuery = append(out.PerQuery, struct {
 			Query string   `json:"query"`
 			Facts []string `json:"facts"`
 			Error string   `json:"error,omitempty"`
-		}{Query: r.query, Facts: r.facts, Error: e})
+		}{Query: r.Query, Facts: r.Facts, Error: e})
 	}
 
 	var sb strings.Builder
@@ -676,9 +610,9 @@ func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, qu
 		fmt.Fprintf(&sb, "%d. %s\n", i+1, f)
 	}
 	var failed []string
-	for _, r := range rows {
-		if r.err != nil {
-			failed = append(failed, fmt.Sprintf("%q: %v", r.query, r.err))
+	for _, r := range batch {
+		if r.Err != nil {
+			failed = append(failed, fmt.Sprintf("%q: %v", r.Query, r.Err))
 		}
 	}
 	if len(failed) > 0 {
@@ -697,7 +631,43 @@ func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, qu
 	if out.Retrieval != nil {
 		sb.WriteString("\n" + out.Retrieval.Text() + "\n")
 	}
+	writeReviewNotices(&sb, out.ReviewNotices)
 	return toolStructured(out, sb.String())
+}
+
+func (s *Server) recallBatch(ctx context.Context, agentID string, queries []string, topK int, opts *memory.RecallOptions) ([]memory.BatchResult, error) {
+	if recaller, ok := s.backend.(memory.ScopedBatchRecaller); ok {
+		rows, err := recaller.BatchRecallScoped(ctx, agentID, queries, topK, false, opts)
+		if !errors.Is(err, memory.ErrBatchRecallUnsupported) {
+			return rows, err
+		}
+	}
+
+	backend, supports := s.backend.(confidenceRecaller)
+	if opts != nil && !supports {
+		return nil, memory.ErrConfidenceUnsupported
+	}
+	rows := make([]memory.BatchResult, len(queries))
+	limit := min(runtime.GOMAXPROCS(0), len(queries))
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i, query := range queries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if opts != nil {
+				result, err := backend.RecallWithOptions(ctx, agentID, query, topK, *opts)
+				rows[i] = memory.BatchResult{Query: query, Facts: result.Facts, Retrieval: result.Retrieval, ReviewNotices: result.ReviewNotices, Err: err}
+			} else {
+				facts, err := s.backend.Recall(ctx, agentID, query, topK)
+				rows[i] = memory.BatchResult{Query: query, Facts: facts, Err: err}
+			}
+		}()
+	}
+	wg.Wait()
+	return rows, nil
 }
 
 // handleMemorySearchBatchTool is the memory_search_batch entry point: it reads

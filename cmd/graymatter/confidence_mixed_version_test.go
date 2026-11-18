@@ -20,6 +20,7 @@ import (
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
+	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -244,7 +245,8 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := initial.Remember(ctx, "a", "legacy database policy"); err != nil {
+	// Seed through the old wire protocol before exercising the upgraded client.
+	if err := initial.CallService(rpc.ServiceName, "Put", &rpc.PutRequest{AgentID: "a", Text: "legacy database policy"}, &rpc.PutResponse{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := initial.Recall(ctx, "a", "database", 8); err != nil {
@@ -273,7 +275,7 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 		return daemonStore{Client: client}, nil
 	})
 	t.Cleanup(func() { _ = r.Close() })
-	if _, err := r.PutWithOptionsReturningFact(ctx, "a", "must not write", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, memory.ErrConfidenceUnsupported) {
+	if _, err := r.PutWithOptionsReturningFact(ctx, "a", "must not write", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, daemon.ErrMaintenancePolicyUnsupported) {
 		t.Fatalf("new write against previous=%v", err)
 	}
 	if _, err := r.PutSharedWithOptionsReturningFact(ctx, "must not write shared", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, memory.ErrConfidenceUnsupported) {
@@ -321,7 +323,7 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 	if _, err := r.RecallWithOptions(ctx, "a", "database", 8, opts); !errors.Is(err, memory.ErrConfidenceUnsupported) || reopens != 2 {
 		t.Fatalf("downgrade renegotiation err=%v reopens=%d", err, reopens)
 	}
-	if _, err := r.PutWithOptionsReturningFact(ctx, "a", "must not write on downgrade", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, memory.ErrConfidenceUnsupported) || reopens != 2 {
+	if _, err := r.PutWithOptionsReturningFact(ctx, "a", "must not write on downgrade", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, daemon.ErrMaintenancePolicyUnsupported) || reopens != 2 {
 		t.Fatalf("downgrade mutation err=%v reopens=%d", err, reopens)
 	}
 	legacy, err = r.RecallWithOptions(ctx, "a", "database", 8, memory.RecallOptions{})
@@ -332,7 +334,8 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.Remember(ctx, "a", "downgrade database policy"); err != nil {
+	// Exercise the older binary's wire compatibility independently of the new write gate.
+	if err := old.CallService(rpc.ServiceName, "Put", &rpc.PutRequest{AgentID: "a", Text: "downgrade database policy"}, &rpc.PutResponse{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	facts, err := old.List("a")

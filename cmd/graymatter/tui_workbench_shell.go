@@ -343,9 +343,9 @@ func (m tuiModel) renderFooter() string {
 	help := "Tab focus · ↑↓ scroll"
 	switch m.activeTab {
 	case tabMemory:
-		help = "f filter · n namespace · [ ] state · a add · e revise · p pin · d retire · y copy"
+		help = "f filter · n namespace · [ ] state · a add · e revise · p pin · d retire · v lineage · y copy"
 	case tabRecall:
-		help = "Enter query · Tab inspect · y copy"
+		help = "Enter query · Tab inspect · v lineage · y copy"
 	case tabSessions:
 		help = "c runs/checkpoints · Tab inspect · x stop run"
 	case tabGraph:
@@ -355,6 +355,8 @@ func (m tuiModel) renderFooter() string {
 	}
 	if m.modal == "add" || m.modal == "revise" {
 		help = "Ctrl+S save · Enter new line · Esc cancel"
+	} else if m.modal == "lineage" {
+		help = "Tab choose source · Enter follow · Backspace previous · ↑↓ scroll · Esc close"
 	} else if m.modal == "help" {
 		help = "Esc return"
 	} else if m.modal != "" {

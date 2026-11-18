@@ -84,7 +84,7 @@ func (b *confidenceLateFailureBackend) ReviseFactsWithOptions(ctx context.Contex
 	if err != nil {
 		return fact, err
 	}
-	return fact, errors.New("required retirement phase failed")
+	return fact, errors.New("backend follow-up failed")
 }
 
 func TestConfidenceMCPLateFailureReportsKnownCommittedIdentity(t *testing.T) {
@@ -102,7 +102,11 @@ func TestConfidenceMCPLateFailureReportsKnownCommittedIdentity(t *testing.T) {
 	} {
 		result := confidenceToolCall(t, s, call.tool, call.args)
 		wire, _ := json.Marshal(result)
-		if result["isError"] != true || backend.last.ID == "" || !strings.Contains(string(wire), backend.last.ID) || !strings.Contains(string(wire), "after committing") {
+		committed := "after committing"
+		if call.args["action"] == "update" {
+			committed = "Update committed as"
+		}
+		if result["isError"] != true || backend.last.ID == "" || !strings.Contains(string(wire), backend.last.ID) || !strings.Contains(string(wire), committed) {
 			t.Fatalf("late failure hid durable identity or reported success: %s / %+v", wire, backend.last)
 		}
 	}

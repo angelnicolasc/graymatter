@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -436,6 +437,18 @@ func (s *Server) UpdateFact(req *UpdateFactRequest, resp *UpdateFactResponse) er
 	return s.backend.UpdateFact(req.AgentID, req.Fact)
 }
 
+// UpdateFactWithLineage applies the versioned full-update contract.
+func (s *Server) UpdateFactWithLineage(req *UpdateFactRequest, resp *UpdateFactWithLineageResponse) error {
+	defer s.touch()
+	if s.lineageBackend() == nil {
+		return ErrLineageUnsupported
+	}
+	if err := s.backend.UpdateFact(req.AgentID, req.Fact); err != nil {
+		resp.Error, resp.ErrorCode = err.Error(), revisionErrorCode(err)
+	}
+	return nil
+}
+
 // Consolidate handles a remote consolidation request, applying the
 // daemon-side consolidation policy.
 func (s *Server) Consolidate(req *ConsolidateRequest, resp *ConsolidateResponse) error {
@@ -461,6 +474,28 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 	resp.Protocol = Protocol
 	resp.Capabilities = s.confidenceCapabilities()
 	resp.Capabilities = append(resp.Capabilities, s.inspectionCapabilities()...)
+	review := s.reviewBackend() != nil
+	lineage := s.lineageBackend() != nil
+	if review {
+		resp.Capabilities = append(resp.Capabilities, ReviewJournalV1)
+	}
+	if lineage {
+		resp.Capabilities = append(resp.Capabilities, AuthoritativeLineageV1)
+	}
+	if (review || lineage) && !slices.Contains(resp.Capabilities, InspectionContextV1) {
+		resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+	}
+	_, localStore := s.backend.(*memory.Store)
+	custom, optedIn := s.backend.(interface{ MaintenanceOnly() bool })
+	if localStore || optedIn && custom.MaintenanceOnly() {
+		resp.Capabilities = append(resp.Capabilities, MaintenanceOnlyV1)
+		if _, ok := s.backend.(returningFactWriter); ok {
+			resp.Capabilities = append(resp.Capabilities, FactIdentityV1)
+		}
+	}
+	if _, ok := s.scopedBatchRecaller(); ok {
+		resp.Capabilities = append(resp.Capabilities, ScopedBatchRecallV1)
+	}
 	weight := memory.DefaultConfidenceWeight
 	if provider, ok := s.backend.(DefaultConfidenceProvider); ok {
 		weight = provider.DefaultConfidenceWeight()

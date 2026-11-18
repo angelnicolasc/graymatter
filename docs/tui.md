@@ -72,9 +72,11 @@ pages are live reads rather than a transaction spanning the whole UI session.
 
 `a` adds, `e` revises, `d` retires, and `p` toggles the selected fact's pin.
 Editors submit with `Ctrl+S`; Enter inserts a newline. Retirement requires a
-confirmation and preserves the historical record. Revision targets the selected
-ID, derives conservative confidence, and commits the replacement and retirement
-together. A pin is not inherited by the replacement. Stale content, confidence
+confirmation and removes the row from recall. The retired row remains
+inspectable until ordinary pruning or explicit deletion. Revision targets the
+selected ID and commits the replacement, retirement, and version lineage
+together with conservative confidence. A pin is not inherited by the
+replacement. Stale content, confidence
 or pin state causes a conflict instead of updating a different fact. Inspect the
 fresh selection before retrying. A lost write response is reported as an
 unknown outcome and is not automatically replayed. Further mutations remain
@@ -84,9 +86,15 @@ The inspector distinguishes retention weight, confidence, lifecycle, timestamps
 and access counts. Valid confidence labels are marked writer-declared; an absent
 legacy label is not declared and has effective confidence `inferred`. Unknown
 historical labels retain their original text and have effective confidence
-`unverified`. Retention weight is not a probability
-that the fact is true. File/tool provenance is explicitly unavailable when it
-was not recorded.
+`unverified`. Retention weight measures how long a fact is kept.
+
+Memory and Recall show namespace-scoped version lineage where recorded.
+Press `v` to inspect a selected version. Use `Tab` or `Shift+Tab` to choose a
+versioned source, `Enter` to follow it, `Backspace` to return to the previous
+version, and `Esc` to close. When current content has diverged, the preview
+shows both hashes and `v` opens the historical version. An ambiguous legacy
+pointer can be followed when its exact source snapshot is available.
+Inspection is read-only. Retained evidence stays outside recall.
 
 ## Recall, Activity and Graph
 

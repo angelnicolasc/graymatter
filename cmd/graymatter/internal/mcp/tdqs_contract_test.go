@@ -262,3 +262,28 @@ func firstWord(s string) string {
 	}
 	return s
 }
+
+func TestToolRetentionContract(t *testing.T) {
+	tools := listToolDefs(t)
+	for name, want := range map[string]string{
+		"memory_search":  "Retired facts are excluded immediately.",
+		"memory_add":     "Unpinned facts decay (30-day default half-life) and may eventually be pruned.",
+		"memory_reflect": "Retirement leaves a tombstone that ordinary pruning can remove.",
+	} {
+		if !strings.Contains(tools[name].Description, want) {
+			t.Errorf("%s description must include %q", name, want)
+		}
+	}
+
+	var input struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tools["memory_search"].InputSchema, &input); err != nil {
+		t.Fatalf("decode memory_search inputSchema: %v", err)
+	}
+	if got := input.Properties["explain"].Description; !strings.Contains(got, "reachable through retained tombstones") {
+		t.Errorf("explain must describe the retained lineage, got %q", got)
+	}
+}

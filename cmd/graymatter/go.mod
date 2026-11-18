@@ -2,19 +2,11 @@ module github.com/angelnicolasc/graymatter/cmd/graymatter
 
 go 1.25.5
 
-// The binaries built from this module ship to users, and `go install ...@latest`
-// bypasses CI entirely — whatever toolchain the user happens to have is what
-// links the stdlib in. govulncheck found 14 reachable stdlib advisories against
-// 1.26.1; all are fixed by 1.26.6. Declaring the toolchain here means a user on
-// an older Go still gets a patched binary.
-//
-// This is deliberately not in the root go.mod: that module is consumed as a
-// library, and forcing a toolchain download on library consumers is not ours
-// to decide. Their own toolchain links their own binary.
-//
-// It also has no effect on this repo's own builds, which run in the go.work
-// workspace, where go.work's directives govern toolchain selection.
-toolchain go1.26.9
+// Recommend the patched toolchain for standalone builds of this module.
+// Go 1.26.10 fixes the crypto/x509 issue tracked as GO-2026-6809.
+// The go directive sets the minimum supported version. Builds inside go.work
+// and versioned go install commands select their toolchain independently.
+toolchain go1.26.10
 
 // The library is developed one directory up in the same checkout. The
 // go.work workspace at the repo root maps that dependency to the checkout for

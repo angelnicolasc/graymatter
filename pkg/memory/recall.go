@@ -26,6 +26,10 @@ type recallPipeline struct {
 	recRank    map[string]int
 	k          float64 // RRF constant in force
 	nowT       time.Time
+
+	activatedAliases []string
+	activityOnly     bool // an expansion was useful but the ranking corpus is empty
+
 	// feedback carries the weak-match vocabulary block (empty when the match
 	// is strong enough that the weak-match trigger stays quiet). Additive
 	// output only — nothing in the ranking reads it.
@@ -75,18 +79,62 @@ func (s *Store) RecallDetailed(ctx context.Context, agentID, query string, topK 
 }
 
 func (s *Store) recallDetailedWithPolicy(ctx context.Context, agentID, query string, topK int, policy recallPolicy) ([]string, string, error) {
-	result, feedback, _, err := s.recallDetailedCollectWithPolicy(ctx, agentID, query, topK, policy, true)
+	result, feedback, _, err := s.recallDetailedCollectWithPolicy(ctx, agentID, query, topK, policy, touchImmediately)
 	return result, feedback, err
 }
 
-// recallDetailedCollectWithPolicy can defer bookkeeping until a namespace
-// merge selects its final output. The returned snapshots identify only the
-// canonical facts selected by this namespace's deduplicated ranking.
-func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, query string, topK int, policy recallPolicy, touch bool) ([]string, string, []Fact, error) {
+type recallTouchMode uint8
+
+const (
+	touchImmediately recallTouchMode = iota
+	deferAliasActivity
+	deferRecallActivity
+)
+
+type recallActivity struct {
+	facts   []Fact
+	aliases []aliasActivity
+}
+
+type aliasActivity struct {
+	agentID string
+	factIDs []string
+	at      time.Time
+}
+
+func (p *recallPipeline) activity(agentID string) recallActivity {
+	if len(p.activatedAliases) == 0 {
+		return recallActivity{}
+	}
+	return recallActivity{aliases: []aliasActivity{{agentID: agentID, factIDs: p.activatedAliases, at: p.nowT.UTC()}}}
+}
+
+func (s *Store) recordRecallActivity(activity recallActivity, mode recallTouchMode) {
+	if mode == deferRecallActivity {
+		return
+	}
+	if mode == deferAliasActivity {
+		activity.aliases = nil
+	}
+	s.touchRecallActivity(activity)
+}
+
+// recallDetailedCollectWithPolicy can defer bookkeeping across a namespace
+// merge or batch. Ranked facts and vocabulary activations travel separately.
+func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, query string, topK int, policy recallPolicy, mode recallTouchMode) ([]string, string, recallActivity, error) {
 	start := time.Now()
 	p, err := s.runRecallPipelineWithPolicy(ctx, agentID, query, topK, policy)
 	if err != nil || p == nil {
-		return nil, "", nil, err
+		return nil, "", recallActivity{}, err
+	}
+
+	activity := p.activity(agentID)
+	if p.activityOnly {
+		if err := ctx.Err(); err != nil {
+			return nil, "", recallActivity{}, err
+		}
+		s.recordRecallActivity(activity, mode)
+		return nil, "", activity, nil
 	}
 
 	// Collect top-k, deduplicated by text (the documented contract), updating
@@ -94,7 +142,7 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 	// rather than slicing first: with N identical texts inside the top-k, the
 	// slice would spend budget on duplicates and return fewer distinct facts
 	// than the caller asked for. Duplicates arise whenever a caller re-stores
-	// the same sentence across sessions — the store is append-only by design.
+	// the same sentence across sessions, so multiple rows may hold it.
 	capacity := min(topK, len(p.ranked))
 	result := make([]string, 0, capacity)
 	seen := make(map[string]bool, capacity)
@@ -121,9 +169,8 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 		f.AccessedAt = p.nowT.UTC()
 		touched = append(touched, *f)
 	}
-	if touch {
-		s.touchFacts(touched)
-	}
+	activity.facts = touched
+	s.recordRecallActivity(activity, mode)
 
 	// Usage-alias learning: the store learns its vocabulary from observed reformulations —
 	// weak match leaves a pending miss, the strong match that answers it
@@ -139,7 +186,7 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 	graph := s.graph
 	extractor := s.extractor
 	s.mu.RUnlock()
-	if !policy.filtered() && graph != nil && extractor != nil && len(result) > 0 {
+	if !policy.filtered() && graph != nil && extractor != nil && len(touched) > 0 && touched[0].Extractable() {
 		// Extract entity IDs from the top-ranked fact and surface neighbors.
 		//
 		// Budget (ADR-003 condition 2): at most kgMaxNeighbors entries are
@@ -176,7 +223,7 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 	if s.cfg.OnRecall != nil {
 		s.cfg.OnRecall(agentID, query, len(result), time.Since(start))
 	}
-	return result, p.feedback, touched, nil
+	return result, p.feedback, activity, nil
 }
 
 // RecallExplain performs the same hybrid retrieval as Recall and returns one
@@ -197,6 +244,17 @@ func (s *Store) recallExplainWithPolicy(ctx context.Context, agentID, query stri
 	p, err := s.runRecallPipelineWithPolicy(ctx, agentID, query, topK, policy)
 	if err != nil || p == nil {
 		return nil, err
+	}
+
+	activity := p.activity(agentID)
+	if p.activityOnly {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !policy.preview {
+			s.touchRecallActivity(activity)
+		}
+		return nil, nil
 	}
 
 	// Identical walk to Recall's collection loop — same dedup contract, same
@@ -230,12 +288,17 @@ func (s *Store) recallExplainWithPolicy(ctx context.Context, agentID, query stri
 		return nil, err
 	}
 	if !policy.preview {
-		s.touchFacts(touched)
+		activity.facts = touched
+		s.touchRecallActivity(activity)
 	}
 
 	if !policy.preview && s.cfg.OnRecall != nil {
 		s.cfg.OnRecall(agentID, query, len(receipts), time.Since(start))
 	}
+	if err := s.annotateLineageReceipts(ctx, receipts, agentID); err != nil {
+		return nil, err
+	}
+	s.annotateReviewReceipts(ctx, receipts, touched)
 	return receipts, nil
 }
 
@@ -243,10 +306,9 @@ func (s *Store) recallExplainWithPolicy(ctx context.Context, agentID, query stri
 // filter, the three signal rankings, RRF fusion, the debugRanking seam and the
 // optional MinRelevance cut. Both Recall and RecallExplain consume the result.
 //
-// Returns (nil, nil) when the agent has nothing to rank — either no stored
-// facts at all or no live facts after the tombstone filter. An empty result is
-// not an error; the OnRecall hook still fires on the live-but-all-tombstoned
-// path so observability sees the recall happened and returned nothing.
+// An empty corpus can still yield alias activity. The empty-result path fires
+// the OnRecall hook for an existing namespace, and an absent namespace has
+// neither a ranking nor activity.
 func (s *Store) runRecallPipeline(ctx context.Context, agentID, query string, topK int) (*recallPipeline, error) {
 	policy, err := s.resolveRecallPolicy(RecallOptions{})
 	if err != nil {
@@ -290,9 +352,15 @@ func (s *Store) runRecallPipelineScan(ctx context.Context, agentID, query string
 
 func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, query string, topK int, policy recallPolicy) (*recallPipeline, error) {
 	start := time.Now()
-	stored, err := s.listLiteContext(ctx, agentID)
-	if err != nil || len(stored) == 0 {
+	stored, vectorState, err := s.listLiteSnapshot(ctx, agentID)
+	if err != nil {
 		return nil, err
+	}
+	if len(stored) == 0 {
+		if vectorState.pending {
+			policy.noteVectorFallback(vectorIndexPending)
+		}
+		return nil, nil
 	}
 
 	// Alias facts carry vocabulary mapping, not content: they never
@@ -313,16 +381,11 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 		}
 		content = append(content, f)
 	}
-	aliasMap := parseAliasFacts(aliases)
-	effectiveQuery := expandQuery(query, aliasMap, s.cfg.StemKeywords)
+	effectiveQuery, activated := expandQuery(query, parseAliasFacts(aliases))
 
-	// Drop superseded facts before anything is scored. Filtering here rather
-	// than at the end means a tombstoned fact cannot displace a live one from
-	// the top-k, and the three signals below rank only what is still true.
-	//
-	// The vector index is deliberately not filtered: it can still return a
-	// superseded ID, but the fusion loop iterates over facts, so such an ID
-	// only ever contributes a rank nobody reads.
+	// Drop superseded facts from the ranking corpus. Known tombstones also
+	// require canonical vector eligibility before truncation, since their
+	// external documents can outlive the canonical revision.
 	facts := make([]Fact, 0, len(content))
 	var supersededTexts map[string]bool
 	var retiredBy map[string][]string
@@ -348,8 +411,14 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 		}
 	}
 	if len(facts) == 0 {
+		if vectorState.pending {
+			policy.noteVectorFallback(vectorIndexPending)
+		}
 		if !policy.preview && s.cfg.OnRecall != nil {
 			s.cfg.OnRecall(agentID, query, 0, time.Since(start))
+		}
+		if len(activated) != 0 {
+			return &recallPipeline{activatedAliases: activated, activityOnly: true, nowT: s.now()}, nil
 		}
 		return nil, nil
 	}
@@ -392,7 +461,7 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 
 	// --- Signal 1: vector similarity ---
 	vectorRank := make(map[string]int, min(vectorBudget(topK), len(facts))) // factID → rank (1-based)
-	vecResults, vecErr := s.vectorSearchWithPolicy(ctx, agentID, effectiveQuery, vectorBudget(topK), factIndex, policy)
+	vecResults, vectorFallback, vecErr := s.searchSnapshotVectors(ctx, agentID, effectiveQuery, vectorBudget(topK), factIndex, policy, vectorState, len(supersededTexts) != 0)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -586,7 +655,10 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 		return nil, err
 	}
 
+	policy.noteVectorFallback(vectorFallback)
 	return &recallPipeline{
+		activatedAliases: activated,
+
 		policy:          policy,
 		baseScores:      baseScores,
 		facts:           facts,
@@ -604,9 +676,8 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 	}, nil
 }
 
-// lineage returns every fact the given one replaced, oldest edge last, walking
-// the supersede chain transitively: when a value was corrected twice, the live
-// fact names both retired versions, not only the one it directly replaced.
+// lineage walks retained tombstones to find reachable predecessor IDs.
+// Removing an intermediate tombstone can shorten the chain.
 //
 // The walk carries its own visited set. A supersede cycle is already a doctor
 // finding rather than an impossibility, and a receipt is not the place to

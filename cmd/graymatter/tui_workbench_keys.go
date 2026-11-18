@@ -19,7 +19,7 @@ type paletteCommand struct{ name, description, key string }
 
 var tuiCommands = []paletteCommand{
 	{"memory", "Browse and curate facts", "1"}, {"recall", "Inspect retrieval without access touches", "2"}, {"activity", "Harness runs and checkpoints", "3"}, {"graph", "Relationships and supporting facts", "4"}, {"usage", "Subscription limits and API spend", "u"}, {"status", "Store status and diagnostics", "6"},
-	{"namespace", "Choose memory namespace", "n"}, {"filter", "Filter text in current list", "f"}, {"add", "Add a fact to the current namespace", "a"}, {"revise", "Replace selected fact with traceable revision", "e"}, {"retire", "Retire selected fact, preserve history", "d"}, {"pin", "Toggle selected fact's permanent pin", "p"}, {"copy", "Copy selected content", "y"}, {"refresh", "Refresh the current resource", "r"},
+	{"namespace", "Choose memory namespace", "n"}, {"filter", "Filter text in current list", "f"}, {"add", "Add a fact to the current namespace", "a"}, {"revise", "Replace selected fact with traceable revision", "e"}, {"retire", "Retire selected fact as a tombstone", "d"}, {"pin", "Toggle protection from automatic decay and pruning", "p"}, {"copy", "Copy selected content", "y"}, {"refresh", "Refresh the current resource", "r"},
 	{"theme dark", "Use the dark theme", ""}, {"theme light", "Use the light theme", ""}, {"theme terminal", "Use terminal foreground and background", ""}, {"mouse", "Toggle mouse navigation", ""}, {"help", "Keyboard reference and data scope", "?"}, {"quit", "Close the workbench", "q"},
 	{"redraw", "Clear and redraw the terminal", "Ctrl+L"},
 }
@@ -53,6 +53,9 @@ func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.recallCancel()
 		}
 		return m, tea.Quit
+	}
+	if m.modal == "lineage" {
+		return m.handleLineageKey(msg)
 	}
 	if m.modal != "" {
 		return m.handleModalKey(msg)
@@ -117,6 +120,11 @@ func (m tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "y":
 		return m, m.copySelection()
+	case "v":
+		if m.activeTab == tabMemory || m.activeTab == tabRecall {
+			cmd := m.openLineage()
+			return m, cmd
+		}
 	}
 	switch m.activeTab {
 	case tabMemory:
@@ -428,7 +436,7 @@ func (m *tuiModel) updateMemoryKey(msg tea.KeyPressMsg) []tea.Cmd {
 	m.modalFact = sel.fact
 	m.modalAgent = sel.fact.AgentID
 	if sel.fact.IsSuperseded() {
-		m.status = "Retired facts are preserved as history; select a live fact to change it"
+		m.status = "Select a live fact to revise or retire"
 		return nil
 	}
 	switch key {

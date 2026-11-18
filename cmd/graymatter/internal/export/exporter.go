@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/lineageview"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -51,4 +53,39 @@ func (e *JSONExporter) Export(facts []memory.Fact, outDir string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, "memories.json"), data, 0o644)
+}
+
+// WriteLineageArchive places the audit archive after the complete file has been
+// encoded. The temporary file keeps the same restrictive permissions on rename.
+func WriteLineageArchive(archive memory.LineageArchive, outDir string) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(outDir, ".memory-lineage-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	writeErr := enc.Encode(archive)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), filepath.Join(outDir, "memory-lineage.json"))
+}
+
+func writeFactLineage(sb *strings.Builder, heading string, p memory.LineageProjection) {
+	lines := lineageview.Lines(p)
+	if len(lines) == 0 {
+		return
+	}
+	sb.WriteString(heading)
+	for _, line := range lines {
+		fmt.Fprintf(sb, "- %s\n", line)
+	}
 }

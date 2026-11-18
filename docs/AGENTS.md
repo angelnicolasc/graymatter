@@ -53,16 +53,16 @@ labels, surrounding whitespace and incorrect types before effects.
 |---|---|---|
 | `memory_add`, reflect add, CLI remember | Keep legacy empty storage, effectively inferred | Commit the validated label with the exact new fact |
 | reflect update, CLI revise | Minimum of inferred and every validated live target's effective confidence | Commit the requested label on the exact replacement |
-| Generated consolidation summary | Minimum of inferred and the valid consumed sources | No automatic promotion |
+| Historical generated consolidation summary | Minimum of inferred and the valid consumed sources | Generative compaction is disabled |
 | `RememberExtracted` LLM result | Unverified, even if the extracted text equals the input | Original-text fallback remains ordinary legacy storage |
 | forget, pin, unpin, link | Preserve labels | `confidence` is invalid on these actions |
 
-Revision commits the replacement's text and metadata atomically, then retires
-the targets. A changed source is revalidated before the replacement commit.
-The workflow is not one transaction: a later retirement failure is reported and
-can leave the committed replacement alongside a still-live target. A failed
-replacement write leaves the targets live. No pin is inherited. Pin/unpin,
-decay, access bookkeeping, export and vector reconciliation preserve confidence.
+Revision commits the replacement and all selected source retirements together.
+A changed source, a write failure, or cancellation before commit rolls back the
+revision. A successful response returns the committed replacement. If a daemon
+response is lost after dispatch, inspect the current facts before repeating the
+request. The replacement starts unpinned. Pin/unpin, decay, access bookkeeping,
+export and vector reconciliation preserve confidence.
 
 Search and batch accept global `min_confidence` and `confidence_weight` options:
 
@@ -70,8 +70,8 @@ Search and batch accept global `min_confidence` and `confidence_weight` options:
   effective categories, `inferred` includes inferred/legacy and verified, and
   `verified` includes verified only. Aliases and tombstones never rank.
 - Eligibility is applied before IDF, signal ranks, recency, relevance floor,
-  deduplication and top-k, in both scan and indexed retrieval. Historical
-  tombstones remain available for explain lineage.
+  deduplication and top-k, in both scan and indexed retrieval. Explain includes
+  retained version lineage and observable legacy tombstones.
 - A finite weight in `[0, 0.5]` applies `final = B * (1 + weight * c)`, with
   `c = +1` for verified, `0` for inferred/legacy and `-1` for unverified/unknown.
   `B` is the existing three-signal RRF score with `k = 60`. Zero retains legacy
@@ -105,9 +105,11 @@ the effective query fails explicitly and can be retried; it does not generate a
 second embedding.
 
 New RPC methods negotiate versioned confidence capabilities. A legacy daemon
-may serve an effectively legacy request; explicit new options require an
-update/restart error when unsupported. An uncertain write is never replayed
-automatically. Older RPC endpoints and the REST API retain zero preference.
+can serve compatible reads and lifecycle requests. Typed writes that can
+schedule maintenance require a daemon that advertises maintenance-only mode.
+Unsupported options return an update/restart error before dispatch. An uncertain
+write is never replayed automatically. Older RPC endpoints and the REST API
+retain zero preference.
 Authenticated MCP over HTTP supports the same options as stdio.
 
 ```jsonc
@@ -281,7 +283,16 @@ GrayMatter ranks facts via **Reciprocal Rank Fusion (RRF)** over three independe
 2. **Keyword relevance** (TF-IDF approximation over bbolt facts)
 3. **Recency** (exponential decay from `CreatedAt`)
 
-Each signal produces an independent ranking; RRF fuses the ranks (not the scores) into a single base score. Optional confidence preference adjusts that score as described above. Returns top-K, deduplicated by text. One batched transaction updates only returned facts' access metadata (`AccessCount++`, `AccessedAt = now`).
+Each signal produces an independent ranking; RRF fuses the ranks (not the scores) into a single base score. Optional confidence preference adjusts that score as described above. Returns top-K, deduplicated by text. Returned facts update their access metadata.
+
+A live alias records access when its expansion adds a new query token, even
+if the search returns no facts. A batch or combined namespace search records
+each contributing alias once per operation. Preview and read-only searches
+leave alias access metadata untouched. An activation renews a live, unpinned
+usage alias to full weight. Authored aliases are exempt from decay and pruning
+while live. Other source values record access without a special renewal.
+Retirement ends expansion and restores ordinary maintenance for unpinned
+aliases. See [the alias lifecycle contract](api-stability.md#recall-result-ordering).
 
 Facts marked superseded are dropped before any of this — a fact an agent has corrected or forgotten never competes for a slot. Graph neighbours of the top hit would also be appended, but nothing wires the graph into the store in shipped builds, so in practice that step never runs ([ADR-003](decisions/003-knowledge-graph-autopopulation.md)).
 
@@ -327,17 +338,16 @@ identity may pass the flat input schema, but the server rejects it at runtime.
 |--------|-------------------------|---------------------------|
 | `add` | The new fact (required) | (unused) |
 | `update` | The corrected fact (required) | The old fact text to supersede (required) |
-| `forget` | The fact to remove (alternative to `target`) | The fact to remove (wins when both are set) |
+| `forget` | The fact to retire (alternative to `target`) | The fact to retire (wins when both are set) |
 | `link` | Source node ID (required) | Target node ID in the knowledge graph (required) |
 | `pin` | The fact to pin (alternative to `target`) | The fact to pin (wins when both are set) |
 | `unpin` | The fact to unpin (alternative to `target`) | The fact to unpin (wins when both are set) |
 
-**Pin/unpin:** a pinned fact is exempt from decay, pruning and summarisation
-(ADR-010) — use it when the user declares something permanent: a standing
-obligation, an architecture decision, a security policy. Pins are visible
-(star in the TUI, counted by `status`, flagged in exports). Unpinning
-restores normal decay; a fact pinned for a long time inherits the accumulated
-staleness when unpinned, which is honest rather than silently reset.
+Pinning exempts a fact from automatic decay and pruning
+([ADR-010](decisions/010-pinned-facts.md)). Pins are visible in the TUI,
+counted by `status` and flagged in exports. Unpinning restores the normal lifecycle
+using the fact's existing access timestamp. Explicit deletion can remove a
+pinned record.
 
 **Update workflow:**
 ```jsonc
@@ -355,11 +365,13 @@ staleness when unpinned, which is honest rather than silently reset.
 }}
 ```
 
-The old fact is tombstoned and stops being recalled from the very next search
-— not on the next consolidation pass, and not eventually. It is not deleted:
-it stays visible to `graymatter export`, the TUI and any `List` call, with its
-`superseded_by` pointing at the fact that replaced it, so the correction can be
-audited later. Ordinary decay and pruning collect it in due course.
+The old fact drops out of recall immediately. Its tombstone stays visible to
+`graymatter export`, the TUI and `List` while the row remains stored.
+`superseded_by` points to the replacement fact. Ordinary pruning can remove
+an unpinned tombstone after its weight falls below 0.01. The `forget` action
+also retires a fact immediately, without a replacement.
+See [fact retention and deletion](api-stability.md#fact-retention-and-deletion)
+for the explicit deletion API.
 
 > Before v0.10.0 this action set the old fact's weight to 0 and reported
 > success, and recall does not read weight — so the superseded fact kept
@@ -458,20 +470,25 @@ Before storing, verify the fact:
 
 ### Decay & consolidation
 
-Facts decay. A fact you never recall will eventually be pruned.
+Consolidation runs decay, pruning, and configured graph extraction.
+Generative compaction is disabled for Anthropic and Ollama.
+
+Unpinned rows subject to aging can decay. A maintenance cycle can prune live
+facts and tombstones that meet the weight threshold.
 
 **Mechanics** (defaults from [`config.go`](../config.go)):
 - Initial weight = `1.0`
 - Exponential decay based on time since last access
 - Half-life = `30 days` (`DecayHalfLife = 720h`)
-- Pruned when weight `< 0.01`
-- Recall resets the decay clock for that fact
+- A live ordinary fact is eligible for pruning when its weight and its current age-based decay value are both below `0.01`.
+- Recall refreshes the access time without raising the stored weight of ordinary facts. A manually low weight on a live fact follows the same age check. Retire or delete the fact to remove it explicitly.
+- Live authored aliases and pinned rows are exempt from automatic aging. Eligible usage aliases renew on activation.
 - Consolidation triggers when an agent has ≥ `ConsolidateThreshold` (default `20`) facts; runs async unless `AsyncConsolidate = false`; up to `MaxAsyncConsolidations` (default `2`) goroutines concurrently
 
 **Implications:**
 ```jsonc
-// Anti-pattern: store once, never reference → pruned after ~199 days
-// (6.64 half-lives to fall below the 0.01 floor, at the default 30-day half-life)
+// An unpinned fact at weight 1.0 becomes eligible for pruning after about
+// 199 days without access at the default half-life.
 { "tool": "memory_add", "args": { "agent_id": "agent", "text": "Critical security policy: …" }}
 // Then never search for it.
 
@@ -479,16 +496,13 @@ Facts decay. A fact you never recall will eventually be pruned.
 
 	// Best: the user declared it permanent (standing obligation, architecture
 	// decision)? Pin it — memory_reflect action=pin exempts it from decay,
-	// pruning and summarisation entirely (ADR-010).
+	// and pruning (ADR-010).
 	// ```
 	// { "tool": "memory_reflect", "args": { "action": "pin", "agent_id": "agent",
 	//     "text": "Critical security policy: …" }}
 	// ```
-	// A pinned fact never decays and is never pruned or summarised away;
-	// unpin only restores normal decay — it does not retire the fact. A fact
-	// that is wrong or superseded is fixed with memory_reflect update (or
-	// forget); unpin is for a fact that is still true but no longer needs
-	// permanence.
+	// Unpin restores the record's normal lifecycle. Use memory_reflect update
+	// or forget to retire a fact. Explicit deletion can remove a pinned row.
 ```
 
 ### Cleanup schedule
@@ -606,7 +620,7 @@ Other useful subcommands:
 | `graymatter demo` | Seed a scratch multi-agent store, run consolidation, open the TUI — one command, no keys |
 | `graymatter hooks install` / `uninstall` / `doctor` | Manage Claude Code automatic memory hooks (per-turn injection of agent facts + `__shared__` conventions, `remember:` / `remember shared:` instant-save, /compact survival); every hook failure degrades silently |
 | `graymatter recall <agent> "<query>" --explain` | Receipts per fact: per-signal RRF ranks, fused score, weight, age, provenance (`fact_id`, `written_at`) — same JSON shape as the MCP `explain` payload |
-| `graymatter consolidate <agent_id>` | Run one consolidation cycle through the daemon's policy |
+| `graymatter consolidate <agent_id>` | Run memory maintenance through the store owner's policy |
 | `graymatter kg render --out graph.html` | Self-contained force-graph page (offline, tooltips carry fact-ID receipts); `--out graph.dot` for Graphviz |
 | `graymatter mcp serve` | Start the MCP server (stdio default, `--http 127.0.0.1:8080` for HTTP; the HTTP transport requires a bearer token) |
 | `graymatter tui` | Six-view memory workbench; see [controls and scope](tui.md) |
@@ -778,23 +792,28 @@ Even very large memory stores stay tiny. Don't pre-optimise for storage.
 ### Environment variables
 
 ```bash
-# Embedding providers (auto-detected in this order: Ollama → OpenAI → Anthropic → keyword)
+# Embedding providers (auto-detected in this order: Ollama → OpenAI → Voyage → keyword)
 export OPENAI_API_KEY=sk-...           # OpenAI embeddings
-export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic embeddings + consolidation LLM
+export VOYAGE_API_KEY=pa-...           # Voyage embeddings
+
+# Optional Anthropic fact or entity extraction
+export ANTHROPIC_API_KEY=sk-ant-...
 
 # Or run Ollama locally (default, recommended)
 ollama pull nomic-embed-text
 export GRAYMATTER_OLLAMA_URL=http://localhost:11434     # optional override
 export GRAYMATTER_OLLAMA_MODEL=nomic-embed-text         # optional override
-export GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL=llama3.2     # local consolidation summariser (ADR-011)
+export GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL=llama3.2     # legacy summariser model setting
 export GRAYMATTER_OPENAI_MODEL=text-embedding-3-small   # optional override
 ```
 
-Consolidation (`ConsolidateLLM`) accepts `"anthropic"` (needs
-`ANTHROPIC_API_KEY`) or `"ollama"` — fully local, no key. With Ollama, each
-applied cycle replaces the weakest half of an agent's facts with one summary;
-the consumed facts stay auditable as tombstones pointing at the summary, and
-`status` reports the running totals (`consolidations`, `facts_consumed`).
+The `ConsolidateLLM` values `"anthropic"` and `"ollama"` and their model
+settings are accepted for compatibility. The effective mode is maintenance
+only. Configured embedding and graph extraction providers remain independent.
+`status` reports the effective mode and the historical summary totals
+(`consolidations`, `facts_consumed`). A maintenance run leaves both totals
+unchanged. A legacy daemon with unknown maintenance policy needs an update
+and restart before it can serve writes that trigger maintenance.
 
 ### Key config fields ([`config.go`](../config.go))
 
@@ -804,7 +823,7 @@ the consumed facts stay auditable as tombstones pointing at the summary, and
 | `TopK` | `8` | ↑ to 12 for very dense memory; ↓ to 5 if facts are highly specific |
 | `EmbeddingMode` | `EmbeddingAuto` | Force `EmbeddingKeyword` to skip vector search entirely |
 | `DecayHalfLife` | `720h` (30 d) | ↓ to 7 d for fast-changing domains; ↑ to 90 d for stable conventions |
-| `ConsolidateThreshold` | `20` | ↓ to 10 for aggressive consolidation; ↑ to 50 for retention |
+| `ConsolidateThreshold` | `20` | Minimum fact count for automatic maintenance |
 | `AsyncConsolidate` | `true` | Set `false` only in tests / deterministic CI |
 | `MaxAsyncConsolidations` | `2` | Concurrency cap on background consolidation |
 | `ReadOnly` | `false` | Set `true` to open the store without taking the write lock |

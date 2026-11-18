@@ -16,9 +16,9 @@ pkg/embedding             pluggable embeddings: Ollama → OpenAI → Anthropic 
 
 | Module | What it is | Invariant | Guarded by |
 |---|---|---|---|
-| `store.go` | bbolt persistence; facts are JSON docs under per-agent buckets | append-only: `Delete` is the only removal path; `UpdateFact` never creates | `store_test.go`, `reconcile_test.go` |
+| `store.go` | bbolt persistence; facts are JSON docs under per-agent buckets | pruning removes eligible unpinned rows and `Delete` explicitly removes a row by ID. `UpdateFact` never creates a row | `store_test.go`, `reconcile_test.go` |
 | `recall.go` | RRF fusion over vector / keyword / recency signals | deterministic total order (score → CreatedAt → ID); superseded facts never score | `tiebreak_test.go`, `golden_test.go` |
-| `consolidate.go` | decay → propose/apply summarisation → prune → KG extraction | LLM proposes, apply is deterministic; receipts via tombstones; pinned facts exempt from all three steps (I-1) | `consolidate_ollama_test.go`, `consolidate_test.go`, `pin_test.go`, property: `TestConsolidation_TombstonePropertyAcrossCycles` |
+| `consolidate.go` | decay, prune, and optional KG extraction | Generative compaction is disabled. Pinned facts are protected from decay and pruning (I-1) | `consolidate_test.go`, `pin_test.go` |
 | extraction watermark | SHA-256 text signature per fact | a fact is extracted once per text version; retired facts never reach the graph | `TestExtraction_WatermarkSkipsUnchangedAndSuperseded` |
 | `fact.go` | the Fact record and its lifecycle markers | superseded ⇒ out of recall immediately; pinned ⇒ out of decay/prune/batch | `pin_test.go`, `supersede` tests in rpc/mcp |
 | quality gates | corpus-backed regression floors | canonical recall@8 must not regress across consolidation | `benchmarks/retrieval_quality/consolidation_test.go`, `golden_test.go` |

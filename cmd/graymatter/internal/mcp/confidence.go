@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
@@ -12,6 +13,51 @@ import (
 type confidenceWriter interface {
 	PutWithOptionsReturningFact(context.Context, string, string, memory.WriteOptions) (memory.Fact, error)
 }
+type optionalIdentityWriter interface {
+	PutWithOptionalIdentity(context.Context, string, string, memory.WriteOptions) (memory.Fact, error)
+}
+
+type returningFactWriter interface {
+	PutReturningFact(context.Context, string, string) (memory.Fact, error)
+}
+
+// Select the route before dispatch. A failure after invoking a writer never
+// permits a fallback write because the first operation may have committed.
+func (s *Server) putWithIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if writer, ok := s.backend.(optionalIdentityWriter); ok {
+		return writer.PutWithOptionalIdentity(ctx, agentID, text, opts)
+	}
+	if writer, ok := s.backend.(confidenceWriter); ok {
+		return confirmedIdentity(writer.PutWithOptionsReturningFact(ctx, agentID, text, opts))
+	}
+	if opts.Confidence != nil {
+		return memory.Fact{}, memory.ErrConfidenceUnsupported
+	}
+	if writer, ok := s.backend.(returningFactWriter); ok {
+		return confirmedIdentity(writer.PutReturningFact(ctx, agentID, text))
+	}
+	// Older in-process backends may only support Remember. A product daemon
+	// uses the optional identity capability path, including its policy gate.
+	return memory.Fact{}, s.backend.Remember(ctx, agentID, text)
+}
+
+func confirmedIdentity(fact memory.Fact, err error) (memory.Fact, error) {
+	if err == nil && fact.ID == "" {
+		return memory.Fact{}, errors.New("write returned no committed fact identity")
+	}
+	return fact, err
+}
+
+func writeIdentityNotice(id, confidence string) string {
+	if id == "" {
+		return ""
+	}
+	if confidence == "" {
+		return fmt.Sprintf(" fact_id %s.", id)
+	}
+	return fmt.Sprintf(" Confidence %s. fact_id %s.", confidence, id)
+}
+
 type confidenceReviser interface {
 	ReviseFactsWithOptions(context.Context, string, string, memory.WriteOptions, ...memory.Fact) (memory.Fact, error)
 }

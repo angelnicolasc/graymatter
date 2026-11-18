@@ -26,6 +26,15 @@ import (
 // through the real wire by TestBackendErrorSurface.
 type failingBackend struct{}
 
+func (failingBackend) MaintenanceOnly() bool              { return true }
+func (failingBackend) SupportsAuthoritativeLineage() bool { return true }
+func (failingBackend) InspectLineage(context.Context, string, string, string) (memory.LineageInspection, error) {
+	return memory.LineageInspection{}, errors.New("backend down")
+}
+func (failingBackend) ExportLineage(context.Context, string) (memory.LineageArchive, error) {
+	return memory.LineageArchive{}, errors.New("backend down")
+}
+
 func (failingBackend) Put(context.Context, string, string) error { return errors.New("backend down") }
 func (failingBackend) PutShared(context.Context, string) error {
 	return errors.New("backend down")

@@ -2,10 +2,22 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sort"
 	"sync"
 )
+
+// ErrBatchRecallUnsupported reports that the current backend does not support
+// scoped batch recall.
+var ErrBatchRecallUnsupported = errors.New("scoped batch recall is unsupported")
+
+// ScopedBatchRecaller is an optional store capability. The all flag includes
+// shared memory for each query. Nil opts request the legacy zero-confidence
+// policy and a raw top-k, while nonnil opts use option-aware recall.
+type ScopedBatchRecaller interface {
+	BatchRecallScoped(ctx context.Context, agentID string, queries []string, topK int, all bool, opts *RecallOptions) ([]BatchResult, error)
+}
 
 // BatchRecall answers many queries in one call, fanning them out across
 // goroutines.
@@ -23,10 +35,11 @@ import (
 // batch adds is the fan-out and a merged view (see MergedFacts) for callers
 // that want one deduplicated block instead of k separate lists.
 type BatchResult struct {
-	Query     string             `json:"query"`
-	Facts     []string           `json:"facts"`
-	Feedback  string             `json:"feedback,omitempty"`
-	Retrieval *RetrievalMetadata `json:"retrieval,omitempty"`
+	Query         string             `json:"query"`
+	Facts         []string           `json:"facts"`
+	Feedback      string             `json:"feedback,omitempty"`
+	Retrieval     *RetrievalMetadata `json:"retrieval,omitempty"`
+	ReviewNotices []ReviewNotice     `json:"conflict_notices,omitempty"`
 	// Err carries a per-query failure. One bad query does not fail the batch:
 	// an agent asking six questions should get the five answers that worked,
 	// not a single error for all of them.
@@ -49,7 +62,7 @@ func (s *Store) BatchRecall(ctx context.Context, agentID string, queries []strin
 	if topK < 0 {
 		topK = 0
 	}
-	return s.batchRecallWithPolicy(ctx, agentID, queries, topK, policy)
+	return s.batchRecallWithPolicy(ctx, agentID, queries, topK, false, policy)
 }
 
 func (s *Store) BatchRecallWithOptions(ctx context.Context, agentID string, queries []string, topK int, opts RecallOptions) ([]BatchResult, error) {
@@ -58,14 +71,27 @@ func (s *Store) BatchRecallWithOptions(ctx context.Context, agentID string, quer
 		return nil, err
 	}
 	topK = recallTopK(topK)
-	return s.batchRecallWithPolicy(ctx, agentID, queries, topK, policy)
+	return s.batchRecallWithPolicy(ctx, agentID, queries, topK, false, policy)
 }
 
-func (s *Store) batchRecallWithPolicy(ctx context.Context, agentID string, queries []string, topK int, policy recallPolicy) ([]BatchResult, error) {
+// BatchRecallScoped implements ScopedBatchRecaller.
+func (s *Store) BatchRecallScoped(ctx context.Context, agentID string, queries []string, topK int, all bool, opts *RecallOptions) ([]BatchResult, error) {
+	if opts == nil {
+		return s.batchRecallWithPolicy(ctx, agentID, queries, max(topK, 0), all, recallPolicy{})
+	}
+	policy, err := s.resolveRecallPolicy(*opts)
+	if err != nil {
+		return nil, err
+	}
+	return s.batchRecallWithPolicy(ctx, agentID, queries, recallTopK(topK), all, policy)
+}
+
+func (s *Store) batchRecallWithPolicy(ctx context.Context, agentID string, queries []string, topK int, all bool, policy recallPolicy) ([]BatchResult, error) {
 	if len(queries) == 0 {
 		return nil, nil
 	}
 	out := make([]BatchResult, len(queries))
+	activated := make([][]aliasActivity, len(queries))
 	limit := runtime.GOMAXPROCS(0)
 	if limit > len(queries) {
 		limit = len(queries)
@@ -83,19 +109,39 @@ func (s *Store) batchRecallWithPolicy(ctx context.Context, agentID string, queri
 				return
 			}
 			defer func() { <-sem }()
-			out[i] = BatchResult{Query: q, Retrieval: policy.retrieval()}
-			facts, feedback, err := s.recallDetailedWithPolicy(ctx, agentID, q, topK, policy)
+			var vectorFallback string
+			request := policy
+			request.vectorFallback = &vectorFallback
+			var result RecallResult
+			var activity recallActivity
+			var err error
+			if all {
+				result, activity, err = s.recallAllCollectWithPolicy(ctx, agentID, q, topK, request, deferAliasActivity)
+			} else {
+				result.Facts, result.Feedback, activity, err = s.recallDetailedCollectWithPolicy(ctx, agentID, q, topK, request, deferAliasActivity)
+				if err == nil {
+					result.ReviewNotices = s.recalledReviewNotices(ctx, activity.facts)
+				}
+			}
+			out[i] = BatchResult{Query: q, Retrieval: request.retrieval()}
 			if err != nil {
 				out[i].Err = err
 				return
 			}
-			out[i].Facts = facts
+			activated[i] = activity.aliases
+			out[i].Facts = result.Facts
+			out[i].ReviewNotices = result.ReviewNotices
 			if policy.metadata {
-				out[i].Feedback = feedback
+				out[i].Feedback = result.Feedback
 			}
 		}(i, q)
 	}
 	wg.Wait()
+	var activity recallActivity
+	for _, aliases := range activated {
+		activity.aliases = append(activity.aliases, aliases...)
+	}
+	s.touchRecallActivity(activity)
 	return out, ctx.Err()
 }
 

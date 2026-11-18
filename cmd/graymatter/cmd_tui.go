@@ -270,7 +270,8 @@ type tuiModel struct {
 	input                      textinput.Model
 	editor                     textarea.Model
 	inputMode                  string // palette, filter, recall, namespace, graph-source
-	modal                      string // add, revise, retire, kill, help
+	modal                      string // add, revise, retire, kill, help, lineage
+	lineage                    tuiLineage
 	modalFact                  memory.Fact
 	modalAgent, modalSession   string
 	busy                       bool
@@ -563,6 +564,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		changed := m.width != msg.Width || m.height != msg.Height
 		m.width, m.height = msg.Width, msg.Height
+		if m.modal == "lineage" {
+			m.sizeLineageView()
+		}
 		m.updateSizes()
 		m.syncPreview(false)
 		if changed {
@@ -587,6 +591,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.handleMouse(msg))
 		}
 	case tea.MouseWheelMsg:
+		if m.mouse && m.modal == "lineage" {
+			var cmd tea.Cmd
+			m.lineage.view, cmd = m.lineage.view.Update(msg)
+			return m, cmd
+		}
 		if m.mouse && m.modal == "" && m.inputMode == "" {
 			if m.activeTab == tabUsage {
 				return m, m.updateUsage(msg)
@@ -720,6 +729,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			setListItems(&m.checkpointList, items)
 			m.syncPreview(false)
 		}
+	case lineageLoadedMsg:
+		m.lineageLoaded(msg)
 	case recallLoadedMsg:
 		if msg.generation != m.recallGeneration || msg.agent != m.namespace {
 			break
@@ -768,7 +779,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case mutationMsg:
 		m.busy = false
-		if msg.err != nil {
+		knownRevision := msg.action == "revise" && msg.fact.ID != ""
+		if msg.err != nil && !knownRevision {
 			m.status = "Action failed: " + tuiPlain(msg.err.Error())
 			if errors.Is(msg.err, memory.ErrMutationOutcomeUnknown) {
 				m.modal = ""
@@ -784,6 +796,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.modal = ""
 			m.status = msg.action + " confirmed"
+			if msg.err != nil {
+				m.status = "Revision committed as " + tuiPlain(msg.fact.ID) + ". Follow-up error: " + tuiPlain(msg.err.Error())
+			}
 			if msg.agent == m.namespace {
 				cmds = append(cmds, m.loadFacts(m.namespace))
 			}
@@ -954,7 +969,7 @@ func max(a, b int) int {
 func tuiCmd() *cobra.Command {
 	var readOnly, mouse bool
 	var theme string
-	cmd := &cobra.Command{Use: "tui", Short: "Explore, inspect and curate agent memory", Long: "Interactive memory workbench: Memory, Recall, Activity, Graph, Usage and Status.\nUse / or Ctrl+K for commands, f to filter, n to choose a namespace.\nRecall inspection does not touch access counts. Retiring preserves history.", RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "tui", Short: "Explore, inspect and curate agent memory", Long: "Interactive memory workbench: Memory, Recall, Activity, Graph, Usage and Status.\nUse / or Ctrl+K for commands, f to filter, n to choose a namespace.\nRecall inspection does not touch access counts. Retirement leaves a tombstone that ordinary pruning can remove.", RunE: func(cmd *cobra.Command, args []string) error {
 		if theme != "" && theme != "dark" && theme != "light" && theme != "terminal" {
 			return fmt.Errorf("theme must be dark, light, or terminal")
 		}

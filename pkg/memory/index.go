@@ -660,6 +660,9 @@ func (s *Store) idxLoadFactsContext(ctx context.Context, tx *bolt.Tx, agentID st
 		if err != nil {
 			return nil, fmt.Errorf("index load %s: %w", id, err)
 		}
+		if err := hydrateLineageTx(tx, &f); err != nil {
+			return nil, err
+		}
 		out[id] = f
 	}
 	return out, nil

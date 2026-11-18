@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -68,8 +69,8 @@ type RunConfig struct {
 	// MaxRetries is the maximum number of LLM call attempts. Default: 3
 	MaxRetries int
 
-	// ResumeID is a harness session ID or "latest". When non-empty, the prior
-	// message history is loaded from the selected checkpoint and prepended.
+	// ResumeID is a harness session ID or "latest". Latest is scoped to the
+	// agent namespace. The runner restores messages, not arbitrary state.
 	ResumeID string
 
 	// Stdout receives the final agent reply. Default: os.Stdout
@@ -162,13 +163,18 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 	switch cfg.ResumeID {
 	case "":
 	case "latest":
-		// Preserve the established meaning of latest: the newest checkpoint for
-		// this agent, even if a newer failed session has no checkpoint.
 		cp, cpErr := store.CheckpointResume(def.Name)
-		if cpErr == nil && cp != nil {
-			priorMessages = cp.Messages
-			fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", cfg.ResumeID, cp.ID)
+		if errors.Is(cpErr, session.ErrNoCheckpoint) {
+			break
 		}
+		if cpErr != nil {
+			return nil, fmt.Errorf("resume session %q: %w", cfg.ResumeID, cpErr)
+		}
+		if cp == nil {
+			return nil, fmt.Errorf("resume session %q: persistence backend returned no checkpoint", cfg.ResumeID)
+		}
+		priorMessages = cp.Messages
+		fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", cfg.ResumeID, cp.ID)
 	default:
 		resolvedID, cp, cpErr := loadSessionCheckpoint(store, def.Name, cfg.ResumeID)
 		if cpErr != nil {

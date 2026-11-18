@@ -16,11 +16,12 @@ import "github.com/angelnicolasc/graymatter/pkg/memory"
 // take it and ignore the per-query breakdown, and a fact that answered three
 // of the questions appears once rather than three times.
 type batchResult struct {
-	Retrieval *memory.RetrievalMetadata `json:"retrieval,omitempty"`
-	AgentID   string                    `json:"agent_id"`
-	Count     int                       `json:"count"`
-	Merged    []string                  `json:"merged"`
-	PerQuery  []struct {
+	Retrieval     *memory.RetrievalMetadata `json:"retrieval,omitempty"`
+	AgentID       string                    `json:"agent_id"`
+	Count         int                       `json:"count"`
+	Merged        []string                  `json:"merged"`
+	ReviewNotices []memory.ReviewNotice     `json:"conflict_notices,omitempty"`
+	PerQuery      []struct {
 		Query string   `json:"query"`
 		Facts []string `json:"facts"`
 		Error string   `json:"error,omitempty"`
@@ -36,7 +37,8 @@ type searchResult struct {
 	// Feedback carries the weak-match vocabulary block (v0.18.0): additive
 	// text emitted when the query's vocabulary barely overlaps the store's.
 	// Omitted when the match is strong, so the bare shape is unchanged.
-	Feedback string `json:"feedback,omitempty"`
+	Feedback      string                `json:"feedback,omitempty"`
+	ReviewNotices []memory.ReviewNotice `json:"conflict_notices,omitempty"`
 	// Explained carries the per-fact receipts when memory_search was called
 	// with explain=true (v0.17.0). Omitted otherwise, so the schema stays
 	// additive: the property is optional and the bare shape is unchanged.

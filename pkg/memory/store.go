@@ -305,8 +305,12 @@ type Store struct {
 
 	// graph and extractor are set via SetKG after Open().
 	// They are optional; Consolidate and Recall work without them.
-	graph     GraphAccessor
-	extractor EntityExtractorAccessor
+	graph            GraphAccessor
+	extractor        EntityExtractorAccessor
+	graphMaintenance GraphAccessor
+
+	// Serializes delivery when the graph uses a separate database.
+	graphDeliveryMu sync.Mutex
 
 	// Goroutine lifecycle. All goroutines launched by Store must acquire sema
 	// and register with wg before doing work. Close() cancels shutdownCtx,
@@ -350,16 +354,11 @@ func Open(cfg StoreConfig) (*Store, error) {
 	// Use the caller-supplied vector backend, or default to chromem-go.
 	vectors := cfg.VectorBackend
 	if vectors == nil {
-		openVectors := newChromemVectorStore
-		if readOnly {
-			openVectors = newReadOnlyChromemVectorStore
-		}
-		v, err := openVectors(cfg.DataDir)
+		vectors, err = openNativeVectors(cfg.DataDir, db, readOnly)
 		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("open vector store: %w", err)
 		}
-		vectors = v
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -400,7 +399,10 @@ func Open(cfg StoreConfig) (*Store, error) {
 		// Drain any vector writes that did not complete on the previous run
 		// (crash between bbolt commit and vector upsert, or transient failures)
 		// - and, after a provider switch, the full re-index queued above.
-		s.reconcileVectors()
+		_, vectorsUnavailable := vectors.(unavailableVectorStore)
+		if !vectorsUnavailable {
+			s.reconcileVectors()
+		}
 
 		// Expire reformulation pairs that never reached the promotion
 		// threshold within their evidence window: stale evidence must
@@ -410,7 +412,7 @@ func Open(cfg StoreConfig) (*Store, error) {
 		// Background reconcile loop: retries pending vectors on a cadence so the
 		// inconsistency window collapses to at most VectorReconcileInterval rather
 		// than "until next process restart". Disabled when the interval is 0.
-		if cfg.VectorReconcileInterval > 0 {
+		if cfg.VectorReconcileInterval > 0 && !vectorsUnavailable {
 			s.wg.Add(1)
 			go s.vectorReconcileLoop(cfg.VectorReconcileInterval)
 		}
@@ -556,7 +558,7 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 
 	var emb []float32
 	var embedErr error
-	if kind != KindAlias && s.embedder != nil {
+	if (Fact{Kind: kind}).Embeddable() && s.embedder != nil {
 		emb, embedErr = s.embedder.Embed(ctx, text)
 		if embedErr != nil {
 			emb = nil
@@ -624,7 +626,7 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 				return err
 			}
 		}
-		return nil
+		return ctx.Err()
 	}); err != nil {
 		return Fact{}, fmt.Errorf("put fact: %w", err)
 	}
@@ -651,16 +653,22 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 	return f, nil
 }
 
-// Delete removes a fact by ID for agentID, together with its KG extraction
-// watermark: a signature for a deleted fact is unbounded garbage, and a
-// future re-add of the same text lands under a new ID (new key) so it must
-// extract again.
+// Delete immediately removes the canonical row regardless of its weight, pin,
+// or retirement status. It removes graph support and the extraction watermark.
+// Other owners can retain an immutable evidence snapshot.
 func (s *Store) Delete(agentID, factID string) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		return s.deleteFactTx(tx, agentID, factID)
+		isLineageHead := lineageHeadKey(tx, agentID, factID) != ""
+		if err := s.deleteFactTx(tx, agentID, factID); err != nil {
+			return err
+		}
+		if isLineageHead {
+			return collectLineageTx(tx, agentID, s.now().UTC())
+		}
+		return nil
 	})
 }
 
@@ -668,6 +676,9 @@ func (s *Store) deleteFactTx(tx *bolt.Tx, agentID, factID string) error {
 	b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
 	if b == nil || b.Get([]byte(factID)) == nil {
 		return nil
+	}
+	if err := s.invalidateGraphSupportTx(tx, agentID, factID); err != nil {
+		return err
 	}
 	// Erase derived entries before losing the canonical text.
 	if s.cfg.CandidateRetrieval {
@@ -715,12 +726,19 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 			if err != nil {
 				return nil // skip corrupt entries
 			}
+			if err := hydrateLineageTx(tx, &f); err != nil {
+				return err
+			}
+			if err := verifyLineageProjectionTx(context.Background(), tx, &f); err != nil {
+				return err
+			}
 			facts = append(facts, f)
 			return nil
 		})
 	}); err != nil {
 		return nil, err
 	}
+	projectLegacyLineage(facts, legacyLineageIDs(facts))
 	// Sort newest first.
 	sortFactsByTime(facts)
 	return facts, nil
@@ -731,15 +749,18 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 // factLite). Every caller is inside this package, so the lite/full agreement
 // test in recall_lite_test.go is what keeps the two decoders honest.
 func (s *Store) listLite(agentID string) ([]Fact, error) {
-	return s.listLiteContext(context.Background(), agentID)
+	facts, _, err := s.listLiteSnapshot(context.Background(), agentID)
+	return facts, err
 }
 
-func (s *Store) listLiteContext(ctx context.Context, agentID string) ([]Fact, error) {
+func (s *Store) listLiteSnapshot(ctx context.Context, agentID string) ([]Fact, recallVectorState, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, recallVectorState{}, err
 	}
 	var facts []Fact
+	var vectorState recallVectorState
 	if err := s.db.View(func(tx *bolt.Tx) error {
+		vectorState = recallVectorStateTx(tx, agentID)
 		parent := tx.Bucket(bucketFacts)
 		if parent == nil {
 			return nil
@@ -756,14 +777,18 @@ func (s *Store) listLiteContext(ctx context.Context, agentID string) ([]Fact, er
 			if err != nil {
 				return nil // skip corrupt entries, same as List
 			}
+			if err := hydrateLineageTx(tx, &f); err != nil {
+				return err
+			}
 			facts = append(facts, f)
 			return nil
 		})
 	}); err != nil {
-		return nil, err
+		return nil, recallVectorState{}, err
 	}
+	projectLegacyLineage(facts, legacyLineageIDs(facts))
 	sortFactsByTime(facts)
-	return facts, ctx.Err()
+	return facts, vectorState, ctx.Err()
 }
 
 // ListAgents returns all known agent IDs.
@@ -793,62 +818,89 @@ func (s *Store) Stats(agentID string) (MemoryStats, error) {
 	return summary.All, err
 }
 
-// touchFacts persists access-metadata bumps for a recall batch in ONE
-// transaction. Best-effort by contract: a lost bump is statistical noise on
-// decay/recency curves measured in days, never a correctness event, so an
-// error here degrades to a log-free no-op rather than failing the recall
-// that already returned its results.
 func (s *Store) touchFacts(facts []Fact) {
-	if len(facts) == 0 {
+	s.touchRecallActivity(recallActivity{facts: facts})
+}
+
+// touchRecallActivity persists access metadata in one best-effort transaction.
+// An activation identifies a namespace and canonical fact ID independently
+// of the text returned from ranking.
+func (s *Store) touchRecallActivity(activity recallActivity) {
+	if s.readOnly || (len(activity.facts) == 0 && len(activity.aliases) == 0) {
 		return
 	}
+	type aliasKey struct{ agentID, factID string }
+	var aliases map[aliasKey]time.Time
+	if len(activity.aliases) > 1 {
+		aliases = make(map[aliasKey]time.Time)
+		for _, activation := range activity.aliases {
+			for _, id := range activation.factIDs {
+				key := aliasKey{agentID: activation.agentID, factID: id}
+				if at, seen := aliases[key]; !seen || activation.at.After(at) {
+					aliases[key] = activation.at
+				}
+			}
+		}
+	}
 	_ = s.db.Update(func(tx *bolt.Tx) error {
-		for i := range facts {
-			parent := tx.Bucket(bucketFacts)
-			if parent == nil {
-				return nil
+		parent := tx.Bucket(bucketFacts)
+		if parent == nil {
+			return nil
+		}
+		for _, f := range activity.facts {
+			if err := touchFactTx(tx, parent, f.AgentID, f.ID, f.AccessedAt, false); err != nil {
+				return err
 			}
-			b := parent.Bucket([]byte(facts[i].AgentID))
-			if b == nil {
-				continue
+		}
+		// A single namespace expansion already contains unique alias IDs.
+		if len(activity.aliases) == 1 {
+			a := activity.aliases[0]
+			for _, id := range a.factIDs {
+				if err := touchFactTx(tx, parent, a.agentID, id, a.at, true); err != nil {
+					return err
+				}
 			}
-			key := []byte(facts[i].ID)
-			// Update, never create: if the fact vanished mid-recall (forget
-			// racing the batch), a Put here would resurrect it - the exact
-			// class of bug the UpdateFact guard closed.
-			raw := b.Get(key)
-			if raw == nil {
-				continue
-			}
-			// Read-modify-write the CURRENT stored fact, not the recall-time
-			// snapshot: a concurrent consolidation may have changed weight,
-			// tombstone state or pinned flag between List and this write, and
-			// the snapshot must not stomp it. The old shape marshalled the
-			// snapshot back whole — correct only while writes were serialised
-			// by luck, and it made the lite decode path impossible besides.
-			current, uerr := unmarshalFact(raw)
-			if uerr != nil {
-				continue
-			}
-			// Update, never resurrect: the same race with the tombstone half
-			// — a consolidation cycle can supersede the fact between Recall's
-			// filter and this writeback, and the stale snapshot must not
-			// clear the tombstone. See UpdateFact for the full story.
-			if current.IsSuperseded() {
-				continue
-			}
-			current.AccessCount++
-			current.AccessedAt = facts[i].AccessedAt
-			data, err := current.marshal()
-			if err != nil {
-				continue
-			}
-			if err := b.Put(key, data); err != nil {
+		}
+		for key, at := range aliases {
+			if err := touchFactTx(tx, parent, key.agentID, key.factID, at, true); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+func touchFactTx(tx *bolt.Tx, parent *bolt.Bucket, agentID, factID string, at time.Time, aliasOnly bool) error {
+	b := parent.Bucket([]byte(agentID))
+	if b == nil {
+		return nil
+	}
+	key := []byte(factID)
+	raw := b.Get(key)
+	if raw == nil {
+		return nil
+	}
+	// Apply the access to the current row. A concurrent retirement, delete or
+	// reclassification can invalidate the retrieval-time alias activation.
+	current, err := unmarshalFact(raw)
+	if err != nil || current.IsSuperseded() || current.IsAlias() != aliasOnly {
+		return nil
+	}
+	if err := hydrateLineageTx(tx, &current); err != nil {
+		return err
+	}
+	current.AccessCount++
+	if !aliasOnly || at.After(current.AccessedAt) {
+		current.AccessedAt = at
+	}
+	if aliasOnly && current.AliasSource == AliasSourceUsage && !current.Pinned {
+		current.Weight = 1
+	}
+	data, err := current.marshal()
+	if err != nil {
+		return nil
+	}
+	return b.Put(key, data)
 }
 
 // UpdateFact persists an intentional full fact modification and maintains the
@@ -890,11 +942,27 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 		// the stale write is dropped: every legitimate caller here either
 		// carries the tombstone forward or operates on a live fact, and no
 		// path is allowed to un-retire anything.
-		if raw := b.Get([]byte(f.ID)); raw != nil {
-			current, uerr := unmarshalFact(raw)
-			if uerr == nil && current.IsSuperseded() && !f.IsSuperseded() {
-				return nil
+		current, err := factInTx(tx, agentID, f.ID)
+		if err != nil {
+			return err
+		}
+		if current.IsSuperseded() && !f.IsSuperseded() {
+			return nil
+		}
+		if f.AgentID != agentID {
+			return fmt.Errorf("%w: fact identity mismatch", ErrFactChanged)
+		}
+		if current.Text != f.Text || current.Kind != f.Kind || current.Confidence != f.Confidence {
+			retained, err := hasLineageEvidenceTx(tx, current)
+			if err != nil {
+				return err
 			}
+			if retained {
+				return fmt.Errorf("%w: fact %s", ErrRevisionRequired, f.ID)
+			}
+		}
+		if err := hydrateLineageTx(tx, &f); err != nil {
+			return err
 		}
 		// Candidate-set index. This is the path a revision takes — the
 		// tombstone is an UpdateFact — and it is also the path a CreatedAt
@@ -903,7 +971,13 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 		// stored, then write the ones the new version implies; doing it in
 		// that order is what keeps a rewritten text from stranding postings
 		// under its old vocabulary.
-		return s.persistFactTx(tx, b, agentID, f)
+		if err := s.persistFactTx(tx, b, agentID, f); err != nil {
+			return err
+		}
+		if !current.IsSuperseded() && f.IsSuperseded() && lineageHeadKey(tx, agentID, f.ID) != "" {
+			return collectLineageTx(tx, agentID, s.now().UTC())
+		}
+		return nil
 	})
 }
 
@@ -914,20 +988,30 @@ func (s *Store) persistFactTx(tx *bolt.Tx, b *bolt.Bucket, agentID string, f Fac
 	if err != nil {
 		return err
 	}
+	raw := b.Get([]byte(f.ID))
+	revisions := tx.Bucket(bucketGraphRevisions)
+	tracked := revisions != nil && revisions.Get(graphSourceKey(agentID, f.ID)) != nil
+	if raw != nil && (tracked || s.cfg.CandidateRetrieval) {
+		prev, err := unmarshalFactLite(raw)
+		if err != nil {
+			return err
+		}
+		if tracked && (prev.Text != f.Text || prev.Kind != f.Kind || prev.SupersededBy != f.SupersededBy) {
+			if err := s.invalidateGraphSupportTx(tx, agentID, f.ID); err != nil {
+				return err
+			}
+		}
+		if s.cfg.CandidateRetrieval {
+			if err := idxRemoveFact(tx, prev, s.cfg.StemKeywords); err != nil {
+				return err
+			}
+		}
+	}
 	if !s.cfg.CandidateRetrieval {
 		if err := idxInvalidate(tx, agentID); err != nil {
 			return err
 		}
 		return b.Put([]byte(f.ID), data)
-	}
-	if raw := b.Get([]byte(f.ID)); raw != nil {
-		prev, err := unmarshalFactLite(raw)
-		if err != nil {
-			return err
-		}
-		if err := idxRemoveFact(tx, prev, s.cfg.StemKeywords); err != nil {
-			return err
-		}
 	}
 	if err := b.Put([]byte(f.ID), data); err != nil {
 		return err
@@ -1075,9 +1159,31 @@ func fuseRecallResults(agentResults, sharedResults []string, topK int) []string 
 // Both arguments are optional; pass nil to disable the corresponding feature.
 func (s *Store) SetKG(graph GraphAccessor, extractor EntityExtractorAccessor) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.graph = graph
 	s.extractor = extractor
+	s.graphMaintenance = graph
+	s.mu.Unlock()
+	s.retryGraphCleanup(graph)
+}
+
+// SetGraphMaintenance attaches lifecycle operations without enabling extraction
+// or recall enrichment. Callers can maintain an existing graph with auto off.
+func (s *Store) SetGraphMaintenance(graph GraphAccessor) {
+	s.mu.Lock()
+	s.graph, s.extractor = nil, nil
+	s.graphMaintenance = graph
+	s.mu.Unlock()
+	s.retryGraphCleanup(graph)
+}
+
+func (s *Store) retryGraphCleanup(graph GraphAccessor) {
+	// A canonical delete can commit while graph delivery is disabled.
+	// Reattaching the same graph retries durable cleanup intents.
+	if writer, ok := graph.(GraphProvenanceWriter); ok && !s.readOnly {
+		if err := s.drainGraphCleanup(writer); err != nil && s.cfg.OnConsolidateError != nil {
+			s.cfg.OnConsolidateError("", fmt.Errorf("graph cleanup: %w", err))
+		}
+	}
 }
 
 // --- internal helpers ---
@@ -1120,8 +1226,8 @@ func (s *Store) reconcileVectors() {
 				s.clearPendingVector(agentID, factID)
 				continue
 			}
-			if f.IsSuperseded() {
-				// Retired facts never reach the index; drop the stale intent.
+			if f.IsSuperseded() || !f.Embeddable() {
+				// Drop stale vector intents for retired facts and aliases.
 				s.clearPendingVector(agentID, factID)
 				continue
 			}
@@ -1154,7 +1260,7 @@ func (s *Store) reindexFact(ctx context.Context, agentID string, f *Fact, target
 			return fmt.Errorf("re-embed returned no vector")
 		}
 		updated, err := s.patchFact(agentID, f.ID, func(current *Fact) error {
-			if current.IsSuperseded() || current.Text != f.Text {
+			if current.IsSuperseded() || !current.Embeddable() || current.Text != f.Text {
 				return ErrFactChanged
 			}
 			current.Embedding = fresh
@@ -1210,22 +1316,25 @@ func (s *Store) vectorReconcileLoop(interval time.Duration) {
 func (s *Store) PendingVectorCount() int {
 	count := 0
 	_ = s.db.View(func(tx *bolt.Tx) error {
-		root := tx.Bucket(bucketPendingVector)
-		if root == nil {
-			return nil
+		count = pendingVectorCountTx(tx)
+		return nil
+	})
+	return count
+}
+
+func pendingVectorCountTx(tx *bolt.Tx) int {
+	root := tx.Bucket(bucketPendingVector)
+	if root == nil {
+		return 0
+	}
+	count := 0
+	_ = root.ForEach(func(k, v []byte) error {
+		if v == nil {
+			if sub := root.Bucket(k); sub != nil {
+				count += sub.Stats().KeyN
+			}
 		}
-		return root.ForEach(func(k, v []byte) error {
-			if v != nil {
-				return nil // not a sub-bucket
-			}
-			sub := root.Bucket(k)
-			if sub == nil {
-				return nil
-			}
-			stats := sub.Stats()
-			count += stats.KeyN
-			return nil
-		})
+		return nil
 	})
 	return count
 }
@@ -1274,15 +1383,7 @@ func (s *Store) loadFact(agentID, factID string) (Fact, bool) {
 	var f Fact
 	var ok bool
 	_ = s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
-		if b == nil {
-			return nil
-		}
-		raw := b.Get([]byte(factID))
-		if raw == nil {
-			return nil
-		}
-		parsed, err := unmarshalFact(raw)
+		parsed, err := factInTx(tx, agentID, factID)
 		if err != nil {
 			return nil
 		}
@@ -1364,8 +1465,8 @@ func (s *Store) handleEmbedderLifecycle(emb embedding.Provider) {
 					return nil
 				}
 				f, err := unmarshalFact(factVal)
-				if err != nil || f.IsSuperseded() {
-					return nil // retired facts never reach the index
+				if err != nil || f.IsSuperseded() || !f.Embeddable() {
+					return nil // retired facts and aliases are ineligible
 				}
 				queued++
 				return pending.Put(factKey, []byte{1})
@@ -1394,23 +1495,14 @@ func (s *Store) recordEmbedDimensions(dims int) {
 }
 
 func (s *Store) addToVector(ctx context.Context, agentID string, f Fact) error {
+	if !f.Embeddable() {
+		return nil
+	}
 	metadata := map[string]string{
 		"agent_id":   agentID,
 		"created_at": f.CreatedAt.Format(time.RFC3339),
 	}
 	return s.vectors.AddDocument(ctx, agentID, f.ID, f.Text, f.Embedding, metadata)
-}
-
-// vectorSearch returns at most n results from the vector index.
-func (s *Store) vectorSearch(ctx context.Context, agentID, query string, n int) ([]VectorResult, error) {
-	if s.embedder == nil {
-		return nil, nil
-	}
-	qEmb, err := s.embedder.Embed(ctx, query)
-	if err != nil || len(qEmb) == 0 {
-		return nil, nil
-	}
-	return s.vectors.Query(ctx, agentID, qEmb, n)
 }
 
 // marshalJSON helper for meta bucket.

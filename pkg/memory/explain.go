@@ -34,6 +34,8 @@ type RecallReceipt struct {
 	// Ranking identifies the score that governed selection, while FusedScore
 	// remains the original base RRF value for existing receipt consumers.
 	Ranking *ConfidenceRanking `json:"ranking,omitempty"`
+	// A notice is attached to the first returned receipt it affects.
+	ReviewNotices []ReviewNotice `json:"conflict_notices,omitempty"`
 }
 
 // RecallRanks breaks one fact's fused RRF score into the per-signal ranks that
@@ -53,21 +55,15 @@ type RecallRanks struct {
 // state. Recalled facts are always live, so SupersededBy is empty on every
 // receipt; the field exists so the schema is stable and self-describing.
 type RecallProvenance struct {
+	LineageProjection
 	FactID       string    `json:"fact_id"`
 	WrittenAt    time.Time `json:"written_at"`
 	SupersededBy string    `json:"superseded_by,omitempty"`
 	Confidence   string    `json:"confidence,omitempty"`
 	Pinned       bool      `json:"pinned,omitempty"`
-	// Supersedes names every fact this one replaced, walked transitively, so a
-	// value corrected twice reports both retired versions. Empty for a fact
-	// that revised nothing.
-	//
-	// This is the other half of the tombstone. Recall drops superseded facts
-	// before scoring, which is what makes the answer current — but it also
-	// makes the correction invisible: the caller receives one value with no
-	// sign that it replaced anything. Naming the retired IDs restores the
-	// justification without putting a retired belief back in the ranking, and
-	// the IDs resolve against the store, which keeps every tombstone.
+	// Supersedes lists retired fact IDs for compatibility. It follows recorded
+	// versions where available and observable tombstones for legacy rows.
+	// See the embedded lineage projection for exact versions and status.
 	Supersedes []string `json:"supersedes,omitempty"`
 }
 
@@ -90,12 +86,13 @@ func (s *Store) newReceipt(f *Fact, p *recallPipeline, fused float64) RecallRece
 			K:           p.k,
 		},
 		Provenance: RecallProvenance{
-			FactID:       f.ID,
-			WrittenAt:    f.CreatedAt,
-			SupersededBy: f.SupersededBy,
-			Confidence:   f.Confidence,
-			Pinned:       f.Pinned,
-			Supersedes:   p.lineage(f.ID),
+			LineageProjection: f.LineageProjection,
+			FactID:            f.ID,
+			WrittenAt:         f.CreatedAt,
+			SupersededBy:      f.SupersededBy,
+			Confidence:        f.Confidence,
+			Pinned:            f.Pinned,
+			Supersedes:        p.lineage(f.ID),
 		},
 	}
 	if p.policy.metadata {
