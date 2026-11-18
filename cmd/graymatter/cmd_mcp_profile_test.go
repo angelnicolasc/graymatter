@@ -2,17 +2,18 @@ package main
 
 import (
 	"fmt"
-	gmcp "github.com/angelnicolasc/graymatter/cmd/graymatter/internal/mcp"
-	"github.com/spf13/cobra"
 	"strings"
 	"testing"
+
+	gmcp "github.com/angelnicolasc/graymatter/cmd/graymatter/internal/mcp"
+	"github.com/spf13/cobra"
 )
 
 func TestMCPToolsProfileFlags(t *testing.T) {
 	for name, factory := range map[string]func() *cobra.Command{"serve": mcpServeCmd, "doctor": doctorCmd} {
 		t.Run(name, func(t *testing.T) {
 			cmd := factory()
-			if flag := cmd.Flags().Lookup("tools"); flag == nil || flag.DefValue != gmcp.ToolsCore {
+			if flag := cmd.Flags().Lookup("tools"); flag == nil || flag.DefValue != gmcp.ToolsFull {
 				t.Fatalf("tools flag default: %+v", flag)
 			}
 			for _, value := range []string{"", "invalid"} {
@@ -27,6 +28,18 @@ func TestMCPToolsProfileFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMCPServeDefaultsToFull(t *testing.T) {
+	f := newIssue81Fixture(t)
+	f.startMCPWithCatalog(t.TempDir(), f.bin, []string{"--no-daemon", "mcp", "serve"}, nil, nil, fullMCPToolNames())
+}
+
+func TestMCPServeWithCoreProfile(t *testing.T) {
+	f := newIssue81Fixture(t)
+	f.startMCPWithCatalog(t.TempDir(), f.bin,
+		[]string{"--no-daemon", "mcp", "serve", "--tools", "core"}, nil, nil,
+		[]string{"memory_search", "memory_add", "memory_reflect", "checkpoint_save", "checkpoint_resume"})
 }
 
 func TestDoctorMCPCatalogReadOnlyCost(t *testing.T) {

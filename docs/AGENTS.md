@@ -17,22 +17,21 @@ GrayMatter is your long-term memory. Unlike conversation context, which disappea
 
 ## MCP catalog profiles
 
-`graymatter mcp serve` defaults to the `core` catalog, which lists
+`graymatter mcp serve` defaults to `full`, which lists all seven tools and
+uses the complete briefing. To opt into `core`, use
+`graymatter mcp serve --tools core`. It lists
 `memory_search`, `memory_add`, `memory_reflect`, `checkpoint_save`, and
 `checkpoint_resume`. `memory_alias` and `memory_search_batch` remain
 callable. Runtime options such as `explain`, `scope`, `target_type`, and
 `on_missing` remain available. Core reflect lists `update`, `forget`,
 `pin`, and `unpin`. Legacy actions still work at runtime.
 
-Choose `graymatter mcp serve --tools full` for the complete legacy catalog and
-briefing. Valid flag values are exactly `core` and `full`; an empty or invalid
-value fails before opening a store. Older binaries reject the new `--tools`
-flag with an unknown-flag error; unchanged existing launch commands use the
-new default.
+Valid flag values are exactly `core` and `full`. An empty or invalid value
+fails before opening a store. Older binaries reject `--tools`. Existing launch
+commands without the flag continue to use the complete catalog.
 
-`graymatter doctor` reports the default `core` profile and the local estimated
-fixed cost of instructions plus `tools/list`. Use `graymatter doctor --tools full`
-to inspect the full profile's cost. Doctor does not inspect other processes'
+`graymatter doctor` estimates the local fixed cost of `full` instructions and
+`tools/list` by default. Use `graymatter doctor --tools core` to estimate `core`. Doctor does not inspect other processes'
 argv, and its estimate is not a provider token count. The managed `init` block now delegates the
 session procedure to the MCP briefing instead of repeating the full reference.
 In `core`, one `memory_search` reads the project and `__shared__` together.

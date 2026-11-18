@@ -1,6 +1,6 @@
 # AGENTS.md
 
-MCP discovery defaults to the concise `core` profile (five visible tools). All seven tools below remain callable; `graymatter mcp serve --tools full` restores their complete catalog and briefing. See `docs/AGENTS.md` for profile and advanced parameter details.
+MCP discovery defaults to `full` with all seven tools and the complete briefing. Use `graymatter mcp serve --tools core` for the concise catalog and briefing. All seven tools remain callable in `core`. See `docs/AGENTS.md` for profile and advanced parameter details.
 
 In `core`, writes accept optional `source` and literal `quote`; search returns
 whole escaped evidence or a version marker. Fetch a marker using `agent_id`,

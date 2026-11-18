@@ -327,6 +327,15 @@ func (f *issue81Fixture) startMCPWithTrace(dir, command string, args []string, e
 	f.t.Helper()
 	// Preserve this fixture's complete legacy catalog contract.
 	args = append(append([]string(nil), args...), "--tools", "full")
+	return f.startMCPWithCatalog(dir, command, args, extra, trace, fullMCPToolNames())
+}
+
+func fullMCPToolNames() []string {
+	return []string{"memory_search", "memory_search_batch", "memory_add", "memory_alias", "memory_reflect", "checkpoint_save", "checkpoint_resume"}
+}
+
+func (f *issue81Fixture) startMCPWithCatalog(dir, command string, args []string, extra map[string]string, trace func(int, string, any, []byte), names []string) *issue81MCP {
+	f.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir, cmd.Env = dir, issue81Env(f.env, extra)
@@ -371,16 +380,15 @@ func (f *issue81Fixture) startMCPWithTrace(dir, command string, args []string, e
 	if err := json.Unmarshal(listed, &catalog); err != nil {
 		f.t.Fatalf("decode MCP tools/list: %v", err)
 	}
-	want := map[string]bool{
-		"memory_search": true, "memory_search_batch": true,
-		"memory_add": true, "memory_alias": true, "memory_reflect": true,
-		"checkpoint_save": true, "checkpoint_resume": true,
+	want := make(map[string]bool, len(names))
+	for _, name := range names {
+		want[name] = true
 	}
 	for _, tool := range catalog.Tools {
 		delete(want, tool.Name)
 	}
-	if len(want) != 0 {
-		f.t.Fatalf("MCP tools/list is incomplete: got=%d missing=%v", len(catalog.Tools), want)
+	if len(catalog.Tools) != len(names) || len(want) != 0 {
+		f.t.Fatalf("unexpected MCP tools/list: got=%d want=%d missing=%v", len(catalog.Tools), len(names), want)
 	}
 	return m
 }

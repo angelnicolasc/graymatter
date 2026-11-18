@@ -392,11 +392,11 @@ now returns 8 facts. Pass `?k=5` for the old count.
 
 ## MCP wire contract (stable within the v0.x series)
 
-Catalog discovery now defaults to `core` (five visible tools); `--tools full`
-retains the previous seven-tool catalog and briefing. Hidden tools and advanced
-parameters remain callable. Existing tool names, argument semantics and result
-shapes are unchanged by catalog selection. Use `--tools full` when a client
-requires the complete discovery schema.
+Catalog discovery defaults to `full`, which lists all seven tools and uses
+the complete briefing. Explicit `--tools core` selects five visible tools and
+a compact briefing. The two tools hidden from `core` discovery remain
+callable. Use `full` for clients that depend on the complete discovery schema
+and legacy response formats.
 See [catalog profiles](AGENTS.md#mcp-catalog-profiles).
 
 The Go package that implements the MCP server, `cmd/graymatter/internal/mcp`,

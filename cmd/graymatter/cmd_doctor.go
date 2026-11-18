@@ -203,7 +203,7 @@ Add --html with an output path to write a separate graph render. --health,
 	cmd.Flags().String("html", "", "with --graph: also write the self-contained HTML graph render to this file")
 	cmd.Flags().BoolVar(&health, "health", false, "separate runtime store audit: supersede loops, dumping bursts, near-prune criticals, duplicates")
 	cmd.Flags().BoolVar(&embeddings, "embeddings", false, "separate vector-channel audit: coverage, degraded writes, retry backlog")
-	cmd.Flags().StringVar(&toolsProfile, "tools", gmcp.ToolsCore, "estimate the selected MCP catalog: core (default) or full")
+	cmd.Flags().StringVar(&toolsProfile, "tools", gmcp.ToolsFull, "estimate the selected MCP catalog: full (default) or core")
 	return cmd
 }
 

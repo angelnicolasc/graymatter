@@ -133,8 +133,8 @@ no daemon, and serves no tools. Prepare with init --store-only, then reconnect.`
 		"serve HTTP without authentication (loopback addresses only)")
 	cmd.Flags().BoolVar(&noCreate, "no-create", false,
 		"require an existing regular gray.db or MEMORY.md before opening the store")
-	cmd.Flags().StringVar(&toolsProfile, "tools", gmcp.ToolsCore,
-		"catalog profile: core (default) or full")
+	cmd.Flags().StringVar(&toolsProfile, "tools", gmcp.ToolsFull,
+		"catalog profile: full (default) or core")
 	return cmd
 }
 
