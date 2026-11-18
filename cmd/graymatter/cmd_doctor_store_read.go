@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -135,12 +136,20 @@ func doctorDaemonStore(dc doctorDaemonReader, dir string) (c checkResult) {
 		return doctorIncompleteStore(fmt.Errorf("list agents: %w", err))
 	}
 	facts := 0
+	evidenceFacts, evidenceKnown := 0, true
 	for _, a := range agents {
 		st, err := dc.Stats(a)
 		if err != nil {
 			return doctorIncompleteStore(fmt.Errorf("stats for %q: %w", a, err))
 		}
 		facts += st.FactCount
+		if st.LiveEvidenceCount == nil {
+			evidenceKnown = false
+		} else if *st.LiveEvidenceCount < 0 || *st.LiveEvidenceCount > st.FactCount {
+			return doctorIncompleteStore(fmt.Errorf("invalid literal evidence count for %q", a))
+		} else {
+			evidenceFacts += *st.LiveEvidenceCount
+		}
 	}
 	pending, err := dc.PendingVectorCount()
 	if err != nil {
@@ -157,11 +166,13 @@ func doctorDaemonStore(dc doctorDaemonReader, dir string) (c checkResult) {
 	c.Detail = fmt.Sprintf("served by daemon — observed %d fact(s) across %d agent(s) · historical generated cycles %d (facts consumed %d) · %s",
 		facts, len(agents), overview.Consolidations, overview.FactsConsumed, maintenanceModeLabel(overview.MaintenanceMode))
 	c.Detail += " · review journal " + reviewOverviewText(overview.Review)
+	c.Detail += doctorCitationSummary(evidenceFacts, evidenceKnown)
 	if pending > 0 {
 		c.Status = "warn"
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
+	addDoctorSubjectIssues(&c, dc)
 	return flagIfUnused(c, dir, facts)
 }
 
@@ -202,6 +213,7 @@ func doctorDirectStore(dir string) (c checkResult) {
 		return c
 	}
 	facts := 0
+	evidenceFacts, evidenceKnown := 0, true
 	perAgent := make(map[string]int, len(agents))
 	for _, a := range agents {
 		st, err := store.Stats(a)
@@ -211,6 +223,14 @@ func doctorDirectStore(dir string) (c checkResult) {
 		}
 		facts += st.FactCount
 		perAgent[a] = st.FactCount
+		if st.LiveEvidenceCount == nil {
+			evidenceKnown = false
+		} else if *st.LiveEvidenceCount < 0 || *st.LiveEvidenceCount > st.FactCount {
+			c.Status, c.Detail = "fail", fmt.Sprintf("invalid literal evidence count for %q", a)
+			return c
+		} else {
+			evidenceFacts += *st.LiveEvidenceCount
+		}
 	}
 	if err := doctorValidateFactCounts(store.DB(), perAgent); err != nil {
 		c.Status, c.Detail = "fail", fmt.Sprintf("store facts could not be counted reliably: %v", err)
@@ -223,6 +243,7 @@ func doctorDirectStore(dir string) (c checkResult) {
 	}
 	c.Status = "ok"
 	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read) · historical generated cycles %d (facts consumed %d)", facts, len(agents), cycles, consumed)
+	c.Detail += doctorCitationSummary(evidenceFacts, evidenceKnown)
 	review, err := memory.ReadReviewOverview(context.Background(), store.DB())
 	if err != nil {
 		c.Status = "warn"
@@ -235,7 +256,55 @@ func doctorDirectStore(dir string) (c checkResult) {
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
+	addDoctorSubjectIssues(&c, store)
 	return flagIfUnused(c, dir, facts)
+}
+
+func addDoctorSubjectIssues(check *checkResult, store any) {
+	reader, ok := store.(interface {
+		SubjectIssuesByNamespace(context.Context) (map[string]memory.SubjectIssues, error)
+	})
+	if !ok {
+		return
+	}
+	byNamespace, err := reader.SubjectIssuesByNamespace(context.Background())
+	if err != nil {
+		check.Status = "warn"
+		check.Detail += fmt.Sprintf(" · subject diagnostics unavailable (%q)", err.Error())
+		return
+	}
+	var namespaces []string
+	for namespace := range byNamespace {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	var issues memory.SubjectIssues
+	var projects []string
+	for _, namespace := range namespaces {
+		report := byNamespace[namespace]
+		if report.Total == 0 {
+			continue
+		}
+		issues.Total += report.Total
+		issues.Subjects = append(issues.Subjects, report.Subjects[:min(len(report.Subjects), 3-len(issues.Subjects))]...)
+		projects = append(projects, fmt.Sprintf("%q (%d)", namespace, report.Total))
+	}
+	if issues.Total == 0 {
+		return
+	}
+	check.Status = "warn"
+	check.Detail += " · " + issues.Warning() + " Projects: " + strings.Join(projects, ", ")
+	if check.Hint != "" {
+		check.Hint += " "
+	}
+	check.Hint += "Use core memory_search for the subject diagnostic. Recover with memory_add, the same subject, and an explicit replaces ID. See docs/subject-memory.md."
+}
+
+func doctorCitationSummary(count int, known bool) string {
+	if !known {
+		return " · literal evidence count unavailable from this store"
+	}
+	return fmt.Sprintf(" · %d live fact(s) with literal evidence", count)
 }
 
 // Store.Stats uses List, which intentionally skips malformed fact records.

@@ -34,9 +34,8 @@ type searchResult struct {
 	Query     string                    `json:"query"`
 	Count     int                       `json:"count"`
 	Facts     []string                  `json:"facts"`
-	// Feedback carries the weak-match vocabulary block (v0.18.0): additive
-	// text emitted when the query's vocabulary barely overlaps the store's.
-	// Omitted when the match is strong, so the bare shape is unchanged.
+	// Feedback carries optional recall diagnostics alongside the facts.
+	// It is absent for a strong match with no unresolved subjects.
 	Feedback      string                `json:"feedback,omitempty"`
 	ReviewNotices []memory.ReviewNotice `json:"conflict_notices,omitempty"`
 	// Explained carries the per-fact receipts when memory_search was called

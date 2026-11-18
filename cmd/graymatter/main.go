@@ -82,6 +82,7 @@ func main() {
 		statusCmd(),
 		mcpCmd(),
 		exportCmd(),
+		importCmd(),
 		tuiCmd(),
 		usageCmd(),
 		runCmd(),

@@ -19,6 +19,7 @@ type recallPipeline struct {
 	policy     recallPolicy
 	baseScores map[string]float64
 	facts      []Fact // live facts, tombstones filtered out
+	corpusSize int    // live facts eligible for ranking before top-k
 	factByID   map[string]*Fact
 	ranked     []scored // full fused ranking, best first, post MinRelevance cut
 	vectorRank map[string]int
@@ -92,8 +93,10 @@ const (
 )
 
 type recallActivity struct {
-	facts   []Fact
-	aliases []aliasActivity
+	corpusSize int
+	facts      []Fact
+	aliases    []aliasActivity
+	receipts   map[string]RecallReceipt
 }
 
 type aliasActivity struct {
@@ -103,10 +106,11 @@ type aliasActivity struct {
 }
 
 func (p *recallPipeline) activity(agentID string) recallActivity {
-	if len(p.activatedAliases) == 0 {
-		return recallActivity{}
+	activity := recallActivity{corpusSize: p.corpusSize}
+	if len(p.activatedAliases) != 0 {
+		activity.aliases = []aliasActivity{{agentID: agentID, factIDs: p.activatedAliases, at: p.nowT.UTC()}}
 	}
-	return recallActivity{aliases: []aliasActivity{{agentID: agentID, factIDs: p.activatedAliases, at: p.nowT.UTC()}}}
+	return activity
 }
 
 func (s *Store) recordRecallActivity(activity recallActivity, mode recallTouchMode) {
@@ -129,6 +133,9 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 	}
 
 	activity := p.activity(agentID)
+	if policy.collectReceipts {
+		activity.receipts = make(map[string]RecallReceipt)
+	}
 	if p.activityOnly {
 		if err := ctx.Err(); err != nil {
 			return nil, "", recallActivity{}, err
@@ -155,11 +162,15 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 		if !ok {
 			continue
 		}
-		if seen[f.Text] {
+		key := policy.factKey(*f)
+		if seen[key] {
 			continue
 		}
 		result = append(result, f.Text)
-		seen[f.Text] = true
+		seen[key] = true
+		if policy.collectReceipts {
+			activity.receipts[f.AgentID+"\x00"+f.ID] = s.newReceipt(f, p, sc.score)
+		}
 		// Access metadata rides on one batched transaction after the loop.
 		// The previous shape spawned one goroutine holding one bbolt write
 		// transaction PER RETURNED FACT - up to eight write txns and eight
@@ -186,7 +197,7 @@ func (s *Store) recallDetailedCollectWithPolicy(ctx context.Context, agentID, qu
 	graph := s.graph
 	extractor := s.extractor
 	s.mu.RUnlock()
-	if !policy.filtered() && graph != nil && extractor != nil && len(touched) > 0 && touched[0].Extractable() {
+	if !policy.filtered() && !policy.omitGraphHints && graph != nil && extractor != nil && len(touched) > 0 && touched[0].Extractable() {
 		// Extract entity IDs from the top-ranked fact and surface neighbors.
 		//
 		// Budget (ADR-003 condition 2): at most kgMaxNeighbors entries are
@@ -657,6 +668,7 @@ func (s *Store) runRecallPipelineScanWithPolicy(ctx context.Context, agentID, qu
 
 	policy.noteVectorFallback(vectorFallback)
 	return &recallPipeline{
+		corpusSize:       len(facts),
 		activatedAliases: activated,
 
 		policy:          policy,
@@ -748,7 +760,7 @@ func keywordScoreDetailedContext(ctx context.Context, query string, facts []Fact
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
 		}
-		terms := tokenizeStem(f.Text, doStem)
+		terms := tokenizeStem(factLexicalText(f), doStem)
 		tf := make(map[string]int, len(terms))
 		for _, t := range terms {
 			tf[t]++

@@ -33,6 +33,9 @@ const (
 // Config holds all GrayMatter configuration. All fields have sane defaults
 // via DefaultConfig(). Zero-value Config is not valid — always call DefaultConfig().
 type Config struct {
+	// MaxQuoteBytes bounds newly supplied literal citations. Zero uses 2048.
+	// Existing evidence is never truncated when this limit is reduced.
+	MaxQuoteBytes int
 	// ConfidenceWeight is the product preference default in [0, 0.5]. The
 	// compatible opt-in delivery keeps it zero pending a published rollout.
 	ConfidenceWeight float64

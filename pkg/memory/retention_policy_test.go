@@ -58,6 +58,139 @@ func TestRetentionRecallBetweenDecayAndPrune(t *testing.T) {
 	}
 }
 
+func TestRetentionRecallCompletionOrder(t *testing.T) {
+	ctx := context.Background()
+	const halfLife = 720 * time.Hour
+	const query = "ochre semaphore certificate"
+	older := lineageTime
+	newer := older.Add(time.Hour)
+	boundary := time.Duration(float64(halfLife) * math.Log2(100))
+	for _, path := range []struct {
+		name    string
+		indexed bool
+	}{{name: "scan"}, {name: "index", indexed: true}} {
+		for _, order := range []struct {
+			name    string
+			reverse bool
+		}{{name: "forward"}, {name: "reverse", reverse: true}} {
+			t.Run(path.name+"/"+order.name, func(t *testing.T) {
+				dir := t.TempDir()
+				s := openLineageStore(t, dir, path.indexed)
+				now := older.Add(-201 * 24 * time.Hour)
+				s.now = func() time.Time { return now }
+				f := putLineageFact(t, s, "unique "+query)
+				now = older
+				decayed, err := s.decayFact(lineageAgent, f.ID, now, math.Ln2/halfLife.Hours())
+				if err != nil || decayed.Weight >= minimumFactWeight {
+					t.Fatalf("initial decay = %+v, %v", decayed, err)
+				}
+
+				recall := func() {
+					t.Helper()
+					got, err := s.Recall(ctx, lineageAgent, query, 1)
+					if err != nil || len(got) != 1 || got[0] != f.Text {
+						t.Fatalf("recall = %q, %v", got, err)
+					}
+				}
+				if order.reverse {
+					// Complete a second recall before the first records access.
+					s.debugRanking = func(string, []scored) {
+						s.debugRanking = nil
+						now = newer
+						recall()
+					}
+					recall()
+				} else {
+					recall()
+					now = newer
+					recall()
+				}
+
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s = openLineageStore(t, dir, path.indexed)
+				s.now = func() time.Time { return now }
+				current, ok := s.loadFact(lineageAgent, f.ID)
+				if !ok || current.AccessCount != 2 || current.Weight != decayed.Weight {
+					t.Fatalf("reopened row after two recalls = %+v", current)
+				}
+				if !current.AccessedAt.Equal(newer) {
+					t.Errorf("reopened last access = %s, want %s", current.AccessedAt, newer)
+				}
+
+				cfg := &testConsolidateCfg{halfLife: halfLife}
+				now = older.Add(boundary + 30*time.Minute)
+				if err := s.Consolidate(ctx, lineageAgent, cfg); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := s.loadFact(lineageAgent, f.ID); !ok {
+					t.Fatal("maintenance pruned the fact before the latest access cutoff")
+				}
+				now = newer.Add(boundary + 30*time.Minute)
+				if err := s.Consolidate(ctx, lineageAgent, cfg); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := s.loadFact(lineageAgent, f.ID); ok {
+					t.Fatal("maintenance retained the fact after the latest access cutoff")
+				}
+			})
+		}
+	}
+}
+
+func TestRetentionAccessClockRollback(t *testing.T) {
+	ctx := context.Background()
+	const query = "saffron certificate renewal"
+	for _, path := range []struct {
+		name    string
+		indexed bool
+	}{{name: "scan"}, {name: "index", indexed: true}} {
+		t.Run(path.name, func(t *testing.T) {
+			s := openLineageStore(t, t.TempDir(), path.indexed)
+			f := putLineageFact(t, s, "unique "+query)
+			newest := lineageTime.Add(2 * time.Hour)
+			now := newest
+			s.now = func() time.Time { return now }
+			checkAccess := func(surface string, count int) {
+				t.Helper()
+				got, ok := s.loadFact(lineageAgent, f.ID)
+				if !ok || got.AccessCount != count || !got.AccessedAt.Equal(newest) || got.Weight != f.Weight {
+					t.Errorf("%s row = %+v, want count %d, access %s, weight %g", surface, got, count, newest, f.Weight)
+				}
+			}
+
+			if got, err := s.Recall(ctx, lineageAgent, query, 1); err != nil || len(got) != 1 || got[0] != f.Text {
+				t.Fatalf("recall = %q, %v", got, err)
+			}
+			checkAccess("recall", 1)
+			if got, err := s.RecallExplain(ctx, lineageAgent, query, 1); err != nil || len(got) != 1 {
+				t.Fatalf("explain = %v, %v", got, err)
+			}
+			checkAccess("equal-time explain", 2)
+
+			now = newest.Add(-time.Hour)
+			if got, err := s.BatchRecall(ctx, lineageAgent, []string{query}, 1); err != nil ||
+				len(got) != 1 || got[0].Err != nil || len(got[0].Facts) != 1 || got[0].Facts[0] != f.Text {
+				t.Fatalf("batch = %v, %v", got, err)
+			}
+			checkAccess("rollback batch", 3)
+
+			now = newest.Add(-2 * time.Hour)
+			if got, err := s.RecallAll(ctx, lineageAgent, query, 1); err != nil || len(got) != 1 || got[0] != f.Text {
+				t.Fatalf("recall all = %q, %v", got, err)
+			}
+			checkAccess("rollback recall all", 4)
+
+			now = newest.Add(time.Hour)
+			if got, err := s.RecallPreview(ctx, lineageAgent, query, 1); err != nil || len(got) != 1 {
+				t.Fatalf("preview = %v, %v", got, err)
+			}
+			checkAccess("preview", 4)
+		})
+	}
+}
+
 func TestRetentionPruneBoundaryAndManualWeight(t *testing.T) {
 	now := lineageTime
 	const halfLife = 4 * time.Hour

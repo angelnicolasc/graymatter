@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 )
 
 func TestRuntimeRoutingHookAndMCPUseOneProjectStore(t *testing.T) {
@@ -119,11 +121,29 @@ func TestRuntimeRoutingHookAndMCPUseOneProjectStore(t *testing.T) {
 	if err != nil || !strings.Contains(string(logBytes), `"event":"pre-compact"`) {
 		t.Fatalf("explicit store did not receive hook receipt: %v %q", err, logBytes)
 	}
-	resumed := f.mustRun(process, "", "--no-daemon", "--dir", processStore,
+	listed := f.mustRun(process, "", "--no-daemon", "--dir", processStore,
+		"--json", "checkpoint", "list", "logical-project")
+	var checkpoints []session.Checkpoint
+	if err := json.Unmarshal([]byte(listed.stdout), &checkpoints); err != nil {
+		t.Fatalf("decode explicit-store checkpoints: %v; output=%q", err, listed.stdout)
+	}
+	if len(checkpoints) != 1 || checkpoints[0].ID == "" || checkpoints[0].AgentID != "logical-project" {
+		t.Fatalf("expected one checkpoint in the explicit store: %q", listed.stdout)
+	}
+	loaded := f.mustRun(process, "", "--no-daemon", "--dir", processStore,
+		"checkpoint", "resume", "logical-project", checkpoints[0].ID)
+	var marker session.Checkpoint
+	if err := json.Unmarshal([]byte(loaded.stdout), &marker); err != nil {
+		t.Fatalf("decode explicit-store hook marker: %v; output=%q", err, loaded.stdout)
+	}
+	if marker.ID != checkpoints[0].ID || marker.State["session_id"] != "explicit-store-session" ||
+		marker.State["event"] != "pre-compact" || marker.State["source"] != "hooks" {
+		t.Fatalf("explicit store did not receive checkpoint: %q", loaded.stdout)
+	}
+	latest := f.run(process, "", "--no-daemon", "--dir", processStore,
 		"checkpoint", "resume", "logical-project")
-	if !strings.Contains(resumed.stdout, `"session_id": "explicit-store-session"`) ||
-		!strings.Contains(resumed.stdout, `"event": "pre-compact"`) {
-		t.Fatalf("explicit store did not receive checkpoint: %+v", resumed)
+	if latest.code != 1 || latest.stdout != "" || !strings.Contains(latest.stderr, `no checkpoints for agent "logical-project"`) {
+		t.Fatalf("resume latest did not skip the hook marker: %+v", latest)
 	}
 
 	// A literal relative --dir is explicit and remains relative to the

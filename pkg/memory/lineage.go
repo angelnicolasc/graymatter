@@ -56,6 +56,7 @@ type LineageProjection struct {
 // LineageInspection shows one retained version and the relations it recorded.
 // A divergent canonical row can be inspected by requesting its historical hash.
 type LineageInspection struct {
+	Evidence   *Citation         `json:"evidence,omitempty"`
 	Snapshot   *EvidenceSnapshot `json:"snapshot,omitempty"`
 	CapturedAt *time.Time        `json:"captured_at,omitempty"`
 	LineageProjection
@@ -123,6 +124,9 @@ func lineageHeadKey(tx *bolt.Tx, namespace, factID string) string {
 }
 
 func hydrateLineageTx(tx *bolt.Tx, f *Fact) error {
+	if err := hydrateCitationTx(tx, f); err != nil {
+		return err
+	}
 	// Treat persisted projections as caches, including projections written
 	// by a caller that does not own the version record.
 	f.LineageProjection = LineageProjection{}
@@ -212,10 +216,10 @@ func recordRevisionLineageTx(tx *bolt.Tx, replacement *Fact, sources []Fact, add
 // walkLineageTx follows exact content versions. Separate active and visited
 // states distinguish a real cycle from a shared ancestor in a fork.
 func walkLineageTx(ctx context.Context, tx *bolt.Tx, namespace string, roots []string) (map[string]bool, []string, string, error) {
-	return walkLineageWithLegacyTx(ctx, tx, namespace, roots, nil)
+	return walkLineageWithLegacyTx(ctx, tx, namespace, roots, nil, false)
 }
 
-func walkLineageWithLegacyTx(ctx context.Context, tx *bolt.Tx, namespace string, roots []string, legacy map[string][]string) (map[string]bool, []string, string, error) {
+func walkLineageWithLegacyTx(ctx context.Context, tx *bolt.Tx, namespace string, roots []string, legacy map[string][]string, isolateDamagedSubjects bool) (map[string]bool, []string, string, error) {
 	records, _ := evidenceNamespace(tx, bucketLineageRecords, namespace, false)
 	snapshots, _ := evidenceNamespace(tx, bucketEvidenceSnapshots, namespace, false)
 	type step struct {
@@ -259,15 +263,23 @@ func walkLineageWithLegacyTx(ctx context.Context, tx *bolt.Tx, namespace string,
 		}
 		entry, err := evidenceEntry(snapshots, key)
 		if err != nil {
-			return nil, nil, "", err
-		}
-		if entry.Snapshot.Namespace != namespace {
-			return nil, nil, "", errors.New("lineage snapshot namespace mismatch")
-		}
-		id := entry.Snapshot.FactID
-		if !seenIDs[id] {
-			seenIDs[id] = true
-			ids = append(ids, id)
+			if _, damaged := damagedSubjectSnapshotTx(tx, namespace, key); !isolateDamagedSubjects || !damaged {
+				return nil, nil, "", err
+			}
+			// Keep the version reachable for GC, but never project its
+			// damaged snapshot as evidence. Still walk exact stored refs.
+			if status == "" {
+				status = LineageMissing
+			}
+		} else {
+			if entry.Snapshot.Namespace != namespace {
+				return nil, nil, "", errors.New("lineage snapshot namespace mismatch")
+			}
+			id := entry.Snapshot.FactID
+			if !seenIDs[id] {
+				seenIDs[id] = true
+				ids = append(ids, id)
+			}
 		}
 		record, _, err := lineageRecordAt(records, namespace, key)
 		if err != nil {
@@ -350,7 +362,7 @@ func lineageEvidenceRootsTx(tx *bolt.Tx, namespace string, stagedRoots ...string
 		}
 	}
 	sort.Strings(roots)
-	reachable, _, _, err := walkLineageWithLegacyTx(context.Background(), tx, namespace, roots, legacy)
+	reachable, _, _, err := walkLineageWithLegacyTx(context.Background(), tx, namespace, roots, legacy, true)
 	return reachable, err
 }
 
@@ -398,6 +410,11 @@ func collectLineageChangesTx(tx *bolt.Tx, namespace string, now time.Time, stage
 		return false, err
 	}
 	changed = changed || pruned
+	citationsPruned, err := pruneCitationsTx(tx, namespace)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || citationsPruned
 	if records == nil {
 		return changed, nil
 	}
@@ -406,6 +423,9 @@ func collectLineageChangesTx(tx *bolt.Tx, namespace string, now time.Time, stage
 	var expired []string
 	if err := records.ForEach(func(key, _ []byte) error {
 		if snapshots == nil || snapshots.Get(key) == nil {
+			if _, damaged := damagedSubjectSnapshotTx(tx, namespace, string(key)); damaged {
+				return nil
+			}
 			expired = append(expired, string(key))
 		}
 		return nil
@@ -467,7 +487,7 @@ func hasLineageEvidenceTx(tx *bolt.Tx, f Fact) (bool, error) {
 }
 
 func (s *Store) sweepLineage(namespace string, now time.Time) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.updateSubjectReadView(namespace, true, func(tx *bolt.Tx) error {
 		changed, err := collectLineageChangesTx(tx, namespace, now)
 		if err != nil {
 			return err

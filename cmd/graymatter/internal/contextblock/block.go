@@ -109,7 +109,9 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 	var lines []string
 	for _, c := range cands {
 		trial := append(append([]string{}, lines...), bullet(c.f.Text))
-		if tokens.Approx(renderedBody(trial)) <= budgetTokens {
+		body := renderedBody(trial)
+		// Compare ceil(bytes/3) to the budget without multiplying a caller's budget.
+		if tokens.Approx(body) <= budgetTokens && 1+(len(body)-1)/3 <= budgetTokens {
 			chosen = append(chosen, c.f)
 			lines = trial
 		} else {
@@ -128,7 +130,7 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 
 // renderedBody builds the would-be body for budget measurement.
 func renderedBody(lines []string) string {
-	return heading + "\n" + strings.Join(lines, "\n")
+	return heading + "\n" + strings.Join(lines, "\n") + "\n"
 }
 
 func bullet(text string) string { return "- " + sanitize(text) }

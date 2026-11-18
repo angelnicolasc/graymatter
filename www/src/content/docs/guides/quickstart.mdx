@@ -140,3 +140,12 @@ automatically. See [Knowledge graph](/guides/knowledge-graph/).
 - [MCP clients](/guides/mcp-clients/) — per-client config files and manual wiring
 - [Agent guide](/reference/agents-guide/) — how agents should use the seven tools
 - [Benchmarks](/reference/benchmarks/) — where the 90% number comes from
+
+The default MCP catalog is `core`, with five visible tools. One `memory_search`
+retrieves project and shared context and points to pending work; call
+`checkpoint_resume` when it does. Use `queries` for several questions and
+`memory_add` with `facts: [{"text":"..."}]` for an atomic write batch. Close
+saved work with `checkpoint_save` state `"{\"status\":\"complete\"}"`.
+All seven tools remain callable. `graymatter mcp serve --tools full` preserves
+legacy discovery and responses; the new `scope`, `queries` on `memory_search`,
+and `facts` on `memory_add` require `core`. See [MCP clients](/guides/mcp-clients/).

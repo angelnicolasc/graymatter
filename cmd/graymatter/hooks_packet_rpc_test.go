@@ -17,6 +17,7 @@ type blockedPacketBackend struct {
 	// The historical interface deliberately hides promoted optional methods.
 	// Embedding Store would let the confidence-aware RPC server bypass Recall.
 	rpc.Backend
+	rpc.SubjectBackend
 	release, entered, returned chan struct{}
 	started, finished          sync.Once
 	calls                      atomic.Int32
@@ -33,6 +34,28 @@ func (b *blockedPacketBackend) Recall(context.Context, string, string, int) ([]s
 func (b *blockedPacketBackend) RecallShared(context.Context, string, int) ([]string, error) {
 	b.calls.Add(1)
 	return []string{"unexpected shared call"}, nil
+}
+
+// The hook now requests a version-aware projection. Keep the fixture's
+// blocking seam explicit instead of promoting the real Store implementation.
+func (*blockedPacketBackend) SupportsCitationEvidence() bool { return true }
+
+func (*blockedPacketBackend) FetchCitation(context.Context, string, string, string) (memory.CitationResult, error) {
+	return memory.CitationResult{}, memory.ErrFactNotFound
+}
+
+func (b *blockedPacketBackend) RecallForHooks(ctx context.Context, namespace, query string, k int) ([]string, error) {
+	if namespace == memory.SharedAgentID {
+		return b.RecallShared(ctx, query, k)
+	}
+	return b.Recall(ctx, namespace, query, k)
+}
+
+func (b *blockedPacketBackend) RecallForHooksWithOptions(ctx context.Context, namespace, query string, k int, options memory.RecallOptions) ([]string, error) {
+	if options.ConfidenceWeight == nil || *options.ConfidenceWeight != 0 {
+		return nil, fmt.Errorf("hook RPC did not preserve legacy zero confidence weight")
+	}
+	return b.RecallForHooks(ctx, namespace, query, k)
 }
 
 type blockedConfidencePacketBackend struct {
@@ -78,7 +101,7 @@ func testHookPacketRPCDeadline(t *testing.T, confidenceAware bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	backend := &blockedPacketBackend{Backend: store, release: make(chan struct{}), entered: make(chan struct{}), returned: make(chan struct{})}
+	backend := &blockedPacketBackend{Backend: store, SubjectBackend: store, release: make(chan struct{}), entered: make(chan struct{}), returned: make(chan struct{})}
 	var rpcBackend rpc.Backend = backend
 	if confidenceAware {
 		rpcBackend = &blockedConfidencePacketBackend{blockedPacketBackend: backend, recaller: store}

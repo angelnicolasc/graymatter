@@ -37,6 +37,12 @@ func (e *MarkdownExporter) Export(facts []memory.Fact, outDir string) error {
 				f.Weight, f.AccessCount,
 			))
 			writeFactLineage(&sb, "", f.LineageProjection)
+			if err := writeFactSubjects(&sb, f.Subjects); err != nil {
+				return err
+			}
+			if err := writeFactCitation(&sb, f); err != nil {
+				return err
+			}
 			sb.WriteString("\n---\n\n")
 		}
 		name := sanitiseFilename(agentID) + ".md"

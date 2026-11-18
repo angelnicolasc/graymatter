@@ -80,9 +80,23 @@ func captureLegacyLineageTx(tx *bolt.Tx, namespace string, now time.Time, roots 
 		sources := make([]EvidenceSnapshot, 0, len(predecessors))
 		for _, f := range predecessors {
 			source := NewEvidenceSnapshot(f)
+			snapshots, _ := evidenceNamespace(tx, bucketEvidenceSnapshots, namespace, false)
+			if snapshots != nil && snapshots.Get([]byte(source.key())) != nil {
+				if _, err := evidenceEntry(snapshots, source.key()); err != nil {
+					if _, damaged := damagedSubjectSnapshotTx(tx, namespace, source.key()); damaged {
+						// Maintenance leaves the exact unresolved evidence as-is.
+						// A visible legacy pointer does not repair its snapshot.
+						continue
+					}
+					return err
+				}
+			}
 			sources = append(sources, source)
 			record.Legacy = append(record.Legacy, lineageRef(source))
 			roots = append(roots, f.ID)
+		}
+		if len(sources) == 0 {
+			continue
 		}
 		if err := writeLineageTx(tx, snapshot, sources, record, added); err != nil {
 			return err
@@ -104,6 +118,10 @@ func lineageInspectionAt(ctx context.Context, tx *bolt.Tx, namespace, key string
 		return LineageInspection{}, errors.New("lineage snapshot namespace mismatch")
 	}
 	out := LineageInspection{Snapshot: &entry.Snapshot}
+	out.Evidence, err = citationAtTx(tx, namespace, key)
+	if err != nil {
+		return LineageInspection{}, err
+	}
 	out.ContentHash = entry.Snapshot.ContentHash
 	records, _ := evidenceNamespace(tx, bucketLineageRecords, namespace, false)
 	record, found, err := lineageRecordAt(records, namespace, key)
@@ -200,7 +218,7 @@ func (s *Store) annotateLineageReceipts(ctx context.Context, receipts []RecallRe
 				continue
 			}
 			key := evidenceIdentityKey(namespace, p.FactID, p.ContentHash)
-			_, ids, status, err := walkLineageTx(ctx, tx, namespace, []string{key})
+			_, ids, status, err := walkLineageWithLegacyTx(ctx, tx, namespace, []string{key}, nil, true)
 			if err != nil {
 				return err
 			}
@@ -348,7 +366,7 @@ func verifyLineageProjectionTx(ctx context.Context, tx *bolt.Tx, f *Fact) error 
 		return nil
 	}
 	key := evidenceIdentityKey(f.AgentID, f.ID, f.ContentHash)
-	_, _, status, err := walkLineageTx(ctx, tx, f.AgentID, []string{key})
+	_, _, status, err := walkLineageWithLegacyTx(ctx, tx, f.AgentID, []string{key}, nil, true)
 	if err != nil {
 		return err
 	}

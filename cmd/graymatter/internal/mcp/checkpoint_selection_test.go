@@ -23,7 +23,7 @@ func TestCheckpointResumeMarkersMCPWire(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = mem.Close() })
 	backend := NewDirectBackend(mem, nil)
-	s := New(backend, "test")
+	s := New(backend, "test", WithFullCatalog())
 
 	saved, err := backend.CheckpointSave(session.Checkpoint{
 		AgentID: "agent", CreatedAt: time.Unix(10, 0).UTC(), State: map[string]any{"step": "continue"},

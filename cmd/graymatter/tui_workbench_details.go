@@ -43,6 +43,24 @@ func (m tuiModel) factPreview(f memory.Fact) string {
 		out += "\n" + m.muted("Pinned: yes · exempt from decay and pruning")
 	}
 	out += m.lineagePreview(f.LineageProjection)
+	if len(f.Subjects) != 0 {
+		encoded, err := json.Marshal(f.Subjects)
+		if err != nil {
+			out += m.detailSection("Subjects", m.tone("Subject associations could not be rendered: "+tuiPlain(err.Error()), m.theme.Warning))
+		} else {
+			out += m.detailSection("Subjects", m.muted("Declared names and revision counts.\n"+string(encoded)))
+		}
+	}
+	if f.CitationUnavailable {
+		out += m.detailSection("Literal evidence", m.tone("Exact citation unavailable for this fact version.", m.theme.Warning))
+	} else if f.Evidence != nil {
+		encoded, err := json.Marshal(f.Evidence)
+		if err != nil {
+			out += m.detailSection("Literal evidence", m.tone("Evidence could not be rendered: "+tuiPlain(err.Error()), m.theme.Warning))
+		} else {
+			out += m.detailSection("Literal evidence", m.muted("Declared data; capture time is receipt, not verification.\n"+string(encoded)))
+		}
+	}
 	out += "\n\n" + m.muted("Weight measures retention.")
 	return out
 }

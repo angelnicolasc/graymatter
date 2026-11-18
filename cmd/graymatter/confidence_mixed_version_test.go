@@ -315,7 +315,7 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 		t.Fatalf("new filtered recall=%+v %v", eligible, err)
 	}
 	newProcess.stop()
-	if version := confidenceIndexVersion(t, dir, "a"); version != 3 {
+	if version := confidenceIndexVersion(t, dir, "a"); version != 4 {
 		t.Fatalf("new index version=%d", version)
 	}
 
@@ -362,7 +362,7 @@ func TestConfidenceRealBinaryUpgradeDowngradeAndReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	newProcess.stop()
-	if version := confidenceIndexVersion(t, dir, "a"); version != 3 {
+	if version := confidenceIndexVersion(t, dir, "a"); version != 4 {
 		t.Fatalf("reupgraded index version=%d", version)
 	}
 	// Canonical data must retain every write and its confidence through both

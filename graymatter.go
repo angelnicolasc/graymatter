@@ -93,6 +93,7 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 	})
 
 	store, err := memory.Open(memory.StoreConfig{
+		MaxQuoteBytes:           cfg.MaxQuoteBytes,
 		DataDir:                 cfg.DataDir,
 		Embedder:                embedder,
 		DecayHalfLife:           cfg.DecayHalfLife,

@@ -49,7 +49,7 @@ func (s *Store) patchFact(agentID, id string, patch func(*Fact) error) (Fact, er
 		return Fact{}, ErrStoreReadOnly
 	}
 	var updated Fact
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		current, err := factInTx(tx, agentID, id)
 		if err != nil {
 			return err
@@ -156,7 +156,7 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		rows := lineageRowBucket(tx, namespace)
 		if rows == nil {
 			return errFactUnchanged
@@ -201,7 +201,7 @@ func (s *Store) pruneFact(agentID, id string, now time.Time, lambda float64) err
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		current, err := factInTx(tx, agentID, id)
 		if errors.Is(err, ErrFactChanged) {
 			return nil // a concurrent delete already collected it

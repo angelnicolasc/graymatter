@@ -162,7 +162,7 @@ func validateWireOptions(data []byte, fields ...string) error {
 }
 
 func (r *PutWithOptionsRequest) UnmarshalJSON(data []byte) error {
-	if err := validateWireOptions(data, "confidence"); err != nil {
+	if err := validateWireOptions(data, "confidence", "source", "quote", "subject", "replaces"); err != nil {
 		return err
 	}
 	type plain PutWithOptionsRequest
@@ -170,7 +170,7 @@ func (r *PutWithOptionsRequest) UnmarshalJSON(data []byte) error {
 }
 
 func (r *ReviseWithOptionsRequest) UnmarshalJSON(data []byte) error {
-	if err := validateWireOptions(data, "confidence"); err != nil {
+	if err := validateWireOptions(data, "confidence", "source", "quote", "subject", "replaces"); err != nil {
 		return err
 	}
 	type plain ReviseWithOptionsRequest
@@ -178,7 +178,7 @@ func (r *ReviseWithOptionsRequest) UnmarshalJSON(data []byte) error {
 }
 
 func (r *ReviseFactsWithOptionsRequest) UnmarshalJSON(data []byte) error {
-	if err := validateWireOptions(data, "confidence"); err != nil {
+	if err := validateWireOptions(data, "confidence", "source", "quote", "subject", "replaces"); err != nil {
 		return err
 	}
 	type plain ReviseFactsWithOptionsRequest
@@ -215,6 +215,9 @@ func (s *Server) confidenceCapabilities() []string {
 
 func (s *Server) PutSharedWithOptionsReturningFact(req *PutWithOptionsRequest, resp *PutWithOptionsResponse) error {
 	defer s.touch()
+	if err := s.checkCitationOptions(req.Options); err != nil {
+		return err
+	}
 	if err := req.Options.Validate(); err != nil {
 		return err
 	}
@@ -253,6 +256,9 @@ func (s *Server) rawLegacyEmptyTopK(topK int) bool {
 
 func (s *Server) PutWithOptionsReturningFact(req *PutWithOptionsRequest, resp *PutWithOptionsResponse) error {
 	defer s.touch()
+	if err := s.checkCitationOptions(req.Options); err != nil {
+		return err
+	}
 	if err := req.Options.Validate(); err != nil {
 		return err
 	}
@@ -275,6 +281,12 @@ func (s *Server) PutWithOptionsReturningFact(req *PutWithOptionsRequest, resp *P
 
 func (s *Server) ReviseWithOptions(req *ReviseWithOptionsRequest, resp *ReviseWithOptionsResponse) error {
 	defer s.touch()
+	if subjectRequested(req.Options) {
+		return errors.New("subject and replaces are supported only by add; revision already selects its targets")
+	}
+	if err := s.checkCitationOptions(req.Options); err != nil {
+		return err
+	}
 	if err := req.Options.Validate(); err != nil {
 		return err
 	}
@@ -313,6 +325,12 @@ func (s *Server) RecallWithOptions(req *RecallWithOptionsRequest, resp *RecallWi
 
 func (s *Server) ReviseFactsWithOptions(req *ReviseFactsWithOptionsRequest, resp *ReviseWithOptionsResponse) error {
 	defer s.touch()
+	if subjectRequested(req.Options) {
+		return errors.New("subject and replaces are supported only by add; revision already selects its targets")
+	}
+	if err := s.checkCitationOptions(req.Options); err != nil {
+		return err
+	}
 	if err := req.Options.Validate(); err != nil {
 		return err
 	}
@@ -355,6 +373,12 @@ func revisionResponse(resp *ReviseWithOptionsResponse, fact memory.Fact, err err
 // Preserve typed errors even when the store wraps them with transaction context.
 func revisionErrorCode(err error) string {
 	switch {
+	case errors.Is(err, memory.ErrSubjectUnsupported):
+		return "subject_unsupported"
+	case errors.Is(err, memory.ErrSubjectAmbiguous):
+		return "subject_ambiguous"
+	case errors.Is(err, memory.ErrSubjectHeadUnavailable):
+		return "subject_head_unavailable"
 	case errors.Is(err, memory.ErrFactChanged):
 		return "fact_changed"
 	case errors.Is(err, memory.ErrRevisionRequired):
@@ -377,6 +401,12 @@ func revisionErrorCode(err error) string {
 func revisionError(code, message string) error {
 	var cause error
 	switch code {
+	case "subject_unsupported":
+		cause = memory.ErrSubjectUnsupported
+	case "subject_ambiguous":
+		cause = memory.ErrSubjectAmbiguous
+	case "subject_head_unavailable":
+		cause = memory.ErrSubjectHeadUnavailable
 	case "fact_changed":
 		cause = memory.ErrFactChanged
 	case "revision_required":
@@ -479,6 +509,11 @@ func (c *Client) requireCapability(capability string) error {
 // A safe daemon with no identity endpoint may still accept an ordinary write
 // without options. That route returns a zero Fact by contract.
 func (c *Client) PutWithOptionalIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	var prepareErr error
+	opts, prepareErr = c.prepareCitationOptions(ctx, opts)
+	if prepareErr != nil {
+		return memory.Fact{}, prepareErr
+	}
 	if err := opts.Validate(); err != nil {
 		return memory.Fact{}, err
 	}
@@ -492,7 +527,9 @@ func (c *Client) PutWithOptionalIdentity(ctx context.Context, agentID, text stri
 	switch {
 	case withOptions:
 		fact, err = c.putWithOptionsReturningFact(agentID, text, opts)
-	case opts.Confidence != nil:
+	case subjectRequested(opts):
+		return memory.Fact{}, memory.ErrSubjectUnsupported
+	case opts.Confidence != nil || citationRequested(opts):
 		return memory.Fact{}, unsupported(ConfidenceWriteV1)
 	case withIdentity:
 		fact, err = c.PutReturningFact(ctx, agentID, text)
@@ -506,6 +543,11 @@ func (c *Client) PutWithOptionalIdentity(ctx context.Context, agentID, text stri
 }
 
 func (c *Client) PutWithOptionsReturningFact(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	var prepareErr error
+	opts, prepareErr = c.prepareCitationOptions(ctx, opts)
+	if prepareErr != nil {
+		return memory.Fact{}, prepareErr
+	}
 	if err := ctx.Err(); err != nil {
 		return memory.Fact{}, err
 	}
@@ -516,7 +558,7 @@ func (c *Client) PutWithOptionsReturningFact(ctx context.Context, agentID, text 
 		return memory.Fact{}, err
 	}
 	if err := c.requireCapability(ConfidenceWriteV1); err != nil {
-		if errors.Is(err, ErrUnsupportedCapability) && opts.Confidence == nil {
+		if errors.Is(err, ErrUnsupportedCapability) && opts.Confidence == nil && !citationRequested(opts) && !subjectRequested(opts) {
 			return c.PutReturningFact(ctx, agentID, text)
 		}
 		return memory.Fact{}, err
@@ -534,6 +576,11 @@ func (c *Client) putWithOptionsReturningFact(agentID, text string, opts memory.W
 }
 
 func (c *Client) PutSharedWithOptionsReturningFact(ctx context.Context, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	var prepareErr error
+	opts, prepareErr = c.prepareCitationOptions(ctx, opts)
+	if prepareErr != nil {
+		return memory.Fact{}, prepareErr
+	}
 	if err := ctx.Err(); err != nil {
 		return memory.Fact{}, err
 	}
@@ -552,6 +599,14 @@ func (c *Client) PutSharedWithOptionsReturningFact(ctx context.Context, text str
 }
 
 func (c *Client) ReviseWithOptions(ctx context.Context, agentID, target, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if subjectRequested(opts) {
+		return memory.Fact{}, errors.New("subject and replaces are supported only by add; revision already selects its targets")
+	}
+	var prepareErr error
+	opts, prepareErr = c.prepareCitationOptions(ctx, opts)
+	if prepareErr != nil {
+		return memory.Fact{}, prepareErr
+	}
 	ctx, cancel := c.inspectionContext(ctx)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -579,6 +634,15 @@ func (c *Client) ReviseWithOptions(ctx context.Context, agentID, target, text st
 }
 
 func (c *Client) ReviseFactsWithOptions(ctx context.Context, agentID, text string, opts memory.WriteOptions, victims ...memory.Fact) (memory.Fact, error) {
+	if subjectRequested(opts) {
+		return memory.Fact{}, errors.New("subject and replaces are supported only by add; revision already selects its targets")
+	}
+	var prepareErr error
+	opts, prepareErr = c.prepareCitationOptions(ctx, opts)
+	if prepareErr != nil {
+		return memory.Fact{}, prepareErr
+	}
+	victims = append([]memory.Fact(nil), victims...)
 	ctx, cancel := c.inspectionContext(ctx)
 	defer cancel()
 	if err := ctx.Err(); err != nil {

@@ -12,7 +12,7 @@ func TestR4IdentityMCPConfirmedWrites(t *testing.T) {
 	for _, mode := range []string{"memory_add", "add", "update"} {
 		for _, confidence := range []string{"", "verified"} {
 			t.Run(mode+"/"+confidence, func(t *testing.T) {
-				s, mem := confidenceTestServer(t)
+				s, mem := confidenceFullTestServer(t)
 				ctx := context.Background()
 				const namespace = "confirmed-project"
 				const text = "confirmed deployment policy"
@@ -80,13 +80,13 @@ func (identityTestGraph) LinkNodes(string, string, string) error  { return nil }
 func (identityTestGraph) UpsertNode(string, string, string) error { return nil }
 
 func TestR4IdentityMCPCompatibilityAndLifecycleReceipts(t *testing.T) {
-	_, mem := confidenceTestServer(t)
-	s := New(NewDirectBackend(mem, identityTestGraph{}), "test")
+	_, mem := confidenceFullTestServer(t)
+	s := New(NewDirectBackend(mem, identityTestGraph{}), "test", WithFullCatalog())
 	const namespace = "legacy-project"
 	const text = "fact with legacy backend"
 	// Embedding only Backend exposes the safe local write without the
 	// optional fact-returning methods.
-	legacy := New(struct{ Backend }{NewDirectBackend(mem, nil)}, "test")
+	legacy := New(struct{ Backend }{NewDirectBackend(mem, nil)}, "test", WithFullCatalog())
 	added := confidenceToolCall(t, legacy, "memory_add", map[string]any{"agent_id": namespace, "text": text})
 	if added["isError"] == true || added["structuredContent"].(map[string]any)["fact_id"] != nil {
 		t.Fatalf("legacy receipt invented identity: %+v", added)

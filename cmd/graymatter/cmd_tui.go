@@ -170,12 +170,13 @@ type agentsLoadedMsg struct {
 	generation uint64
 }
 type factsLoadedMsg struct {
-	facts      []factItem
-	agent      string
-	generation uint64
-	next       string
-	total      int
-	appendPage bool
+	facts         []factItem
+	agent         string
+	generation    uint64
+	next          string
+	total         int
+	appendPage    bool
+	subjectIssues *memory.SubjectIssues
 }
 type sessionsLoadedMsg struct {
 	sessions   []sessionItem
@@ -195,10 +196,11 @@ type checkpointsLoadedMsg struct {
 	err         error
 }
 type recallLoadedMsg struct {
-	agent, query string
-	generation   uint64
-	receipts     []memory.RecallReceipt
-	err          error
+	agent, query  string
+	generation    uint64
+	receipts      []memory.RecallReceipt
+	err           error
+	subjectIssues *memory.SubjectIssues
 }
 type mutationMsg struct {
 	action, agent string
@@ -261,6 +263,8 @@ type tuiModel struct {
 	factQuery                  string
 	nextFactCursor             string
 	factTotal                  int
+	factSubjectWarning         string
+	recallSubjectWarning       string
 	factsGeneration            uint64
 	recallGeneration           uint64
 	checkpointGeneration       uint64
@@ -417,6 +421,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		var facts []memory.Fact
+		var issues *memory.SubjectIssues
 		var err error
 		var next string
 		total := 0
@@ -429,6 +434,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 			var page memory.FactPage
 			page, err = p.ListFacts(ctx, agent, mode, query, cursor, 100)
 			facts, next, total = page.Facts, page.NextCursor, page.Total
+			issues = page.SubjectIssues
 		} else {
 			facts, err = st.List(agent)
 			if err == nil {
@@ -449,7 +455,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 		for i, f := range facts {
 			items[i] = factItem{f}
 		}
-		return factsLoadedMsg{facts: items, agent: agent, generation: g, next: next, total: total, appendPage: cursor != ""}
+		return factsLoadedMsg{facts: items, agent: agent, generation: g, next: next, total: total, appendPage: cursor != "", subjectIssues: issues}
 	}
 }
 func matchFact(f memory.Fact, mode, query string) bool {
@@ -551,7 +557,11 @@ func (m *tuiModel) inspectRecall(query string) tea.Cmd {
 			return recallLoadedMsg{agent: agent, query: query, generation: g, err: fmt.Errorf("safe inspection unavailable; update the store daemon")}
 		}
 		rs, e := p.InspectRecall(ctx, agent, query, 8)
-		return recallLoadedMsg{agent, query, g, rs, e}
+		result := recallLoadedMsg{agent: agent, query: query, generation: g, receipts: rs, err: e}
+		if e == nil {
+			result.subjectIssues, result.err = readSubjectIssues(ctx, st, agent)
+		}
+		return result
 	}
 }
 
@@ -653,6 +663,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.factsGeneration = msg.generation
 		m.loaded("memory", nil)
+		m.factSubjectWarning = msg.subjectIssues.Warning()
 		old := m.selectedFactID()
 		if old == "" {
 			old = m.restoreFactID
@@ -737,6 +748,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loaded("recall", msg.err)
 		if msg.err == nil {
+			m.recallSubjectWarning = msg.subjectIssues.Warning()
 			items := make([]list.Item, len(msg.receipts))
 			for i, r := range msg.receipts {
 				items[i] = receiptItem{r, i + 1}
@@ -877,6 +889,7 @@ func (m *tuiModel) chooseNamespace(agent string) tea.Cmd {
 		m.detail.SetContent("")
 		m.previewText = ""
 		m.nextFactCursor, m.factTotal = "", 0
+		m.factSubjectWarning, m.recallSubjectWarning = "", ""
 		m.restoreFactID = ""
 		for _, resource := range []string{"memory", "recall", "checkpoints"} {
 			m.resources[resource] = resourceState{}

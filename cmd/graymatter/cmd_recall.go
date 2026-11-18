@@ -114,6 +114,10 @@ is a writer declaration, not automated verification.`,
 				return err
 			}
 
+			issues, err := readSubjectIssues(ctx, store, recallSubjectNamespaces(agentID, settings)...)
+			if err != nil {
+				return fmt.Errorf("subject diagnostics: %w", err)
+			}
 			if jsonOut {
 				out := map[string]any{
 					"agent_id": agentID,
@@ -128,6 +132,9 @@ is a writer declaration, not automated verification.`,
 				}
 				if len(result.ReviewNotices) > 0 {
 					out["conflict_notices"] = result.ReviewNotices
+				}
+				if issues != nil {
+					out["subject_issues"] = issues
 				}
 				data, _ := json.Marshal(out)
 				fmt.Println(string(data))
@@ -144,6 +151,7 @@ is a writer declaration, not automated verification.`,
 				if feedback != "" {
 					fmt.Printf("\n%s\n", feedback)
 				}
+				printSubjectWarning(issues)
 				return nil
 			}
 
@@ -160,6 +168,7 @@ is a writer declaration, not automated verification.`,
 			if notice := memory.ReviewNoticesText(result.ReviewNotices); notice != "" {
 				fmt.Printf("\n%s\n", notice)
 			}
+			printSubjectWarning(issues)
 			return nil
 		},
 	}
@@ -171,6 +180,22 @@ is a writer declaration, not automated verification.`,
 	cmd.Flags().StringVar(&minimum, "min-confidence", "", "minimum effective confidence: unverified, inferred or verified; suppresses graph hints")
 	cmd.Flags().Float64Var(&weight, "confidence-weight", memory.DefaultConfidenceWeight, "confidence preference in [0,0.5]; zero preserves an explicit filter")
 	return cmd
+}
+
+func recallSubjectNamespaces(agentID string, settings recallSettings) []string {
+	if settings.shared {
+		return []string{memory.SharedAgentID}
+	}
+	if settings.all && agentID != memory.SharedAgentID {
+		return []string{agentID, memory.SharedAgentID}
+	}
+	return []string{agentID}
+}
+
+func printSubjectWarning(issues *memory.SubjectIssues) {
+	if warning := issues.Warning(); warning != "" {
+		fmt.Println(warning)
+	}
 }
 
 // runRecallBatch answers several queries in one invocation.
@@ -262,6 +287,10 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 	} else if settings.shared {
 		scope = "shared"
 	}
+	issues, err := readSubjectIssues(ctx, store, recallSubjectNamespaces(agentID, settings)...)
+	if err != nil {
+		return fmt.Errorf("subject diagnostics: %w", err)
+	}
 
 	if jsonOut {
 		out := map[string]any{
@@ -279,6 +308,9 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		}
 		if len(notices) > 0 {
 			out["conflict_notices"] = notices
+		}
+		if issues != nil {
+			out["subject_issues"] = issues
 		}
 		data, _ := json.Marshal(out)
 		fmt.Println(string(data))
@@ -302,6 +334,7 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		if len(failures) > 0 {
 			fmt.Printf("%d queries failed: %s\n", len(failures), strings.Join(failures, "; "))
 		}
+		printSubjectWarning(issues)
 		return batchError
 	}
 	// Grouped by query, not as one merged block.
@@ -334,6 +367,7 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 	if notice := memory.ReviewNoticesText(notices); notice != "" {
 		fmt.Printf("\n%s\n", notice)
 	}
+	printSubjectWarning(issues)
 	return batchError
 }
 
@@ -396,6 +430,10 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		return err
 	}
 
+	issues, err := readSubjectIssues(cmd.Context(), store, agentID)
+	if err != nil {
+		return fmt.Errorf("subject diagnostics: %w", err)
+	}
 	if jsonOut {
 		out := map[string]any{
 			"agent_id": agentID,
@@ -406,6 +444,9 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		}
 		if retrieval != nil {
 			out["retrieval"] = retrieval
+		}
+		if issues != nil {
+			out["subject_issues"] = issues
 		}
 		data, _ := json.Marshal(out)
 		fmt.Println(string(data))
@@ -419,6 +460,7 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		if !quiet {
 			fmt.Printf("No memories found for agent %q matching %q.\n", agentID, query)
 		}
+		printSubjectWarning(issues)
 		return nil
 	}
 
@@ -449,5 +491,6 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 	if notice := memory.ReviewNoticesText(notices); notice != "" {
 		fmt.Printf("\n%s\n", notice)
 	}
+	printSubjectWarning(issues)
 	return nil
 }

@@ -365,8 +365,22 @@ func (m tuiModel) renderFooter() string {
 		help = "Type to search · ↑↓ choose · Enter apply · Esc return"
 	}
 	first := m.muted(" " + help)
-	if m.status != "" {
-		first = m.ink(" " + tuiPlain(m.status))
+	status := m.status
+	var subjectWarning string
+	switch m.activeTab {
+	case tabMemory:
+		subjectWarning = m.factSubjectWarning
+	case tabRecall:
+		subjectWarning = m.recallSubjectWarning
+	}
+	if subjectWarning != "" {
+		if status != "" {
+			subjectWarning += " · " + status
+		}
+		status = subjectWarning
+	}
+	if status != "" {
+		first = m.ink(" " + tuiPlain(status))
 	}
 	global := "/ commands · 1–6 tabs · r refresh · q quit "
 	gw := ansi.StringWidth(global)

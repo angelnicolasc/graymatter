@@ -441,7 +441,7 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 				return nil
 			}
 			tf := make(map[string]int)
-			for _, t := range tokenizeStem(f.Text, doStem) {
+			for _, t := range tokenizeStem(factLexicalText(f), doStem) {
 				tf[t]++
 			}
 			tfByID[id] = tf
@@ -462,6 +462,7 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 	}
 	policy.noteVectorFallback(vectorFallback)
 	return &recallPipeline{
+		corpusSize:       len(live),
 		activatedAliases: activated,
 
 		policy:          policy,
@@ -852,7 +853,7 @@ func (s *Store) idxSeedDocsContext(ctx context.Context, agentID string, seeds ma
 		if ctx.Err() != nil {
 			return nil
 		}
-		toks := tokenizeStem(f.Text, doStem)
+		toks := tokenizeStem(factLexicalText(f), doStem)
 		tf := make(map[string]int, len(toks))
 		for _, t := range toks {
 			tf[t]++

@@ -23,10 +23,11 @@ func mcpCmd() *cobra.Command {
 
 func mcpServeCmd() *cobra.Command {
 	var (
-		httpAddr string
-		token    string
-		noAuth   bool
-		noCreate bool
+		httpAddr     string
+		token        string
+		noAuth       bool
+		noCreate     bool
+		toolsProfile string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -51,7 +52,7 @@ Claude Code setup — add to your project's .mcp.json:
     }
   }
 
---http exposes the same seven tools over StreamableHTTP. That transport carries
+--http serves the same callable tools and selected catalog over StreamableHTTP. That transport carries
 the whole memory surface, so it requires an HTTP bearer token (see
 "graymatter server --help" for where the token lives) and should be pointed at
 a loopback address:
@@ -62,6 +63,10 @@ a loopback address:
 It does not make the store read-only. A rejected server writes no token, starts
 no daemon, and serves no tools. Prepare with init --store-only, then reconnect.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			profile, err := gmcp.ParseToolsProfile(toolsProfile, true)
+			if err != nil {
+				return err
+			}
 			// Reject invalid options and unsafe leaves before token generation,
 			// daemon startup, or a listener can change the selected store.
 			if err := validateMCPHTTPOptions(httpAddr, noAuth); err != nil {
@@ -102,7 +107,13 @@ no daemon, and serves no tools. Prepare with init --store-only, then reconnect.`
 			}
 			defer func() { _ = store.Close() }()
 
-			srv := gmcp.New(store, version)
+			var serverOpts []gmcp.Option
+			if profile == gmcp.ToolsFull {
+				serverOpts = append(serverOpts, gmcp.WithFullCatalog())
+			} else if httpAddr == "" {
+				serverOpts = append(serverOpts, gmcp.WithLocalProjectStartup(route.agentID))
+			}
+			srv := gmcp.New(store, version, serverOpts...)
 
 			if httpAddr != "" {
 				return srv.ServeHTTP(httpAddr, httpOpts...)
@@ -122,6 +133,8 @@ no daemon, and serves no tools. Prepare with init --store-only, then reconnect.`
 		"serve HTTP without authentication (loopback addresses only)")
 	cmd.Flags().BoolVar(&noCreate, "no-create", false,
 		"require an existing regular gray.db or MEMORY.md before opening the store")
+	cmd.Flags().StringVar(&toolsProfile, "tools", gmcp.ToolsCore,
+		"catalog profile: core (default) or full")
 	return cmd
 }
 

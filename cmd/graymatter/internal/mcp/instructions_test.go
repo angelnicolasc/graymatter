@@ -114,7 +114,7 @@ func TestWithInstructionsOptionOverride(t *testing.T) {
 	}
 
 	s3 := newOptionsServer(t) // no options: the built-in protocol ships by default
-	if got := initializeInstructions(t, s3); got != serverInstructions {
+	if got := initializeInstructions(t, s3); got != coreServerInstructions {
 		t.Errorf("default construction must announce the built-in instructions, got %q", got)
 	}
 }

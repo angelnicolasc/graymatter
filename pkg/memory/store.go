@@ -56,6 +56,8 @@ const SharedAgentID = "__shared__"
 
 // StoreConfig is passed to Open to configure the Store.
 type StoreConfig struct {
+	// MaxQuoteBytes limits new literal citations. Zero uses 2048 bytes.
+	MaxQuoteBytes int
 	DataDir       string
 	Embedder      embedding.Provider
 	DecayHalfLife time.Duration
@@ -269,6 +271,11 @@ type Store struct {
 	partitions map[string]partitionSnapshot
 	spineMu    sync.RWMutex
 
+	// Exact subject and short-ID projections for one committed bbolt snapshot.
+	subjectReadMu    sync.Mutex
+	subjectReadTx    int
+	subjectReadViews map[string]subjectReadView
+
 	db       *bolt.DB
 	vectors  VectorStore
 	embedder embedding.Provider
@@ -323,6 +330,12 @@ type Store struct {
 
 // Open creates or opens the GrayMatter store at cfg.DataDir.
 func Open(cfg StoreConfig) (*Store, error) {
+	if cfg.MaxQuoteBytes < 0 {
+		return nil, errors.New("MaxQuoteBytes must not be negative")
+	}
+	if cfg.MaxQuoteBytes == 0 {
+		cfg.MaxQuoteBytes = DefaultMaxQuoteBytes
+	}
 	if err := (RecallOptions{ConfidenceWeight: &cfg.ConfidenceWeight}).Validate(); err != nil {
 		return nil, err
 	}
@@ -343,6 +356,12 @@ func Open(cfg StoreConfig) (*Store, error) {
 				if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 					return err
 				}
+			}
+			if err := walkLineageNamespaces(tx.Bucket(bucketCitations), "", func(ns string, _ *bolt.Bucket) error {
+				_, err := pruneCitationsTx(tx, ns)
+				return err
+			}); err != nil {
+				return err
 			}
 			return nil
 		}); err != nil {
@@ -382,6 +401,8 @@ func Open(cfg StoreConfig) (*Store, error) {
 		sema:           make(chan struct{}, cfg.MaxAsyncConsolidations),
 	}
 
+	_, vectorsUnavailable := vectors.(unavailableVectorStore)
+
 	// Hydrate known agent IDs so collections are ready.
 	if !readOnly {
 		_ = s.loadAgents()
@@ -399,7 +420,6 @@ func Open(cfg StoreConfig) (*Store, error) {
 		// Drain any vector writes that did not complete on the previous run
 		// (crash between bbolt commit and vector upsert, or transient failures)
 		// - and, after a provider switch, the full re-index queued above.
-		_, vectorsUnavailable := vectors.(unavailableVectorStore)
 		if !vectorsUnavailable {
 			s.reconcileVectors()
 		}
@@ -409,6 +429,12 @@ func Open(cfg StoreConfig) (*Store, error) {
 		// not promote vocabulary months later.
 		s.pruneReformPairs()
 
+	}
+	if err := s.initSubjectReadViews(); err != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("verify subject read views: %w", err)
+	}
+	if !readOnly {
 		// Background reconcile loop: retries pending vectors on a cadence so the
 		// inconsistency window collapses to at most VectorReconcileInterval rather
 		// than "until next process restart". Disabled when the interval is 0.
@@ -519,6 +545,13 @@ func (s *Store) PutReturningFact(ctx context.Context, agentID, text string) (Fac
 // PutWithOptionsReturningFact commits text and confidence together, returning
 // the exact durable fact. Invalid options fail before embedding or store access.
 func (s *Store) PutWithOptionsReturningFact(ctx context.Context, agentID, text string, options WriteOptions) (Fact, error) {
+	if options.HasSubjectIntent() {
+		facts, err := s.PutManyReturningFacts(ctx, agentID, []WriteFact{{Text: text, Options: options}})
+		if err != nil {
+			return Fact{}, err
+		}
+		return facts[0], nil
+	}
 	return s.putReturningFactPrepared(ctx, agentID, text, KindFact, "", options, nil)
 }
 
@@ -541,11 +574,8 @@ func (s *Store) putReturningFactKind(ctx context.Context, agentID, text, kind, s
 // write. Derived writes use it to validate their source snapshot and stamp the
 // conservative label without a transient unlabeled fact.
 func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kind, source string, options WriteOptions, prepare func(*bolt.Tx, *Fact) error) (Fact, error) {
-	if options.Confidence != nil {
-		confidence := *options.Confidence
-		options.Confidence = &confidence
-	}
-	if err := options.Validate(); err != nil {
+	options = options.Clone()
+	if err := s.validateCitationOptions(options); err != nil {
 		return Fact{}, err
 	}
 	if s.readOnly {
@@ -573,12 +603,21 @@ func (s *Store) putReturningFactPrepared(ctx context.Context, agentID, text, kin
 	}
 	hasEmbedding := len(emb) > 0
 
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if prepare != nil {
 			if err := prepare(tx, &f); err != nil {
+				return err
+			}
+		}
+		var citationAdded int64
+		if err := s.recordCitationTx(tx, &f, options, &citationAdded); err != nil {
+			return err
+		}
+		if options.HasEvidence() {
+			if err := checkEvidenceQuotaTx(tx, agentID, citationAdded); err != nil {
 				return err
 			}
 		}
@@ -660,7 +699,7 @@ func (s *Store) Delete(agentID, factID string) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		isLineageHead := lineageHeadKey(tx, agentID, factID) != ""
 		if err := s.deleteFactTx(tx, agentID, factID); err != nil {
 			return err
@@ -676,6 +715,9 @@ func (s *Store) deleteFactTx(tx *bolt.Tx, agentID, factID string) error {
 	b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
 	if b == nil || b.Get([]byte(factID)) == nil {
 		return nil
+	}
+	if err := s.closeSubjectsForFactTx(tx, agentID, factID); err != nil {
+		return err
 	}
 	if err := s.invalidateGraphSupportTx(tx, agentID, factID); err != nil {
 		return err
@@ -715,13 +757,13 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 			// Read-only open of an empty or pre-bucketing database: there are
 			// no facts by definition, and a crash here would turn a harmless
 			// inspection into a process kill.
-			return nil
+			return s.hydrateSubjectFactsTx(tx, agentID, facts)
 		}
 		b := parent.Bucket([]byte(agentID))
 		if b == nil {
-			return nil
+			return s.hydrateSubjectFactsTx(tx, agentID, facts)
 		}
-		return b.ForEach(func(_, v []byte) error {
+		if err := b.ForEach(func(_, v []byte) error {
 			f, err := unmarshalFact(v)
 			if err != nil {
 				return nil // skip corrupt entries
@@ -734,7 +776,10 @@ func (s *Store) List(agentID string) ([]Fact, error) {
 			}
 			facts = append(facts, f)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
+		return s.hydrateSubjectFactsTx(tx, agentID, facts)
 	}); err != nil {
 		return nil, err
 	}
@@ -761,15 +806,16 @@ func (s *Store) listLiteSnapshot(ctx context.Context, agentID string) ([]Fact, r
 	var vectorState recallVectorState
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		vectorState = recallVectorStateTx(tx, agentID)
+		view := s.subjectReadView(tx, agentID)
 		parent := tx.Bucket(bucketFacts)
 		if parent == nil {
-			return nil
+			return view.indexErr
 		}
 		b := parent.Bucket([]byte(agentID))
 		if b == nil {
-			return nil
+			return view.indexErr
 		}
-		return b.ForEach(func(_, v []byte) error {
+		if err := b.ForEach(func(key, v []byte) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -777,12 +823,15 @@ func (s *Store) listLiteSnapshot(ctx context.Context, agentID string) ([]Fact, r
 			if err != nil {
 				return nil // skip corrupt entries, same as List
 			}
-			if err := hydrateLineageTx(tx, &f); err != nil {
+			if err := view.hydrateRankedFact(tx, agentID, key, &f); err != nil {
 				return err
 			}
 			facts = append(facts, f)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
+		return view.indexErr
 	}); err != nil {
 		return nil, recallVectorState{}, err
 	}
@@ -842,7 +891,7 @@ func (s *Store) touchRecallActivity(activity recallActivity) {
 			}
 		}
 	}
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		parent := tx.Bucket(bucketFacts)
 		if parent == nil {
 			return nil
@@ -890,7 +939,8 @@ func touchFactTx(tx *bolt.Tx, parent *bolt.Bucket, agentID, factID string, at ti
 		return err
 	}
 	current.AccessCount++
-	if !aliasOnly || at.After(current.AccessedAt) {
+	// A recall can complete after one that captured a later timestamp.
+	if at.After(current.AccessedAt) {
 		current.AccessedAt = at
 	}
 	if aliasOnly && current.AliasSource == AliasSourceUsage && !current.Pinned {
@@ -910,7 +960,7 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.updateSubjectReadView(agentID, false, func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
 		if b == nil {
 			return nil
@@ -984,6 +1034,19 @@ func (s *Store) UpdateFact(agentID string, f Fact) error {
 // persistFactTx writes an existing fact and updates all derived index entries.
 // The caller must read and validate the current fact in this same transaction.
 func (s *Store) persistFactTx(tx *bolt.Tx, b *bolt.Bucket, agentID string, f Fact) error {
+	if f.SupersededBy == SupersededByAgent {
+		if raw := b.Get([]byte(f.ID)); raw != nil {
+			old, err := unmarshalFactLite(raw)
+			if err != nil {
+				return err
+			}
+			if !old.IsSuperseded() {
+				if err := s.closeSubjectsForFactTx(tx, agentID, f.ID); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	data, err := f.marshal()
 	if err != nil {
 		return err
@@ -1340,7 +1403,7 @@ func pendingVectorCountTx(tx *bolt.Tx) int {
 }
 
 func (s *Store) clearPendingVector(agentID, factID string) {
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		root := tx.Bucket(bucketPendingVector)
 		if root == nil {
 			return nil
@@ -1435,7 +1498,7 @@ func (s *Store) handleEmbedderLifecycle(emb embedding.Provider) {
 		stored, current, emb.Name())
 
 	queued := 0
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		mb := tx.Bucket(bucketMeta)
 		if mb == nil {
 			return fmt.Errorf("meta bucket missing")
@@ -1484,7 +1547,7 @@ func (s *Store) handleEmbedderLifecycle(emb embedding.Provider) {
 // Called the first time a fact with an embedding is persisted.
 func (s *Store) recordEmbedDimensions(dims int) {
 	const metaKeyDims = "embed_dims"
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketMeta)
 		if b.Get([]byte(metaKeyDims)) != nil {
 			return nil // already recorded

@@ -19,10 +19,27 @@ var ErrConfidenceUnsupported = errors.New("confidence options unsupported: updat
 
 // WriteOptions distinguishes omission (legacy storage) from an explicit label.
 type WriteOptions struct {
-	Confidence *string `json:"confidence,omitempty"`
+	Confidence *string  `json:"confidence,omitempty"`
+	Source     *string  `json:"source,omitempty"`
+	Quote      *string  `json:"quote,omitempty"`
+	Subject    *string  `json:"subject,omitempty"`
+	Replaces   []string `json:"replaces,omitempty"`
 }
 
 func (o WriteOptions) Validate() error {
+	if err := o.validateSubjectOptions(); err != nil {
+		return err
+	}
+	var source, quote string
+	if o.Source != nil {
+		source = *o.Source
+	}
+	if o.Quote != nil {
+		quote = *o.Quote
+	}
+	if err := validateCitationStrings(source, quote); err != nil {
+		return err
+	}
 	if o.Confidence != nil {
 		return ValidateConfidence(*o.Confidence)
 	}

@@ -36,7 +36,7 @@ func (b *scopedBatchMCPBackend) BatchRecallScoped(_ context.Context, agentID str
 
 func TestScopedBatchMCPTruncatesAndRetainsPerQueryErrors(t *testing.T) {
 	backend := &scopedBatchMCPBackend{}
-	s := New(backend, "test")
+	s := New(backend, "test", WithFullCatalog())
 	result := confidenceToolCall(t, s, "memory_search_batch", map[string]any{
 		"agent_id": "a", "queries": []string{"one", "two"}, "top_k": 1, "confidence_weight": .2,
 	})
@@ -56,7 +56,7 @@ func TestScopedBatchMCPTruncatesAndRetainsPerQueryErrors(t *testing.T) {
 
 func TestScopedBatchMCPTransportFailureKeepsAllFailedFormat(t *testing.T) {
 	backend := &scopedBatchMCPBackend{failure: io.EOF}
-	result := confidenceToolCall(t, New(backend, "test"), "memory_search_batch", map[string]any{
+	result := confidenceToolCall(t, New(backend, "test", WithFullCatalog()), "memory_search_batch", map[string]any{
 		"agent_id": "a", "queries": []string{"one", "two"},
 	})
 	if result["isError"] != true || result["structuredContent"] != nil || backend.calls != 1 {

@@ -27,7 +27,8 @@ func newTestServer(t *testing.T) (*Server, *graymatter.Memory) {
 		t.Fatalf("NewWithConfig: %v", err)
 	}
 	t.Cleanup(func() { _ = mem.Close() })
-	return New(NewDirectBackend(mem, nil), "test"), mem
+	// Legacy behavioral and catalog contracts run under the preserved full profile.
+	return New(NewDirectBackend(mem, nil), "test", WithFullCatalog()), mem
 }
 
 func reflectReq(args map[string]any) mcp.CallToolRequest {

@@ -325,6 +325,8 @@ func (f *issue81Fixture) startMCP(dir, command string, args []string, extra map[
 
 func (f *issue81Fixture) startMCPWithTrace(dir, command string, args []string, extra map[string]string, trace func(int, string, any, []byte)) *issue81MCP {
 	f.t.Helper()
+	// Preserve this fixture's complete legacy catalog contract.
+	args = append(append([]string(nil), args...), "--tools", "full")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir, cmd.Env = dir, issue81Env(f.env, extra)

@@ -10,12 +10,15 @@ import (
 // recallPolicy is immutable request state. It owns copied option values so a
 // request never changes the store configuration or another query's policy.
 type recallPolicy struct {
-	preview        bool // inspection suppresses every retrieval hook and durable side effect
-	minimum        *string
-	weight         float64
-	metadata       bool
-	embedding      *confidenceEmbeddingCache
-	vectorFallback *string
+	collectReceipts  bool
+	citationIdentity bool // core keeps independently cited versions distinct
+	omitGraphHints   bool // compact results require canonical namespace identities
+	preview          bool // inspection suppresses every retrieval hook and durable side effect
+	minimum          *string
+	weight           float64
+	metadata         bool
+	embedding        *confidenceEmbeddingCache
+	vectorFallback   *string
 }
 
 // A single pipeline may fall back from the compact index to a canonical scan
@@ -97,6 +100,8 @@ func (p recallPolicy) retrieval() *RetrievalMetadata {
 	kg := "hints_without_confidence_receipts"
 	if p.filtered() {
 		kg = "suppressed_min_confidence"
+	} else if p.omitGraphHints {
+		kg = "suppressed_namespace_scope"
 	}
 	return &RetrievalMetadata{MinConfidence: p.minimum, ConfidenceWeight: p.weight, Policy: ConfidencePolicy, KG: kg, VectorFallback: vectorFallback}
 }
@@ -200,7 +205,25 @@ func (s *Store) recallAllCollectWithPolicy(ctx context.Context, agentID, query s
 			touched = append(touched, f)
 		}
 	}
-	activity := recallActivity{facts: touched, aliases: append(agentActivity.aliases, sharedActivity.aliases...)}
+	if p.citationIdentity {
+		facts, touched = fuseCitationFacts(agentActivity.facts, sharedActivity.facts, topK, p)
+	}
+	activity := recallActivity{
+		corpusSize: agentActivity.corpusSize + sharedActivity.corpusSize,
+		facts:      touched,
+		aliases:    append(agentActivity.aliases, sharedActivity.aliases...),
+	}
+	if p.collectReceipts {
+		activity.receipts = make(map[string]RecallReceipt, len(touched))
+		for _, f := range touched {
+			key := f.AgentID + "\x00" + f.ID
+			if r, ok := agentActivity.receipts[key]; ok {
+				activity.receipts[key] = r
+			} else if r, ok := sharedActivity.receipts[key]; ok {
+				activity.receipts[key] = r
+			}
+		}
+	}
 	s.recordRecallActivity(activity, mode)
 	return RecallResult{Facts: facts, Feedback: feedback, Retrieval: p.retrieval(), ReviewNotices: s.recalledReviewNotices(ctx, touched)}, activity, nil
 }

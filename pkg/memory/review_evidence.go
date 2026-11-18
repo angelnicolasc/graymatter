@@ -260,7 +260,7 @@ func checkEvidenceQuotaTx(tx *bolt.Tx, namespace string, added int64) error {
 }
 
 func evidencePayloadBytesTx(tx *bolt.Tx, namespace string) (namespaceBytes, storeBytes int64, err error) {
-	for _, name := range [][]byte{bucketEvidenceSnapshots, bucketEvidenceOwners, bucketLineageRecords, bucketLineageHeads} {
+	for _, name := range [][]byte{bucketEvidenceSnapshots, bucketEvidenceOwners, bucketLineageRecords, bucketLineageHeads, bucketCitations, bucketSubjectHeads} {
 		bucket := tx.Bucket(name)
 		if bucket == nil {
 			continue
@@ -325,6 +325,9 @@ func pruneEvidenceOrphansTx(tx *bolt.Tx, namespace string, now time.Time, roots 
 			OrphanSince *time.Time `json:"orphan_since"`
 		}
 		if err := json.Unmarshal(raw, &metadata); err != nil {
+			if _, damaged := damagedSubjectSnapshotTx(tx, namespace, string(key)); damaged {
+				return nil
+			}
 			return err
 		}
 		if roots[string(key)] {
@@ -334,6 +337,11 @@ func pruneEvidenceOrphansTx(tx *bolt.Tx, namespace string, now time.Time, roots 
 		} else if metadata.OrphanSince == nil {
 			newlyOrphaned = append(newlyOrphaned, string(key))
 		} else if !now.Before(metadata.OrphanSince.Add(evidenceOrphanGrace)) {
+			if _, err := evidenceEntry(snapshots, string(key)); err != nil {
+				if _, damaged := damagedSubjectSnapshotTx(tx, namespace, string(key)); damaged {
+					return nil
+				}
+			}
 			expired = append(expired, string(key))
 		}
 		return nil
@@ -344,6 +352,9 @@ func pruneEvidenceOrphansTx(tx *bolt.Tx, namespace string, now time.Time, roots 
 	for _, key := range reachable {
 		entry, err := evidenceEntry(snapshots, key)
 		if err != nil {
+			if _, damaged := damagedSubjectSnapshotTx(tx, namespace, key); damaged {
+				continue
+			}
 			return false, err
 		}
 		entry.OrphanSince = nil
@@ -355,6 +366,9 @@ func pruneEvidenceOrphansTx(tx *bolt.Tx, namespace string, now time.Time, roots 
 	for _, key := range newlyOrphaned {
 		entry, err := evidenceEntry(snapshots, key)
 		if err != nil {
+			if _, damaged := damagedSubjectSnapshotTx(tx, namespace, key); damaged {
+				continue
+			}
 			return false, err
 		}
 		entry.OrphanSince = &now

@@ -25,9 +25,10 @@ var ErrMutationOutcomeUnknown = errors.New("mutation outcome unknown; refresh be
 // preserve metadata but omit embeddings. Total counts all matches in this read.
 // Separate pages are live reads, not a transaction spanning user interaction.
 type FactPage struct {
-	Facts      []Fact `json:"facts"`
-	NextCursor string `json:"next_cursor,omitempty"`
-	Total      int    `json:"total"`
+	Facts         []Fact         `json:"facts"`
+	NextCursor    string         `json:"next_cursor,omitempty"`
+	Total         int            `json:"total"`
+	SubjectIssues *SubjectIssues `json:"subject_issues,omitempty"`
 }
 
 // Inspector is optional; published store interfaces remain source compatible.
@@ -127,6 +128,13 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 	out := FactPage{Facts: make([]Fact, 0, limit)}
 	hasMore := false
 	err := s.db.View(func(tx *bolt.Tx) error {
+		idx, err := resolveSubjectIndexTx(tx, agent)
+		if err != nil {
+			return err
+		}
+		var issues SubjectIssues
+		issues.add(agent, idx)
+		out.SubjectIssues = issues.nonempty()
 		parent := tx.Bucket(bucketFacts)
 		if parent == nil {
 			return nil
@@ -175,6 +183,7 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 			}
 		}
 		projectLegacyLineage(out.Facts, incoming)
+		projectSubjectFacts(idx.ByVersion, out.Facts)
 		return nil
 	})
 	if err != nil {

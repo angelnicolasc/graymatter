@@ -18,7 +18,7 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
-func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleMemorySearchLegacy(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	agentID, ok := getString(args, "agent_id")
 	if !ok || agentID == "" {
@@ -62,6 +62,10 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
 
+	issues, err := s.subjectIssues(ctx, agentID)
+	if err != nil {
+		return toolError(fmt.Sprintf("subject diagnostics: %v", err))
+	}
 	if topK > 0 && topK < len(facts) {
 		facts = facts[:topK]
 	}
@@ -74,7 +78,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		if retrieval != nil {
 			notice += "\n\n" + retrieval.Text()
 		}
-		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}, Feedback: feedback, Retrieval: retrieval}, notice)
+		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}, Feedback: appendSubjectWarning(feedback, issues), Retrieval: retrieval}, appendSubjectWarning(notice, issues))
 	}
 
 	var sb strings.Builder
@@ -89,7 +93,7 @@ func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest
 		sb.WriteString("\n" + retrieval.Text() + "\n")
 	}
 	writeReviewNotices(&sb, notices)
-	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts, Feedback: feedback, Retrieval: retrieval, ReviewNotices: notices}, sb.String())
+	return toolStructured(searchResult{AgentID: agentID, Query: query, Count: len(facts), Facts: facts, Feedback: appendSubjectWarning(feedback, issues), Retrieval: retrieval, ReviewNotices: notices}, appendSubjectWarning(sb.String(), issues))
 }
 
 // handleMemoryAlias is the memory_alias entry point: it teaches the store's
@@ -143,12 +147,16 @@ func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query s
 		return toolError(fmt.Sprintf("recall error: %v", err))
 	}
 
+	issues, err := s.subjectIssues(ctx, agentID)
+	if err != nil {
+		return toolError(fmt.Sprintf("subject diagnostics: %v", err))
+	}
 	if len(receipts) == 0 {
 		notice := fmt.Sprintf("No memories found for agent %q matching %q.", agentID, query)
 		if retrieval != nil {
 			notice += "\n\n" + retrieval.Text()
 		}
-		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}, Retrieval: retrieval}, notice)
+		return toolStructured(searchResult{AgentID: agentID, Query: query, Count: 0, Facts: []string{}, Retrieval: retrieval, Feedback: issues.Warning()}, appendSubjectWarning(notice, issues))
 	}
 
 	var sb strings.Builder
@@ -185,10 +193,11 @@ func (s *Server) handleMemorySearchExplain(ctx context.Context, agentID, query s
 		Facts:     []string{},
 		Explained: receipts,
 		Retrieval: retrieval,
-	}, sb.String())
+		Feedback:  issues.Warning(),
+	}, appendSubjectWarning(sb.String(), issues))
 }
 
-func (s *Server) handleMemoryAdd(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleMemoryAddLegacy(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	agentID, ok := getString(args, "agent_id")
 	if !ok || agentID == "" {
@@ -267,6 +276,9 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 	cp, err := s.backend.CheckpointResume(agentID)
 	if err != nil {
 		if errors.Is(err, session.ErrNoCheckpoint) {
+			if !s.fullCatalog {
+				return mcp.NewToolResultText("No pending checkpoint."), nil
+			}
 			if onMissing == "empty" {
 				return toolStructured(checkpointResumeEmpty{Found: false, AgentID: agentID},
 					fmt.Sprintf("No checkpoint saved for agent %q yet.", agentID))
@@ -276,6 +288,16 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		// Storage, daemon, and corrupt-record failures stay prose-only in both
 		// modes: they are not absence and must never masquerade as found:false.
 		return toolError(fmt.Sprintf("checkpoint resume error: %v", err))
+	}
+
+	if !s.fullCatalog {
+		if !session.IsPending(*cp) {
+			return mcp.NewToolResultText("No pending checkpoint."), nil
+		}
+		return toolStructured(struct {
+			ID    string         `json:"id"`
+			State map[string]any `json:"state"`
+		}{ID: cp.ID, State: cp.State}, "Resumed.")
 	}
 
 	stateJSON, _ := json.MarshalIndent(cp.State, "", "  ")
@@ -328,6 +350,9 @@ func reflectAgentID(args map[string]any) (string, error) {
 
 func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
+	if err := s.citationArguments("memory_reflect", args); err != nil {
+		return toolError(err.Error())
+	}
 
 	action, ok := getString(args, "action")
 	if !ok || action == "" {
@@ -350,6 +375,11 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 	if opts.Confidence != nil && action != "add" && action != "update" {
 		return toolError("confidence is supported only by reflect add/update")
 	}
+	if opts.Source != nil || opts.Quote != nil {
+		if support, ok := s.backend.(interface{ SupportsCitationEvidence() bool }); !ok || !support.SupportsCitationEvidence() {
+			return toolError(memory.ErrCitationUnsupported.Error())
+		}
+	}
 
 	var oldText string
 	var resultMsg string
@@ -360,12 +390,30 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the fact to add) is required for add")
 		}
-		fact, err := s.putWithIdentity(ctx, agentID, text, opts)
+		var fact memory.Fact
+		var err error
+		var details string
+		rich := !s.fullCatalog && supportsSubjects(s.backend)
+		if rich {
+			receipts, writeErr := s.putCoreReceipts(ctx, agentID, []memory.WriteFact{{Text: text, Options: opts}})
+			err = writeErr
+			if len(receipts) == 1 {
+				fact = receipts[0].Fact
+				_, details = writeReceiptDetails(0, receipts[0])
+			} else if err == nil {
+				err = fmt.Errorf("subject write returned incomplete committed identities")
+			}
+		} else {
+			fact, err = s.putWithIdentity(ctx, agentID, text, opts)
+		}
 		if err != nil {
 			return committedWriteError("add", fact, err)
 		}
+		if rich && fact.ID == "" {
+			return toolError("subject write returned no committed identity")
+		}
 		out.FactID, out.Confidence = fact.ID, fact.Confidence
-		resultMsg = fmt.Sprintf("Added fact for agent %q.", agentID)
+		resultMsg = fmt.Sprintf("Added fact for agent %q.", agentID) + details
 
 	case "update":
 		if target == "" {
@@ -374,15 +422,17 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if text == "" {
 			return toolError("text (the corrected fact) is required for update")
 		}
-		facts, err := s.backend.List(agentID)
+		victims, err := s.curationTargets(ctx, agentID, target, args, false)
 		if err != nil {
-			return toolError(fmt.Sprintf("list facts: %v", err))
+			if !s.fullCatalog && args["target_type"] != "text" {
+				return toolError("resolve target: " + s.targetIDDiagnostic(ctx, agentID, err))
+			}
+			return toolError(s.targetResolutionError(err))
 		}
-		victims := findByText(facts, target, false)
 		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", target))
 		}
-		oldText = target
+		oldText = victims[0].Text
 		reviser, ok := s.backend.(confidenceReviser)
 		if !ok {
 			return toolError("atomic revision is unavailable on this backend")
@@ -411,15 +461,14 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if wanted == "" {
 			return toolError("the fact to forget is required: pass it in target (or text)")
 		}
-		facts, err := s.backend.List(agentID)
+		victims, err := s.curationTargets(ctx, agentID, wanted, args, false)
 		if err != nil {
-			return toolError(fmt.Sprintf("list facts: %v", err))
+			return toolError(s.targetResolutionError(err))
 		}
-		victims := findByText(facts, wanted, false)
 		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
 		}
-		oldText = wanted
+		oldText = victims[0].Text
 		if retirer, ok := s.backend.(interface {
 			Retire(string, ...memory.Fact) error
 		}); ok {
@@ -462,13 +511,12 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		if wanted == "" {
 			return toolError(fmt.Sprintf("the fact to %s is required: pass it in target (or text)", action))
 		}
-		facts, err := s.backend.List(agentID)
+		victims, err := s.curationTargets(ctx, agentID, wanted, args, action == "unpin")
 		if err != nil {
-			return toolError(fmt.Sprintf("list facts: %v", err))
+			return toolError(s.targetResolutionError(err))
 		}
 		// Pin only live copies. Unpin also clears retired copies, preserving
 		// the existing flag-cleanup behavior without changing their receipts.
-		victims := findByText(facts, wanted, action == "unpin")
 		if len(victims) == 0 {
 			return toolError(fmt.Sprintf("target fact not found: %q", wanted))
 		}
@@ -507,6 +555,9 @@ func (s *Server) handleMemoryReflect(ctx context.Context, req mcp.CallToolReques
 		Source:    "agent_self",
 	})
 
+	if !s.fullCatalog && action == "update" {
+		return mcp.NewToolResultText("Stored " + s.compactCoreID(ctx, agentID, out.FactID) + "."), nil
+	}
 	return toolStructured(out, resultMsg+writeIdentityNotice(out.FactID, memory.EffectiveConfidence(out.Confidence)))
 }
 
@@ -621,18 +672,22 @@ func (s *Server) handleMemorySearchBatch(ctx context.Context, agentID string, qu
 		}
 		fmt.Fprintf(&sb, "\n%d of %d queries failed:\n  %s\n", len(failed), len(queries), strings.Join(failed, "\n  "))
 	}
+	issues, err := s.subjectIssues(ctx, agentID)
+	if err != nil {
+		return toolError(fmt.Sprintf("subject diagnostics: %v", err))
+	}
 	if len(merged) == 0 && len(failed) == 0 {
 		notice := fmt.Sprintf("No memories found for agent %q matching any of the %d queries.", agentID, len(queries))
 		if out.Retrieval != nil {
 			notice += "\n\n" + out.Retrieval.Text()
 		}
-		return toolStructured(out, notice)
+		return toolStructured(out, appendSubjectWarning(notice, issues))
 	}
 	if out.Retrieval != nil {
 		sb.WriteString("\n" + out.Retrieval.Text() + "\n")
 	}
 	writeReviewNotices(&sb, out.ReviewNotices)
-	return toolStructured(out, sb.String())
+	return toolStructured(out, appendSubjectWarning(sb.String(), issues))
 }
 
 func (s *Server) recallBatch(ctx context.Context, agentID string, queries []string, topK int, opts *memory.RecallOptions) ([]memory.BatchResult, error) {
@@ -673,6 +728,9 @@ func (s *Server) recallBatch(ctx context.Context, agentID string, queries []stri
 // handleMemorySearchBatchTool is the memory_search_batch entry point: it reads
 // the arguments and delegates to the shared fan-out.
 func (s *Server) handleMemorySearchBatchTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if !s.fullCatalog {
+		return s.handleMemorySearch(ctx, req)
+	}
 	args := req.GetArguments()
 	agentID, ok := getString(args, "agent_id")
 	if !ok || agentID == "" {

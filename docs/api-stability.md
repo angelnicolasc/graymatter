@@ -392,6 +392,13 @@ now returns 8 facts. Pass `?k=5` for the old count.
 
 ## MCP wire contract (stable within the v0.x series)
 
+Catalog discovery now defaults to `core` (five visible tools); `--tools full`
+retains the previous seven-tool catalog and briefing. Hidden tools and advanced
+parameters remain callable. Existing tool names, argument semantics and result
+shapes are unchanged by catalog selection. Use `--tools full` when a client
+requires the complete discovery schema.
+See [catalog profiles](AGENTS.md#mcp-catalog-profiles).
+
 The Go package that implements the MCP server, `cmd/graymatter/internal/mcp`,
 is internal and carries no Go-level guarantee (see [Internal / unstable
 packages](#internal--unstable-packages)). The **wire contract it serves** is

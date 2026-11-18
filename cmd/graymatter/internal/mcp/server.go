@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -77,9 +78,11 @@ type KGLinker interface {
 
 // Server wraps mcp-go with GrayMatter memory handlers.
 type Server struct {
-	backend Backend
-	version string
-	mcpSrv  *server.MCPServer
+	backend         Backend
+	version         string
+	mcpSrv          *server.MCPServer
+	fullCatalog     bool
+	citationWriteMu sync.Mutex
 }
 
 // New creates a configured MCP server on top of backend, announcing version
@@ -97,10 +100,25 @@ func New(backend Backend, version string, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	s := &Server{backend: backend, version: version}
+	if cfg.fullCatalog && !cfg.instructionsSet {
+		cfg.instructions = serverInstructions
+	}
+	hooks := &server.Hooks{}
+	if !cfg.fullCatalog {
+		hooks.AddAfterListTools(coreCatalog)
+		if cfg.localProject != "" && !cfg.instructionsSet {
+			hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, result *mcp.InitializeResult) {
+				if localProjectMemoryEmpty(ctx, backend, cfg.localProject) {
+					result.Instructions = emptyCoreServerInstructions
+				}
+			})
+		}
+	}
+	s := &Server{backend: backend, version: version, fullCatalog: cfg.fullCatalog}
 	s.mcpSrv = server.NewMCPServer(serverName, version,
 		server.WithToolCapabilities(true),
 		server.WithInstructions(cfg.instructions),
+		server.WithHooks(hooks),
 	)
 	s.registerTools()
 	return s

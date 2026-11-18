@@ -12,12 +12,18 @@ import (
 // enriched with metadata used for retrieval scoring and decay.
 type Fact struct {
 	LineageProjection
-	ID          string    `json:"id"`
-	AgentID     string    `json:"agent_id"`
-	Text        string    `json:"text"`
-	CreatedAt   time.Time `json:"created_at"`
-	AccessedAt  time.Time `json:"accessed_at"`
-	AccessCount int       `json:"access_count"`
+	// Evidence is hydrated from the version bucket, never persisted in this row.
+	Evidence *Citation `json:"evidence,omitempty"`
+	// CitationUnavailable reports an exact citation whose snapshot cannot be
+	// projected in a compatible read. It is never persisted in the fact row.
+	CitationUnavailable bool                `json:"citation_unavailable,omitempty"`
+	Subjects            []SubjectProjection `json:"subjects,omitempty"`
+	ID                  string              `json:"id"`
+	AgentID             string              `json:"agent_id"`
+	Text                string              `json:"text"`
+	CreatedAt           time.Time           `json:"created_at"`
+	AccessedAt          time.Time           `json:"accessed_at"`
+	AccessCount         int                 `json:"access_count"`
 	// Weight is the decay-adjusted relevance score in [0, 1].
 	// New facts start at 1.0 and decay over time via the forgetting curve.
 	Weight    float64   `json:"weight"`
@@ -144,6 +150,9 @@ func newFact(agentID, text string, embedding []float32, at time.Time) Fact {
 
 // marshal serialises a Fact to JSON bytes for bbolt storage.
 func (f Fact) marshal() ([]byte, error) {
+	f.Evidence = nil
+	f.CitationUnavailable = false
+	f.Subjects = nil
 	return json.Marshal(f)
 }
 
@@ -200,9 +209,10 @@ func unmarshalFactLite(data []byte) (Fact, error) {
 
 // MemoryStats holds aggregate statistics for a single agent.
 type MemoryStats struct {
-	AgentID   string    `json:"agent_id"`
-	FactCount int       `json:"fact_count"`
-	OldestAt  time.Time `json:"oldest_at"`
-	NewestAt  time.Time `json:"newest_at"`
-	AvgWeight float64   `json:"avg_weight"`
+	LiveEvidenceCount *int      `json:"live_evidence_count,omitempty"`
+	AgentID           string    `json:"agent_id"`
+	FactCount         int       `json:"fact_count"`
+	OldestAt          time.Time `json:"oldest_at"`
+	NewestAt          time.Time `json:"newest_at"`
+	AvgWeight         float64   `json:"avg_weight"`
 }

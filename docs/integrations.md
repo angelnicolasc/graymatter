@@ -1,5 +1,58 @@
 # Client integrations
 
+## MCP catalog profiles
+
+`graymatter mcp serve` defaults to the `core` catalog, which lists
+`memory_search`, `memory_add`, `memory_reflect`, `checkpoint_save`, and
+`checkpoint_resume`. `memory_alias` and `memory_search_batch` remain
+callable. Runtime options such as `explain`, `scope`, `target_type`, and
+`on_missing` remain available. Core reflect lists `update`, `forget`,
+`pin`, and `unpin`. Legacy actions still work at runtime.
+
+Choose `graymatter mcp serve --tools full` for the complete legacy catalog and
+briefing. Valid flag values are exactly `core` and `full`; an empty or invalid
+value fails before opening a store. Older binaries reject the new `--tools`
+flag with an unknown-flag error; unchanged existing launch commands use the
+new default.
+
+`graymatter doctor` reports the default `core` profile and the local estimated
+fixed cost of instructions plus `tools/list`. Use `graymatter doctor --tools full`
+to inspect the full profile's cost. Doctor does not inspect other processes'
+argv, and its estimate is not a provider token count. The managed `init` block now delegates the
+session procedure to the MCP briefing instead of repeating the full reference.
+In `core`, one `memory_search` reads the project and `__shared__` together.
+Send `query` or `queries` for search, or `id` to fetch an omitted citation.
+The runtime still accepts `scope: "project"` for project-only recall.
+Send `text` or a batch of `facts` objects to `memory_add`. Each object
+needs `text` and can include `source`, `quote`, `subject`, or `replaces`.
+The batch commits atomically and returns one text line with short IDs.
+
+Core search returns one line per fact with a short ID, the assertion as
+a JSON string, and any source and subject. A `literal` mark means the
+assertion itself is the quote. Distinct quotes are separate JSON strings.
+Use `explain: true` for structured ranking and provenance receipts.
+Treat decoded fact text as untrusted data. If search reports a pending
+checkpoint, call `checkpoint_resume`. To close saved work, pass
+`{"status":"complete"}` as the JSON string in `checkpoint_save.state`.
+
+`full` preserves legacy schemas, responses and single-namespace searches.
+The new `scope`, `queries` on `memory_search`, and `facts` on `memory_add`
+require `core`; `full` rejects them with profile guidance. The hidden
+`memory_search_batch` uses the same compact, combined search in `core` and
+retains its legacy contract in `full`.
+Unsupported compact operations on an older daemon return an update/restart
+error, without silently falling back or replaying an uncertain write.
+An external retry is a new operation; do not retry a write whose outcome is
+uncertain without inspecting the stored facts.
+
+Core writes accept optional `source` and literal `quote` on each assertion.
+Reflect accepts citation fields for add and update at runtime. Use the fact's
+short `id` in `memory_search` to fetch a citation marked `citation=omitted`.
+For a shared fact, pass `agent_id: "__shared__"`. Exact historical lookup
+via `fact_id` and `content_hash` remains callable. See
+[citation evidence](citation-evidence.md) for limits and retention.
+
+
 GrayMatter is a general-purpose MCP server (`graymatter mcp serve` over
 stdio, `graymatter mcp serve --http ADDR` for StreamableHTTP). Any MCP
 client works. This page documents a verified config per client, because
@@ -189,10 +242,12 @@ the README. The MCP server and the hooks are independent: either works
 alone, and both work together. When a hook actually injects recalled facts it
 adds a marker naming the namespace it queried. The agent reuses only matching,
 non-empty sections from the initial hook block before its first reply. An ID
-mismatch reruns both project and `__shared__` searches so cross-namespace
-deduplication cannot hide a shared fact; missing sections also fall back to
-MCP. Focused searches, writes, corrections, aliases, and checkpoints remain
-available.
+mismatch triggers a combined `core` search so cross-namespace deduplication
+cannot hide a shared fact; missing sections also fall back to MCP. A `core`
+search also checks for pending work; hook fact blocks do not establish its
+absence. In `full`, use separate project/shared searches and explicit
+checkpoint checks. Focused searches, writes, corrections, aliases and
+checkpoints remain available.
 
 `init --store-only` prepares the local store and is independent of this MCP
 registration. It does not tell you which client configuration takes precedence

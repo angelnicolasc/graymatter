@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/internal/tokens"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -13,12 +15,10 @@ import (
 // hosts that never read CLAUDE.md or AGENTS.md — the failure mode behind
 // issues #3 and #14.
 //
-// It is built from compile-time constants on purpose. The initialize response
-// is not a data channel: this text must never contain store contents, agent
-// IDs, or anything derived from runtime state (see docs/threat-model.md on
-// treating memory as untrusted input — recalled facts reach the model through
-// tool results inside the session, never through this field). The one
-// interpolation is memory.FeedbackAction, itself a source constant: the
+// It is built from compile-time constants. The initialize response never
+// includes store contents or agent IDs. Core stdio can use a fixed first line
+// for empty local memory. Recalled facts reach the client through tool results.
+// The one interpolation is memory.FeedbackAction, itself a source constant: the
 // briefing names the same action the block prints and the CLI registers, so
 // the three surfaces cannot drift apart.
 //
@@ -47,7 +47,10 @@ Guide: docs/AGENTS.md.`, memory.FeedbackAction)
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	instructions string
+	instructions    string
+	instructionsSet bool
+	fullCatalog     bool
+	localProject    string
 }
 
 // WithInstructions overrides the instructions announced in the initialize
@@ -55,11 +58,42 @@ type serverOptions struct {
 // tests and for callers that manage agent briefing themselves. Production
 // callers use the default and never construct this option.
 func WithInstructions(text string) Option {
-	return func(o *serverOptions) { o.instructions = text }
+	return func(o *serverOptions) { o.instructions = text; o.instructionsSet = true }
+}
+
+// WithLocalProjectStartup enables the empty-memory briefing for a core stdio
+// server whose project identity was captured at startup.
+func WithLocalProjectStartup(project string) Option {
+	return func(o *serverOptions) { o.localProject = project }
+}
+
+func localProjectMemoryEmpty(ctx context.Context, backend Backend, project string) bool {
+	peeker, ok := backend.(interface {
+		CheckpointPeekPending(string) (*session.PendingCheckpoint, error)
+	})
+	if !ok || ctx.Err() != nil {
+		return false
+	}
+	for _, namespace := range []string{project, memory.SharedAgentID} {
+		pending, err := peeker.CheckpointPeekPending(namespace)
+		if err != nil || pending != nil {
+			return false
+		}
+		facts, err := backend.List(namespace)
+		if err != nil || ctx.Err() != nil {
+			return false
+		}
+		for _, fact := range facts {
+			if !fact.IsSuperseded() && !fact.IsAlias() {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func defaultServerOptions() serverOptions {
-	return serverOptions{instructions: serverInstructions}
+	return serverOptions{instructions: coreServerInstructions}
 }
 
 // instructionTokenBudget is the ceiling enforced by

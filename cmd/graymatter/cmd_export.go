@@ -61,6 +61,9 @@ func exportCmd() *cobra.Command {
 				if err := export.WriteLineageArchive(archive, outDir); err != nil {
 					return fmt.Errorf("write lineage archive: %w", err)
 				}
+				if warning := archive.SubjectIssues.Warning(); warning != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), warning)
+				}
 				if !quiet {
 					fmt.Printf("Exported %d fact rows and %d evidence versions to %s\n",
 						len(archive.Facts), len(archive.Evidence), filepath.Join(outDir, "memory-lineage.json"))
@@ -77,16 +80,38 @@ func exportCmd() *cobra.Command {
 			}
 
 			var facts []memory.Fact
+			var issues memory.SubjectIssues
 			for _, aid := range agents {
 				f, err := store.List(aid)
 				if err != nil {
 					return err
+				}
+				report, err := readSubjectIssues(cmd.Context(), store, aid)
+				if err != nil {
+					return fmt.Errorf("subject diagnostics: %w", err)
+				}
+				if report != nil {
+					issues.Total += report.Total
+					issues.Subjects = append(issues.Subjects, report.Subjects[:min(len(report.Subjects), 3-len(issues.Subjects))]...)
+					// A fact projection of an affected namespace presents
+					// live facts. Historical tombstones remain in the
+					// explicit lineage archive.
+					live := f[:0]
+					for _, fact := range f {
+						if !fact.IsSuperseded() {
+							live = append(live, fact)
+						}
+					}
+					f = live
 				}
 				facts = append(facts, f...)
 			}
 
 			if err := exporter.Export(facts, outDir); err != nil {
 				return err
+			}
+			if warning := issues.Warning(); warning != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), warning)
 			}
 
 			graphNote := ""

@@ -496,6 +496,30 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 	if _, ok := s.scopedBatchRecaller(); ok {
 		resp.Capabilities = append(resp.Capabilities, ScopedBatchRecallV1)
 	}
+	if _, ok := s.utilityStore(); ok {
+		resp.Capabilities = append(resp.Capabilities, UtilityV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if s.citationBackend() != nil {
+		resp.Capabilities = append(resp.Capabilities, CitationEvidenceV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if s.subjectBackend() != nil {
+		resp.Capabilities = append(resp.Capabilities, SubjectHeadsV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if _, ok := s.backend.(subjectIssueCatalog); ok {
+		resp.Capabilities = append(resp.Capabilities, SubjectIssuesV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
 	weight := memory.DefaultConfidenceWeight
 	if provider, ok := s.backend.(DefaultConfidenceProvider); ok {
 		weight = provider.DefaultConfidenceWeight()

@@ -124,6 +124,12 @@ func writeObsidianNote(outDir string, f memory.Fact, noteName string) error {
 	sb.WriteString("---\n\n")
 	sb.WriteString(f.Text + "\n")
 	writeFactLineage(&sb, "\n## Lineage\n\n_Lineage scope · fact projection._\n\n", f.LineageProjection)
+	if err := writeFactSubjects(&sb, f.Subjects); err != nil {
+		return err
+	}
+	if err := writeFactCitation(&sb, f); err != nil {
+		return err
+	}
 
 	filename := fmt.Sprintf("%s.md", noteName)
 	return os.WriteFile(filepath.Join(agentDir, filename), []byte(sb.String()), 0o644)

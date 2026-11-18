@@ -83,7 +83,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		return err
 	}
 	nowT := s.now().UTC()
-	migrationErr := s.db.Update(func(tx *bolt.Tx) error {
+	migrationErr := s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		var added int64
 		if err := captureLegacyLineageTx(tx, agentID, nowT, nil, &added); err != nil {
 			return err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	bolt "go.etcd.io/bbolt"
@@ -25,7 +26,8 @@ func (s *Store) Revise(ctx context.Context, agentID, newText string, victims ...
 // The replacement's confidence is explicit or conservatively derived from the
 // validated sources. The replacement never inherits a pin.
 func (s *Store) ReviseWithOptions(ctx context.Context, agentID, target, newText string, options WriteOptions) (Fact, error) {
-	if err := options.Validate(); err != nil {
+	options = options.Clone()
+	if err := s.validateCitationOptions(options); err != nil {
 		return Fact{}, err
 	}
 	facts, err := s.List(agentID)
@@ -49,7 +51,11 @@ func (s *Store) ReviseWithOptions(ctx context.Context, agentID, target, newText 
 // returns no replacement. Once committed, the receipt is returned even if the
 // caller cancels while post-commit work runs.
 func (s *Store) ReviseFactsWithOptions(ctx context.Context, agentID, newText string, options WriteOptions, victims ...Fact) (Fact, error) {
-	if err := options.Validate(); err != nil {
+	options = options.Clone()
+	if options.HasSubjectIntent() {
+		return Fact{}, fmt.Errorf("explicit revision targets cannot be combined with subject or replaces")
+	}
+	if err := s.validateCitationOptions(options); err != nil {
 		return Fact{}, err
 	}
 	if strings.TrimSpace(newText) == "" {
@@ -102,47 +108,31 @@ func (s *Store) ReviseFactsWithOptions(ctx context.Context, agentID, newText str
 // here preserves access and decay updates without accepting changed content,
 // kind, confidence, pin state or authorship.
 func (s *Store) reviseSources(ctx context.Context, agentID, text string, options WriteOptions, sources []Fact) (Fact, error) {
+	options = options.Clone()
 	replacement, err := s.putReturningFactPrepared(ctx, agentID, text, sources[0].Kind, "", options, func(tx *bolt.Tx, replacement *Fact) error {
-		if options.Confidence == nil {
-			replacement.Confidence = derivedConfidence(sources)
-		}
 		var added int64
-		var unknown []string
-		for _, source := range sources {
-			if lineageHeadKey(tx, agentID, source.ID) == "" {
-				unknown = append(unknown, source.ID)
-			}
-		}
-		if len(unknown) != 0 {
-			if err := captureLegacyLineageTx(tx, agentID, s.now().UTC(), unknown, &added); err != nil {
-				return err
-			}
-		}
-		validated := make([]Fact, 0, len(sources))
-		for _, source := range sources {
-			current, err := factInTx(tx, agentID, source.ID)
-			if err != nil {
-				return err
-			}
-			if !sourceVersionMatches(source, current) {
-				return fmt.Errorf("%w: source %s", ErrFactChanged, source.ID)
-			}
-			validated = append(validated, current)
-		}
-		if err := recordRevisionLineageTx(tx, replacement, validated, &added); err != nil {
+		idx, err := resolveSubjectIndexTx(tx, agentID)
+		if err != nil {
 			return err
+		}
+		validated, droppedHistoricalRoot, err := s.prepareRevisionTx(tx, replacement, options, sources, &added)
+		if err != nil {
+			return err
+		}
+		var keys []string
+		for _, source := range validated {
+			keys = append(keys, idx.ByID[source.ID]...)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			prior := idx.Heads[key]
+			if err := s.advanceSubjectTx(tx, agentID, key, prior.Head.Name, &prior, replacement, &added); err != nil {
+				return err
+			}
+			replacement.Subjects = append(replacement.Subjects, SubjectProjection{Name: prior.Head.Name, Revisions: prior.Revisions + 1})
 		}
 		if err := checkEvidenceQuotaTx(tx, agentID, added); err != nil {
 			return err
-		}
-		b := tx.Bucket(bucketFacts).Bucket([]byte(agentID))
-		droppedHistoricalRoot := false
-		for _, current := range validated {
-			droppedHistoricalRoot = droppedHistoricalRoot || current.LineageStatus == LineageContentChanged
-			current.SupersededBy = replacement.ID
-			if err := s.persistFactTx(tx, b, agentID, current); err != nil {
-				return fmt.Errorf("retire source %s: %w", current.ID, err)
-			}
 		}
 		if droppedHistoricalRoot {
 			// The replacement row is inserted by the caller later in this
@@ -157,6 +147,53 @@ func (s *Store) reviseSources(ctx context.Context, agentID, text string, options
 		return Fact{}, fmt.Errorf("revise: %w", err)
 	}
 	return replacement, nil
+}
+
+// prepareRevisionTx is the common PR-R body for single revisions and atomic
+// subject batches. The caller owns the transaction-wide quota, staged roots,
+// head metadata and revision-vector marker; no nested transaction is opened.
+func (s *Store) prepareRevisionTx(tx *bolt.Tx, replacement *Fact, options WriteOptions, sources []Fact, added *int64) ([]Fact, bool, error) {
+	if options.Confidence == nil {
+		replacement.Confidence = derivedConfidence(sources)
+	}
+	var unknown []string
+	for _, source := range sources {
+		if lineageHeadKey(tx, replacement.AgentID, source.ID) == "" {
+			unknown = append(unknown, source.ID)
+		}
+	}
+	if len(unknown) > 0 {
+		if err := captureLegacyLineageTx(tx, replacement.AgentID, s.now().UTC(), unknown, added); err != nil {
+			return nil, false, err
+		}
+	}
+	validated := make([]Fact, 0, len(sources))
+	for _, source := range sources {
+		current, err := factInTx(tx, replacement.AgentID, source.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		if !sourceVersionMatches(source, current) {
+			return nil, false, fmt.Errorf("%w: source %s", ErrFactChanged, source.ID)
+		}
+		validated = append(validated, current)
+	}
+	if err := recordRevisionLineageTx(tx, replacement, validated, added); err != nil {
+		return nil, false, err
+	}
+	if err := s.recordCitationTx(tx, replacement, options, added); err != nil {
+		return nil, false, err
+	}
+	b := lineageRowBucket(tx, replacement.AgentID)
+	dropped := false
+	for _, current := range validated {
+		dropped = dropped || current.LineageStatus == LineageContentChanged
+		current.SupersededBy = replacement.ID
+		if err := s.persistFactTx(tx, b, replacement.AgentID, current); err != nil {
+			return nil, false, fmt.Errorf("retire source %s: %w", current.ID, err)
+		}
+	}
+	return validated, dropped, nil
 }
 
 // Retire tombstones facts that have nothing to replace them. Recall stops

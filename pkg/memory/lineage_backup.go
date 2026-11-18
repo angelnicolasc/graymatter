@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	bolt "go.etcd.io/bbolt"
@@ -19,10 +20,12 @@ const LineageArchiveVersion = 1
 // LineageArchive is a versioned audit export of canonical rows and retained
 // evidence. Use Backup for a complete database image including journal owners.
 type LineageArchive struct {
-	Version   int                 `json:"version"`
-	Namespace string              `json:"namespace,omitempty"`
-	Facts     []Fact              `json:"facts"`
-	Evidence  []LineageInspection `json:"evidence"`
+	Version       int                     `json:"version"`
+	Namespace     string                  `json:"namespace,omitempty"`
+	Facts         []Fact                  `json:"facts"`
+	Evidence      []LineageInspection     `json:"evidence"`
+	SubjectHeads  []SubjectHeadInspection `json:"subject_heads,omitempty"`
+	SubjectIssues *SubjectIssues          `json:"subject_issues,omitempty"`
 }
 
 // ExportLineage reads a namespace, or all namespaces if namespace is empty,
@@ -37,6 +40,10 @@ func (s *Store) ExportLineage(ctx context.Context, namespace string) (LineageArc
 			return err
 		}
 		if err := walkLineageNamespaces(tx.Bucket(bucketFacts), namespace, func(ns string, b *bolt.Bucket) error {
+			idx, err := resolveSubjectIndexTx(tx, ns)
+			if err != nil {
+				return err
+			}
 			return b.ForEach(func(id, raw []byte) error {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -54,13 +61,14 @@ func (s *Store) ExportLineage(ctx context.Context, namespace string) (LineageArc
 				if err := verifyLineageProjectionTx(ctx, tx, &f); err != nil {
 					return err
 				}
+				f.Subjects = append([]SubjectProjection(nil), idx.ByVersion[NewEvidenceSnapshot(f).key()]...)
 				out.Facts = append(out.Facts, f)
 				return nil
 			})
 		}); err != nil {
 			return err
 		}
-		return walkLineageNamespaces(tx.Bucket(bucketEvidenceSnapshots), namespace, func(ns string, b *bolt.Bucket) error {
+		if err := walkLineageNamespaces(tx.Bucket(bucketEvidenceSnapshots), namespace, func(ns string, b *bolt.Bucket) error {
 			records, _ := evidenceNamespace(tx, bucketLineageRecords, ns, false)
 			return b.ForEach(func(key, _ []byte) error {
 				if err := ctx.Err(); err != nil {
@@ -68,6 +76,9 @@ func (s *Store) ExportLineage(ctx context.Context, namespace string) (LineageArc
 				}
 				entry, err := evidenceEntry(b, string(key))
 				if err != nil {
+					if _, damaged := damagedSubjectSnapshotTx(tx, ns, string(key)); damaged {
+						return nil
+					}
 					return err
 				}
 				if entry.Snapshot.Namespace != ns {
@@ -76,6 +87,10 @@ func (s *Store) ExportLineage(ctx context.Context, namespace string) (LineageArc
 				item := LineageInspection{
 					Snapshot:          &entry.Snapshot,
 					LineageProjection: LineageProjection{ContentHash: entry.Snapshot.ContentHash},
+				}
+				item.Evidence, err = citationAtTx(tx, ns, string(key))
+				if err != nil {
+					return err
 				}
 				record, found, err := lineageRecordAt(records, ns, string(key))
 				if err != nil {
@@ -88,7 +103,32 @@ func (s *Store) ExportLineage(ctx context.Context, namespace string) (LineageArc
 				out.Evidence = append(out.Evidence, item)
 				return nil
 			})
+		}); err != nil {
+			return err
+		}
+		var issues SubjectIssues
+		err := walkLineageNamespaces(tx.Bucket(bucketSubjectHeads), namespace, func(ns string, _ *bolt.Bucket) error {
+			idx, err := resolveSubjectIndexTx(tx, ns)
+			if err != nil {
+				return err
+			}
+			issues.add(ns, idx)
+			keys := make([]string, 0, len(idx.Heads))
+			for key := range idx.Heads {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				h := idx.Heads[key].Head
+				out.SubjectHeads = append(out.SubjectHeads, SubjectHeadInspection{Namespace: ns, Name: h.Name, Reference: h.Reference, Revisions: h.Revisions, State: h.State})
+			}
+			return nil
 		})
+		out.SubjectIssues = issues.nonempty()
+		return err
 	})
 	if err != nil {
 		return LineageArchive{}, err
@@ -177,6 +217,12 @@ func RestoreLineageBackup(ctx context.Context, reader io.Reader, destination str
 }
 
 func validateLineageBackup(ctx context.Context, tx *bolt.Tx) error {
+	if err := validateSubjectBackupTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := validateCitationBackupTx(ctx, tx); err != nil {
+		return err
+	}
 	if err := walkLineageNamespaces(tx.Bucket(bucketEvidenceSnapshots), "", func(ns string, b *bolt.Bucket) error {
 		return b.ForEach(func(key, _ []byte) error {
 			if err := ctx.Err(); err != nil {

@@ -24,11 +24,36 @@ type returningFactWriter interface {
 // Select the route before dispatch. A failure after invoking a writer never
 // permits a fallback write because the first operation may have committed.
 func (s *Server) putWithIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if hasSubjectIntent(opts) {
+		if !supportsSubjects(s.backend) {
+			return memory.Fact{}, memory.ErrSubjectUnsupported
+		}
+		writer, ok := s.backend.(subjectWriter)
+		if !ok {
+			return memory.Fact{}, memory.ErrSubjectUnsupported
+		}
+		receipts, err := writer.PutManyReturningReceipts(ctx, agentID, []memory.WriteFact{{Text: text, Options: opts}})
+		if len(receipts) == 1 {
+			return confirmedIdentity(receipts[0].Fact, err)
+		}
+		if err != nil {
+			return memory.Fact{}, err
+		}
+		return memory.Fact{}, errors.New("subject write returned no committed identity")
+	}
+	if opts.Source != nil || opts.Quote != nil {
+		if support, ok := s.backend.(interface{ SupportsCitationEvidence() bool }); !ok || !support.SupportsCitationEvidence() {
+			return memory.Fact{}, memory.ErrCitationUnsupported
+		}
+	}
 	if writer, ok := s.backend.(optionalIdentityWriter); ok {
 		return writer.PutWithOptionalIdentity(ctx, agentID, text, opts)
 	}
 	if writer, ok := s.backend.(confidenceWriter); ok {
 		return confirmedIdentity(writer.PutWithOptionsReturningFact(ctx, agentID, text, opts))
+	}
+	if opts.HasEvidence() {
+		return memory.Fact{}, memory.ErrCitationUnsupported
 	}
 	if opts.Confidence != nil {
 		return memory.Fact{}, memory.ErrConfidenceUnsupported
@@ -112,6 +137,24 @@ func confidenceWeightSchema() mcp.ToolOption {
 
 func writeOptions(args map[string]any) (memory.WriteOptions, error) {
 	var opts memory.WriteOptions
+	for _, field := range []struct {
+		name string
+		dst  **string
+	}{{"source", &opts.Source}, {"quote", &opts.Quote}, {"subject", &opts.Subject}} {
+		if value, present := args[field.name]; present {
+			literal, ok := value.(string)
+			if !ok {
+				return opts, fmt.Errorf("%s must be a string", field.name)
+			}
+			*field.dst = &literal
+		}
+	}
+	if value, present := args["replaces"]; present {
+		raw, err := json.Marshal(value)
+		if err != nil || json.Unmarshal(raw, &opts.Replaces) != nil || opts.Replaces == nil {
+			return opts, fmt.Errorf("replaces must be a non-empty array of IDs")
+		}
+	}
 	if value, present := args["confidence"]; present {
 		s, ok := value.(string)
 		if !ok {
@@ -161,6 +204,9 @@ func recallOptions(args map[string]any) (memory.RecallOptions, error) {
 func (s *Server) confidenceGuard(tool string, next func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
+		if err := s.citationArguments(tool, args); err != nil {
+			return toolError(err.Error())
+		}
 		for _, key := range []string{"confidence", "min_confidence", "confidence_weight"} {
 			if _, present := args[key]; !present {
 				continue

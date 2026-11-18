@@ -206,7 +206,7 @@ func TestCheckpointResumeBackendFailure(t *testing.T) {
 
 func TestCheckpointResumeWrappedAbsence(t *testing.T) {
 	cause := fmt.Errorf("backend: %w", session.ErrNoCheckpoint)
-	s := New(resumeErrorBackend{err: cause}, "test")
+	s := New(resumeErrorBackend{err: cause}, "test", WithFullCatalog())
 	res, err := s.handleCheckpointResume(context.Background(), reflectReq(map[string]any{"agent_id": "sc-a"}))
 	if err != nil || !res.IsError || res.StructuredContent != nil {
 		t.Fatalf("result = %+v, error = %v; want text-only tool error", res, err)
