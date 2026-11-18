@@ -31,7 +31,7 @@ or refuses outright when `GOTOOLCHAIN=local` — which is what container images
 set. The shipped binary is built without CGO; that constraint is about the
 release artifact, not about your machine. See the note on `-race` below.
 
-`cmd/graymatter/go.mod` additionally declares `toolchain go1.26.9`. That line is
+`cmd/graymatter/go.mod` additionally declares `toolchain go1.26.11`. That line is
 inert inside the workspace (go.work governs toolchain selection there), but it
 means someone running `go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest`
 on an older Go gets a binary linked against a patched standard library rather

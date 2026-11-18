@@ -1,7 +1,7 @@
 // Package embedding provides pluggable vector embedding backends for GrayMatter.
 //
 // Auto-detection order:
-//  1. Ollama (default — fires a HEAD to /api/tags)
+//  1. Ollama (default — sends GET /api/tags)
 //  2. OpenAI API (if OPENAI_API_KEY is set)
 //  3. Voyage AI API (if VOYAGE_API_KEY is set)
 //  4. Keyword-only fallback (zero network deps)
@@ -13,6 +13,9 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/angelnicolasc/graymatter/internal/providerhttp"
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 // maxErrorBodyBytes caps how much of a non-200 response body goes into an
@@ -70,6 +73,21 @@ type Config struct {
 	VoyageAPIKey    string
 	OpenAIAPIKey    string
 	OpenAIModel     string // defaults to text-embedding-3-small
+	OpenAIBaseURL   string // empty uses OPENAI_BASE_URL or https://api.openai.com/v1
+	VoyageBaseURL   string // empty uses VOYAGE_BASE_URL or https://api.voyageai.com/v1
+}
+
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+func newEmbeddingHTTPClient(provider, baseURL string) (string, httpDoer, error) {
+	base, err := providerurl.Parse(provider, baseURL)
+	if err != nil {
+		return "", nil, err
+	}
+	client := providerhttp.New(provider, base, &http.Client{Timeout: 30 * time.Second})
+	return providerurl.Endpoint(base, "embeddings"), client, nil
 }
 
 // AutoDetect selects the best available Provider given cfg.
@@ -115,7 +133,7 @@ func voyageOrKeyword(cfg Config) Provider {
 	return NewKeyword()
 }
 
-// ollamaReachable does a fast HEAD probe to check if Ollama is up.
+// ollamaReachable does a fast GET probe to check if Ollama is up.
 // Only a 200 counts as reachable: a captive portal or proxy answers 404/302
 // for unknown paths, and treating that as "Ollama is here" sends every
 // embedding into guaranteed-failing calls whose failures Put then swallows.

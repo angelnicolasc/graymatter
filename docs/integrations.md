@@ -90,6 +90,44 @@ service working directory and does not infer a remote client's project. See
 [project routing and migration](runtime-project-routing.md) before reusing a
 user-scoped registration across worktrees.
 
+## Provider endpoints
+
+Set the matching environment variable in the CLI or MCP server process.
+Set the Go field to configure a specific library instance.
+
+| Go field | Environment variable | Default base | Request path appended |
+|-----------|----------------------|--------------|-----------------------|
+| `AnthropicBaseURL` | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | `v1/messages` |
+| `OpenAIBaseURL` | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | `embeddings` |
+| `VoyageBaseURL` | `VOYAGE_BASE_URL` | `https://api.voyageai.com/v1` | `embeddings` |
+
+For example, `OPENAI_BASE_URL=https://gateway.example/tenant/v1` sends
+embedding requests to `/tenant/v1/embeddings`. An Anthropic base of
+`https://gateway.example/tenant` sends Messages requests to `/tenant/v1/messages`.
+An Anthropic base ending in `/v1` produces `/v1/v1/messages`.
+Use absolute HTTP or HTTPS bases. Provider selection, credentials and model
+requirements still apply when using a gateway.
+
+```go
+cfg := graymatter.DefaultConfig()
+cfg.DataDir = ".graymatter"
+cfg.OpenAIBaseURL = "https://gateway.example/tenant/v1"
+mem, err := graymatter.NewWithConfig(cfg)
+```
+
+A nonempty field wins over the environment. An empty field can use its matching
+environment variable, and an empty variable uses the official base. Invalid
+active bases produce a configuration error. Invalid URLs for inactive embeddings
+providers do not prevent a keyword-only or Ollama store from opening.
+
+`DefaultConfig` captures the current values. Each `Memory` keeps its effective
+bases for its lifetime. Standalone graph extractors and `graymatter run` capture
+their Anthropic URL when prepared. A running daemon uses its own startup
+environment. Stop and restart it with the new environment to change its destinations.
+
+Anthropic, OpenAI and Voyage follow only HTTP 307 and 308 redirects to the same
+origin, preserving POST. This policy applies to official and custom URLs.
+
 ## Prepared-store admission for MCP (opt-in)
 
 The default `graymatter mcp serve` can create a valid missing store. To require

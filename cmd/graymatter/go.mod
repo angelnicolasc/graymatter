@@ -14,7 +14,7 @@ go 1.25.5
 //
 // It also has no effect on this repo's own builds, which run in the go.work
 // workspace, where go.work's directives govern toolchain selection.
-toolchain go1.26.9
+toolchain go1.26.11
 
 // The library is developed one directory up in the same checkout. The
 // go.work workspace at the repo root maps that dependency to the checkout for

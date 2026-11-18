@@ -7,6 +7,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ---
 
 ## [Unreleased]
+### Added
+
+- **Configurable provider endpoints.** Anthropic, OpenAI and Voyage accept
+  base URLs from Go `Config` fields or matching environment variables. A daemon
+  uses its startup configuration. Provider redirects preserve POST and stay on
+  the configured origin.
 
 ---
 

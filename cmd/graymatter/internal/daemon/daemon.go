@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 
 	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
@@ -68,6 +70,10 @@ func Run(opts RunOptions) error {
 
 	mem, err := graymatter.NewWithConfig(cfg)
 	if err != nil {
+		var invalidURL *providerurl.ConfigError
+		if errors.As(err, &invalidURL) {
+			logf("daemon: code=%s provider=%s reason=%s", providerurl.Code, invalidURL.Provider, invalidURL.Reason)
+		}
 		return fmt.Errorf("daemon: %w", err)
 	}
 	defer func() { _ = mem.Close() }()

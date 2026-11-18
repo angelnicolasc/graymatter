@@ -1,17 +1,27 @@
 package kg
 
 import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 // The LLM extractor is opt-in, so its failure modes must be invisible to the
 // graph: every degradation lands on the regex extractor, and model noise
 // (unknown types/relations) is dropped at the schema gate rather than stored.
 
-func TestLLMFallback_DelegatesToRegexOnTransportError(t *testing.T) {
+func TestLLMFallback_DelegatesToRegexOnProviderError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
 	f := NewLLMExtractor("test-key", "").(*llmFallback)
-	// No ANTHROPIC_BASE_URL override and a bogus key: transport fails.
 	nodes, _, err := f.Extract("Maria Rodriguez joined Acme Corp.")
 	if err != nil {
 		t.Fatalf("fallback must swallow the transport error: %v", err)
@@ -27,6 +37,58 @@ func TestLLMFallback_DelegatesToRegexOnTransportError(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("regex fallback missed known entity; got %v", nodeLabels(nodes))
+	}
+}
+
+func TestKGExtractorSnapshotsAnthropicBase(t *testing.T) {
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	gateway := func(prefix, entity string) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var payload struct{ Model string }
+			err := json.NewDecoder(r.Body).Decode(&payload)
+			if err != nil || payload.Model != "synthetic-kg-model" || r.Method != http.MethodPost ||
+				r.URL.Path != prefix+"/v1/messages" || r.Header.Get("x-api-key") != "fake-kg-key" {
+				t.Errorf("unexpected extraction request: %s %s %+v, %v", r.Method, r.URL.Path, payload, err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			content := `{"nodes":[{"label":"` + entity + `","entity_type":"concept"}],"edges":[]}`
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content": []map[string]string{{"type": "text", "text": content}},
+			})
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	a := gateway("/first", "synthetic entity A")
+	b := gateway("/second", "synthetic entity B")
+	t.Setenv("ANTHROPIC_BASE_URL", a.URL+"/first")
+	first := NewLLMExtractor("fake-kg-key", "synthetic-kg-model")
+	t.Setenv("ANTHROPIC_BASE_URL", b.URL+"/second/")
+	second := NewLLMExtractor("fake-kg-key", "synthetic-kg-model")
+	for _, tc := range []struct {
+		extractor EntityExtractor
+		entity    string
+	}{{first, "synthetic entity A"}, {second, "synthetic entity B"}, {first, "synthetic entity A"}} {
+		nodes, _, err := tc.extractor.Extract("Source text without the fixture entity.")
+		if err != nil || len(nodes) != 1 || nodes[0].Label != tc.entity {
+			t.Fatalf("extract = %+v, %v; want %q", nodes, err, tc.entity)
+		}
+	}
+
+	t.Setenv("ANTHROPIC_BASE_URL", "https://dummy:KG-CANARY@127.0.0.1")
+	invalid := NewLLMExtractor("fake-kg-key", "").(*llmFallback)
+	var urlError *providerurl.ConfigError
+	if _, _, err := invalid.llm.Extract("source"); !errors.As(err, &urlError) || strings.Contains(err.Error(), "KG-CANARY") {
+		t.Fatalf("invalid initializer error = %v", err)
+	}
+	text := "Maria Rodriguez joined Acme Corp."
+	nodes, _, err := invalid.Extract(text)
+	if err != nil || len(nodes) == 0 {
+		t.Fatalf("invalid URL fallback = %+v, %v", nodes, err)
+	}
+	nodes, _, err = NewExtractor(ExtractorConfig{}).Extract(text)
+	if err != nil || len(nodes) == 0 {
+		t.Fatalf("explicit regex with inactive invalid URL = %+v, %v", nodes, err)
 	}
 }
 

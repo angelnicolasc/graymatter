@@ -77,6 +77,9 @@ func TestRunBackgroundPersistsPrintedSessionAndSupportsControl(t *testing.T) {
 	var requestCount atomic.Int32
 	var blockedOnce, doneOnce sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/background-gateway/v1/messages" {
+			t.Errorf("background request = %s %s", r.Method, r.URL.Path)
+		}
 		if requestCount.Add(1) == 1 {
 			http.Error(w, "intentional first-attempt failure", http.StatusBadRequest)
 			return
@@ -110,7 +113,7 @@ func TestRunBackgroundPersistsPrintedSessionAndSupportsControl(t *testing.T) {
 	env := []string{
 		"ANTHROPIC_API_KEY=background-e2e",
 		"ANTHROPIC_AUTH_TOKEN=",
-		"ANTHROPIC_BASE_URL=" + server.URL,
+		"ANTHROPIC_BASE_URL=" + server.URL + "/background-gateway",
 		"OPENAI_API_KEY=",
 		"VOYAGE_API_KEY=",
 		"GRAYMATTER_OLLAMA_URL=disabled://background-session-e2e",

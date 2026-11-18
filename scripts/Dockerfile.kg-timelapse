@@ -14,7 +14,7 @@
 #   -v C:\Users\you\AppData\Local\Temp\kg-timelapse-out:/out
 #
 # Artifacts land in /out: frames/*.dot, frames/*.png and kg-timelapse.gif.
-FROM golang:1.26-bookworm
+FROM golang:1.26.11-bookworm
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends graphviz imagemagick ca-certificates \

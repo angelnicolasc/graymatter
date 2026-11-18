@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -639,8 +638,11 @@ func consolidateViaAnthropic(ctx context.Context, prompt string, cfg Consolidate
 	if key == "" {
 		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
-	client := anthropic.NewClient(option.WithAPIKey(key))
-	msg, err := client.Messages.New(ctx, anthropic.MessageNewParams{
+	messages, err := newAnthropicMessages(cfg, key)
+	if err != nil {
+		return "", err
+	}
+	msg, err := messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(cfg.GetConsolidateModel()),
 		MaxTokens: 512,
 		Messages: []anthropic.MessageParam{

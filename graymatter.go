@@ -16,6 +16,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 	"github.com/angelnicolasc/graymatter/pkg/embedding"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -74,23 +75,38 @@ func New(dataDir string) *Memory {
 }
 
 // NewWithConfig creates a Memory with explicit configuration.
-// Returns an error if the data directory cannot be created or the
-// database cannot be opened.
+// Provider base URLs are selected when the handle is constructed. An invalid
+// base URL for an active provider prevents store initialization.
 func NewWithConfig(cfg Config) (*Memory, error) {
+	cfg.AnthropicBaseURL = providerurl.Select(cfg.AnthropicBaseURL, providerurl.AnthropicEnv, providerurl.AnthropicDefault)
+	cfg.OpenAIBaseURL = providerurl.Select(cfg.OpenAIBaseURL, providerurl.OpenAIEnv, providerurl.OpenAIDefault)
+	cfg.VoyageBaseURL = providerurl.Select(cfg.VoyageBaseURL, providerurl.VoyageEnv, providerurl.VoyageDefault)
+	if cfg.AnthropicAPIKey != "" {
+		if _, err := providerurl.Parse("anthropic", cfg.AnthropicBaseURL); err != nil {
+			return nil, fmt.Errorf("graymatter: %w", err)
+		}
+	}
+
+	embedder := embedding.AutoDetect(embedding.Config{
+		Mode:          embedding.Mode(cfg.EmbeddingMode),
+		OllamaURL:     cfg.OllamaURL,
+		OllamaModel:   cfg.OllamaModel,
+		VoyageAPIKey:  cfg.VoyageAPIKey,
+		VoyageBaseURL: cfg.VoyageBaseURL,
+		OpenAIAPIKey:  cfg.OpenAIAPIKey,
+		OpenAIBaseURL: cfg.OpenAIBaseURL,
+		OpenAIModel:   cfg.OpenAIModel,
+	})
+	if initialized, ok := embedder.(interface{ InitializationError() error }); ok {
+		if err := initialized.InitializationError(); err != nil {
+			return nil, fmt.Errorf("graymatter: %w", err)
+		}
+	}
 	if !cfg.ReadOnly || cfg.StrictWrite {
 		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 			return nil, fmt.Errorf("graymatter: create data dir: %w", err)
 		}
 	}
-
-	embedder := embedding.AutoDetect(embedding.Config{
-		Mode:         embedding.Mode(cfg.EmbeddingMode),
-		OllamaURL:    cfg.OllamaURL,
-		OllamaModel:  cfg.OllamaModel,
-		VoyageAPIKey: cfg.VoyageAPIKey,
-		OpenAIAPIKey: cfg.OpenAIAPIKey,
-		OpenAIModel:  cfg.OpenAIModel,
-	})
 
 	store, err := memory.Open(memory.StoreConfig{
 		DataDir:                 cfg.DataDir,
