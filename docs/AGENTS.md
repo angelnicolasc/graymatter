@@ -70,8 +70,9 @@ via `fact_id` and `content_hash` remains callable. See
 
 Core also supports [current facts by subject](subject-memory.md): optional
 `subject` or `replaces` on writes, atomic replacement receipts, short IDs in search and revision counts with `explain`, and `target_type` for explicit ID/text curation.
-Similarity only suggests candidates and never retires a fact. `full` retains
-its legacy schema and rejects these new options. See that guide for Unicode
+Similarity only suggests candidates and never retires a fact. In `full`, a
+valid `memory_add` call stores an ordinary fact even if `subject` or `replaces`
+is present. Use `core` to apply those options. See that guide for Unicode
 normalization, concurrent writes, evidence retention and import restrictions.
 
 Seven tools are registered by `graymatter mcp serve` (see [`cmd/graymatter/internal/mcp/server.go`](../cmd/graymatter/internal/mcp/server.go)). **Parameter names are not uniform** — check the table before calling.

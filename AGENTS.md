@@ -5,8 +5,9 @@ MCP discovery defaults to `full` with all seven tools and the complete briefing.
 In `core`, writes accept optional `source` and literal `quote`; search returns
 whole escaped evidence or a version marker. Fetch a marker using `agent_id`,
 `fact_id` and `content_hash` instead of query/queries. See
-[citation evidence](docs/citation-evidence.md) for limits and retention. These
-parameters are rejected by `full`.
+[citation evidence](docs/citation-evidence.md) for limits and retention. In
+`full`, a valid `memory_add` call stores the text and ignores `source` and
+`quote`. Use `core` to persist citations or fetch evidence by version.
 
 Core writes can declare `subject` to replace the current fact for that topic,
 or `replaces` with concrete IDs. Search returns addressable IDs; reflect accepts
@@ -46,8 +47,8 @@ a pending checkpoint, call `checkpoint_resume`; close saved work with
 `checkpoint_save` state `{"status":"complete"}` encoded as a JSON string.
 
 `full` preserves legacy schemas, responses and single-namespace searches.
-The new `scope`, `queries` on `memory_search`, and `facts` on `memory_add`
-require `core`; `full` rejects them with profile guidance. The hidden
+In `full`, `memory_search` requires `query` and ignores `scope` and `queries`;
+`memory_add` requires `text` and ignores `facts`. Use `core` for those options. The hidden
 `memory_search_batch` uses the same compact, combined search in `core` and
 retains its legacy contract in `full`.
 Unsupported compact operations on an older daemon return an update/restart
