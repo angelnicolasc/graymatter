@@ -168,7 +168,7 @@ func TestLineageArchiveRPCRejectsOversizedSnapshotWithoutPartialRows(t *testing.
 }
 
 func TestPU07LineageArchiveBoundsSubjectMetadata(t *testing.T) {
-	ctx := t.Context()
+	ctx := context.Background()
 	archive := memory.LineageArchive{Version: memory.LineageArchiveVersion, Facts: []memory.Fact{{Text: ""}}}
 	initial, err := encodeLineageArchive(ctx, archive)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestPU07LineageArchiveBoundsSubjectMetadata(t *testing.T) {
 		{"subject_issues", withIssue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := encodeLineageArchive(t.Context(), tc.archive)
+			got, err := encodeLineageArchive(context.Background(), tc.archive)
 			if !errors.Is(err, ErrLineageArchiveTooLarge) || !reflect.DeepEqual(got, LineageArchiveResponse{}) {
 				t.Fatalf("oversized metadata returned a partial archive or hid its reason: err=%v", err)
 			}
@@ -243,7 +243,7 @@ func TestPU07LineageArchiveRejectsPartialLegacyPeer(t *testing.T) {
 	client := &Client{rpc: netrpc.NewClientWithCodec(jsonrpc.NewClientCodec(clientConn)), conn: clientConn, callTimeout: time.Second}
 	t.Cleanup(func() { _ = client.Close(); _ = serverConn.Close() })
 
-	ctx := t.Context()
+	ctx := context.Background()
 	if lineage, err := client.InspectLineage(ctx, "project", "kept", ""); err != nil || lineage.ContentHash != "available" {
 		t.Fatalf("old peer should still support inspection: %+v, %v", lineage, err)
 	}
