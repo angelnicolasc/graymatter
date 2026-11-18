@@ -354,7 +354,10 @@ missing entries. If the native index is unreadable and the store has
 revision history or pending writes, writable recovery queues the live
 canonical embeddings before quarantining and rebuilding the derived index.
 Read-only opens and repairs that cannot proceed serve canonical recall in
-degraded mode. A subsequent writable open can resume recovery.
+degraded mode. When a damaged index needs quarantine, open the store using
+its resolved absolute directory path. A symlink in that path or a Windows
+short-name alias can prevent quarantine. Recovery leaves a redirected index
+directory in place. A subsequent writable open can resume recovery.
 Keyword-only search remains supported without a vector capability.
 Concurrent confidence updates cannot mix eligibility with different receipt
 metadata. Once a query embedding exists, an overlapping alias edit that changes

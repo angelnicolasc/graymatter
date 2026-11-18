@@ -60,8 +60,14 @@ func makeNativeRecoveryFixture(t *testing.T) nativeRecoveryFixture {
 
 func seedNativeRecoveryFixture(t *testing.T, pending bool) nativeRecoveryFixture {
 	t.Helper()
+	// Positive quarantine cases need a physical store path. The system temp
+	// directory can contain symlinks (macOS) or 8.3 aliases (Windows).
+	dataDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := StoreConfig{
-		DataDir: t.TempDir(), Embedder: nativeRecoveryEmbedder{},
+		DataDir: dataDir, Embedder: nativeRecoveryEmbedder{},
 		CandidateRetrieval: true, StrictWrite: true,
 	}
 	s, err := Open(cfg)
@@ -170,6 +176,7 @@ func TestNativeVectorRecoveryReplaysTornDeliveryAcrossNamespaces(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = s.Close() })
 		requireNativeRecoveryCanonical(t, s, f)
+		requireWritableNativeVectors(t, s)
 		if count := s.PendingVectorCount(); count != 0 {
 			t.Fatalf("open %d has %d outstanding vectors", i+1, count)
 		}
@@ -223,24 +230,30 @@ func TestNativeVectorRecoveryReadOnlyUsesCanonicalFallback(t *testing.T) {
 }
 
 func TestNativeVectorRecoveryLeavesUnsafePathInPlace(t *testing.T) {
-	for _, kind := range []string{"file", "symlink"} {
+	for _, kind := range []string{"file", "symlink", "parent-symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			f := makeNativeRecoveryFixture(t)
-			index := filepath.Join(f.cfg.DataDir, "vectors")
-			parked := filepath.Join(f.cfg.DataDir, "fixture-index")
-			if err := os.Rename(index, parked); err != nil {
-				t.Fatal(err)
-			}
-			switch kind {
-			case "file":
-				if err := os.WriteFile(index, []byte("preserve this file"), 0o600); err != nil {
+			if kind == "parent-symlink" {
+				alias := filepath.Join(t.TempDir(), "store-link")
+				if err := os.Symlink(f.cfg.DataDir, alias); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				f.cfg.DataDir = alias
+			} else {
+				index := filepath.Join(f.cfg.DataDir, "vectors")
+				parked := filepath.Join(f.cfg.DataDir, "fixture-index")
+				if err := os.Rename(index, parked); err != nil {
 					t.Fatal(err)
 				}
-			case "symlink":
-				if err := os.Symlink(parked, index); err != nil {
+				if kind == "file" {
+					if err := os.WriteFile(index, []byte("preserve this file"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.Symlink(parked, index); err != nil {
 					t.Skipf("symlinks unavailable: %v", err)
 				}
 			}
+			index := filepath.Join(f.cfg.DataDir, "vectors")
 			before, err := os.Lstat(index)
 			if err != nil {
 				t.Fatal(err)
@@ -252,6 +265,15 @@ func TestNativeVectorRecoveryLeavesUnsafePathInPlace(t *testing.T) {
 			defer s.Close()
 			requireNativeRecoveryCanonical(t, s, f)
 			requireNativeRecoveryRanking(t, s, f.replacement, 0, "pending_vector_index")
+			if kind == "parent-symlink" {
+				fallback, ok := s.vectors.(unavailableVectorStore)
+				if !ok || fallback.cause == nil || !strings.Contains(fallback.cause.Error(), "redirected index directory") {
+					t.Fatalf("redirected parent must prevent quarantine: %T, %v", s.vectors, fallback.cause)
+				}
+				if torn, err := os.Stat(f.tornPath); err != nil || torn.Size() != 0 {
+					t.Fatalf("redirected parent changed the torn document: %v, %v", torn, err)
+				}
+			}
 			if count := s.PendingVectorCount(); count != 1 {
 				t.Fatalf("unsafe vector path changed the pending marker: %d", count)
 			}
@@ -380,12 +402,21 @@ func requireAcknowledgedVectorReadOnlyFallback(t *testing.T, f nativeRecoveryFix
 	}
 }
 
-func requireActualNativeDocuments(t *testing.T, s *Store, facts ...Fact) {
+func requireWritableNativeVectors(t *testing.T, s *Store) *chromemVectorStore {
 	t.Helper()
+	if fallback, ok := s.vectors.(unavailableVectorStore); ok {
+		t.Fatalf("writable repair left the native index unavailable: %v", fallback.cause)
+	}
 	vectors, ok := s.vectors.(*chromemVectorStore)
 	if !ok {
 		t.Fatalf("writable repair did not restore the native backend: %T", s.vectors)
 	}
+	return vectors
+}
+
+func requireActualNativeDocuments(t *testing.T, s *Store, facts ...Fact) {
+	t.Helper()
+	vectors := requireWritableNativeVectors(t, s)
 	for _, want := range facts {
 		collection := vectors.db.GetCollection(want.AgentID, nil)
 		if collection == nil {
