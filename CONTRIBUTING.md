@@ -31,9 +31,9 @@ or refuses outright when `GOTOOLCHAIN=local` — which is what container images
 set. The shipped binary is built without CGO; that constraint is about the
 release artifact, not about your machine. See the note on `-race` below.
 
-`cmd/graymatter/go.mod` recommends `toolchain go1.26.10` for standalone
+`cmd/graymatter/go.mod` recommends `toolchain go1.26.11` for standalone
 builds of the CLI checkout. Workspace builds use `go.work` for toolchain
-selection. For a versioned installation, set `GOTOOLCHAIN=go1.26.10` to build
+selection. For a versioned installation, set `GOTOOLCHAIN=go1.26.11` to build
 with that patch. Keep the Go versions used by CI, release and maintenance
 workflows aligned with the CLI pin. CI runs `govulncheck` on both modules.
 

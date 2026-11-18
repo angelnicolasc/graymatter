@@ -50,7 +50,7 @@ func parallelCIErrors(body string) []string {
 		header := strings.SplitN(job, "    steps:\n", 2)[0]
 		for _, fragment := range []string{
 			"runs-on: ${{ matrix.os }}", "fail-fast: false",
-			"os: [ubuntu-latest, macos-latest, windows-latest]", `go: ["1.25", "1.26.10"]`,
+			"os: [ubuntu-latest, macos-latest, windows-latest]", `go: ["1.25", "1.26.11"]`,
 		} {
 			require(header, fragment)
 		}

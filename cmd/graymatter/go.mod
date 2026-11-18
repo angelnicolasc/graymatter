@@ -3,10 +3,10 @@ module github.com/angelnicolasc/graymatter/cmd/graymatter
 go 1.25.5
 
 // Recommend the patched toolchain for standalone builds of this module.
-// Go 1.26.10 fixes the crypto/x509 issue tracked as GO-2026-6809.
+// Go 1.26.11 includes the net/http fix for GO-2026-6859.
 // The go directive sets the minimum supported version. Builds inside go.work
 // and versioned go install commands select their toolchain independently.
-toolchain go1.26.10
+toolchain go1.26.11
 
 // The library is developed one directory up in the same checkout. The
 // go.work workspace at the repo root maps that dependency to the checkout for
