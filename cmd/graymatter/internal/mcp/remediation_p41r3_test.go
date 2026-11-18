@@ -30,13 +30,24 @@ func TestRP41SubjectAlternatives(t *testing.T) {
 			second := add(current, topic)
 			unrelated := add("Sheet size is A4", other)
 			if profile == ToolsFull {
-				const want = "subject requires the core tools profile; restart mcp serve --tools core"
-				for i, got := range []utilityContractResult{
-					first, second, add("Same", topic, "01M70000"),
-					add("Wrong", topic, "01M70001"), add("Recover", topic, "01M70002"),
+				oldID, _ := first.Structured["fact_id"].(string)
+				if oldID == "" {
+					t.Fatalf("first ordinary add did not return a fact identity: %s", first.Raw)
+				}
+				for _, got := range []utilityContractResult{
+					first, second, unrelated, add("Retain the old fact.", topic, oldID),
 				} {
-					if !got.IsError || got.text() != want {
-						t.Errorf("full case %d: %s", i, got.Raw)
+					if got.IsError || got.Structured["stored"] != true {
+						t.Fatalf("full did not perform an ordinary add: %s", got.Raw)
+					}
+				}
+				facts, err := mem.Advanced().List(agent)
+				if err != nil || len(facts) != 4 {
+					t.Fatalf("full ordinary facts: %+v / %v", facts, err)
+				}
+				for _, fact := range facts {
+					if fact.IsSuperseded() {
+						t.Fatalf("full applied a subject replacement: %+v", fact)
 					}
 				}
 				return

@@ -13,7 +13,7 @@ const subjectWriteAlternatives = "subject and replaces are alternatives"
 func (s *Server) coreAddOptions(ctx context.Context, namespace string, args map[string]any) (memory.WriteOptions, error) {
 	opts, err := writeOptions(args)
 	if err != nil && err.Error() == subjectWriteAlternatives && opts.Subject != nil {
-		for _, id := range opts.Replaces {
+		for _, id := range opts.Replaces.IDs() {
 			missing := fmt.Errorf("target ID %q%s", id, missingCanonicalTarget)
 			if detail := s.targetIDDiagnostic(ctx, namespace, missing); detail != missing.Error() {
 				return opts, fmt.Errorf("%s", detail)
@@ -31,7 +31,7 @@ func (s *Server) coreAddError(ctx context.Context, namespace string, inputs []me
 		var rows []int
 		for i, input := range inputs {
 			opts := input.Options
-			if opts.Subject != nil && len(opts.Replaces) == 1 {
+			if opts.Subject != nil && len(opts.Replaces.IDs()) == 1 {
 				guidance = append(guidance, s.subjectAlternativeError(ctx, namespace, opts).Error())
 				rows = append(rows, i)
 			}
@@ -56,7 +56,7 @@ func (s *Server) subjectAlternativeError(ctx context.Context, namespace string, 
 	if ok {
 		var guidance []string
 		var subjects map[string]string
-		for _, target := range opts.Replaces {
+		for _, target := range opts.Replaces.IDs() {
 			selected, err := resolver.ResolveFactTargets(ctx, namespace, target, "id", true)
 			if err != nil || len(selected) != 1 || selected[0].AgentID != namespace {
 				continue

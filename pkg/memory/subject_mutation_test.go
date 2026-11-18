@@ -15,7 +15,7 @@ func TestSubjectPinnedIDReplacesUsesCompleteMutationSnapshot(t *testing.T) {
 	if err := s.SetPinned(subjectNS, true, old); err != nil {
 		t.Fatal(err)
 	}
-	receipts, err := s.PutManyReturningReceipts(ctx, subjectNS, []WriteFact{{Text: "policy current", Options: WriteOptions{Replaces: []string{old.ID}}}})
+	receipts, err := s.PutManyReturningReceipts(ctx, subjectNS, []WriteFact{{Text: "policy current", Options: WriteOptions{Replaces: testReplacementIDs(t, old.ID)}}})
 	if err != nil {
 		t.Fatal(err)
 	}

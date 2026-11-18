@@ -13,9 +13,10 @@ without either field remain independent facts.
 Both fields are available on `memory_add`, including each object in `facts`,
 and on `memory_reflect` with `action: "add"`. An explicit reflect `update`
 already selects its victims with `target`; it cannot combine a second write
-intention. `full` preserves its earlier input schema and rejects these fields
-with profile guidance. An unsupported daemon reports an update/restart error
-before dispatching the new operation.
+intention. In `full`, a valid legacy `memory_add` with `text` still stores
+an ordinary fact when these extra fields are present. Subject-based writes
+require `core`. An unsupported daemon reports an update/restart error before
+dispatching the new operation.
 
 ```json
 {"agent_id":"project","text":"The retention period is 11 days.","subject":"retention policy"}

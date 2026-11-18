@@ -28,12 +28,16 @@ func TestSubjectOptionalIdentityRejectsUnsupportedIntentBeforeLegacyWrite(t *tes
 	backend := &subjectLegacyStore{}
 	r := newReconnectingStoreAt(backend, func() (cliStore, error) { t.Fatal("unsupported intent reconnected"); return nil, nil })
 	subject, source, quote := "topic", "document", "literal"
+	replaces, err := memory.NewReplacementIDs([]string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		opts memory.WriteOptions
 		want error
 	}{
 		{memory.WriteOptions{Subject: &subject}, memory.ErrSubjectUnsupported},
-		{memory.WriteOptions{Replaces: []string{"id"}}, memory.ErrSubjectUnsupported},
+		{memory.WriteOptions{Replaces: replaces}, memory.ErrSubjectUnsupported},
 		{memory.WriteOptions{Source: &source}, memory.ErrCitationUnsupported},
 		{memory.WriteOptions{Quote: &quote}, memory.ErrCitationUnsupported},
 	} {
@@ -152,7 +156,11 @@ func TestSubjectDirectMaintenanceRunsAfterAtomicReplacement(t *testing.T) {
 	if live != 1 {
 		t.Fatalf("live=%d", live)
 	}
-	if _, err := d.PutManyReturningReceipts(context.Background(), "a", []memory.WriteFact{{Text: "bad", Options: memory.WriteOptions{Replaces: []string{}}}}); err == nil {
+	replaces, err := memory.NewReplacementIDs([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.PutManyReturningReceipts(context.Background(), "a", []memory.WriteFact{{Text: "bad", Options: memory.WriteOptions{Replaces: replaces}}}); err == nil {
 		t.Fatal("empty replaces accepted")
 	}
 	if store.launches != 2 {

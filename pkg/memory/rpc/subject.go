@@ -54,7 +54,7 @@ func (r *PutManyReceiptsRequest) UnmarshalJSON(data []byte) error {
 }
 
 func subjectRequested(opts memory.WriteOptions) bool {
-	return opts.Subject != nil || opts.Replaces != nil
+	return opts.HasSubjectIntent()
 }
 func (s *Server) subjectBackend() SubjectBackend {
 	b, ok := s.backend.(SubjectBackend)

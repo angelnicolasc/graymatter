@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -151,7 +152,7 @@ func writeOptions(args map[string]any) (memory.WriteOptions, error) {
 	}
 	if value, present := args["replaces"]; present {
 		raw, err := json.Marshal(value)
-		if err != nil || json.Unmarshal(raw, &opts.Replaces) != nil || opts.Replaces == nil {
+		if err != nil || json.Unmarshal(raw, &opts.Replaces) != nil || !opts.Replaces.Present() {
 			return opts, fmt.Errorf("replaces must be a non-empty array of IDs")
 		}
 	}
@@ -199,10 +200,36 @@ func recallOptions(args map[string]any) (memory.RecallOptions, error) {
 	return opts, opts.Validate()
 }
 
-// Validate only the new options. The existing MCP validation contract remains
-// intact; a recognized option on the wrong tool must never disappear silently.
+// fullRequest preserves the pre-core treatment of unadvertised arguments.
+// Remove core extensions before validation and before any write parser can
+// apply their effects. Keep the caller's arguments and ordinary fields intact.
+func fullRequest(tool string, req mcp.CallToolRequest) mcp.CallToolRequest {
+	args := req.GetArguments()
+	var legacy map[string]any
+	for _, key := range [...]string{
+		"source", "quote", "subject", "replaces", "target_type", "fact_id",
+		"content_hash", "evidence_budget_bytes", "facts", "scope", "queries",
+	} {
+		if _, present := args[key]; !present || key == "queries" && tool == "memory_search_batch" {
+			continue
+		}
+		if legacy == nil {
+			legacy = maps.Clone(args)
+		}
+		delete(legacy, key)
+	}
+	if legacy != nil {
+		req.Params.Arguments = legacy
+	}
+	return req
+}
+
+// Validate advertised confidence options and core extensions in their profiles.
 func (s *Server) confidenceGuard(tool string, next func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.fullCatalog {
+			req = fullRequest(tool, req)
+		}
 		args := req.GetArguments()
 		if err := s.citationArguments(tool, args); err != nil {
 			return toolError(err.Error())

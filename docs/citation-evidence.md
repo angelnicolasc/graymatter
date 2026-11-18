@@ -52,7 +52,9 @@ the short ID on that line.
 For a shared citation, use `agent_id: "__shared__"`. The legacy
 `fact_id` and `content_hash` arguments fetch a retained exact version.
 Fetching does not increment recall accesses. Citation parameters require
-`core` and a daemon with the `citation-evidence-v1` capability.
+`core` and a daemon with the `citation-evidence-v1` capability. A valid
+legacy `memory_add` or `memory_search` in `full` ignores these additional
+parameters.
 
 ## Export, import and restore
 

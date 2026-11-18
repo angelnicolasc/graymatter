@@ -23,23 +23,24 @@ func NormalizeSubject(value string) (string, error) {
 	return key, nil
 }
 
-func (o WriteOptions) HasSubjectIntent() bool { return o.Subject != nil || o.Replaces != nil }
+func (o WriteOptions) HasSubjectIntent() bool { return o.Subject != nil || o.Replaces.Present() }
 
 func (o WriteOptions) validateSubjectOptions() error {
+	replaces := o.Replaces.IDs()
 	if o.Subject != nil {
-		if o.Replaces != nil && len(o.Replaces) != 1 {
+		if replaces != nil && len(replaces) != 1 {
 			return fmt.Errorf("subject and replaces are alternatives")
 		}
 		if _, err := NormalizeSubject(*o.Subject); err != nil {
 			return err
 		}
 	}
-	if o.Replaces != nil {
-		if len(o.Replaces) == 0 {
+	if replaces != nil {
+		if len(replaces) == 0 {
 			return fmt.Errorf("replaces must contain at least one fact ID")
 		}
 		seen := map[string]bool{}
-		for _, id := range o.Replaces {
+		for _, id := range replaces {
 			if strings.TrimSpace(id) == "" || !utf8.ValidString(id) {
 				return fmt.Errorf("replaces must contain non-empty UTF-8 fact IDs")
 			}

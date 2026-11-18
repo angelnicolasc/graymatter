@@ -57,9 +57,6 @@ func (o WriteOptions) Clone() WriteOptions {
 		value := *o.Subject
 		o.Subject = &value
 	}
-	if o.Replaces != nil {
-		o.Replaces = append([]string{}, o.Replaces...)
-	}
 	if o.Confidence != nil {
 		v := *o.Confidence
 		o.Confidence = &v

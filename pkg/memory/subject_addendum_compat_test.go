@@ -220,7 +220,7 @@ func TestA1LegacyAgedStoreCompatibility(t *testing.T) {
 			if err := s.Retire(ns, revised); err != nil {
 				t.Fatal(err)
 			}
-			recovered := put("Recovered deploy window", WriteOptions{Subject: subjectString(subject), Replaces: []string{head.ID}})
+			recovered := put("Recovered deploy window", WriteOptions{Subject: subjectString(subject), Replaces: testReplacementIDs(t, head.ID)})
 			if len(recovered.Subjects) != 1 || recovered.Subjects[0].Name != subject || recovered.Subjects[0].Revisions != 1 {
 				t.Fatalf("A106 explicit absent-head recovery did not continue revisions: %+v", recovered)
 			}

@@ -18,12 +18,13 @@ const DefaultConfidenceWeight = 0.0
 var ErrConfidenceUnsupported = errors.New("confidence options unsupported: update and restart the store daemon")
 
 // WriteOptions distinguishes omission (legacy storage) from an explicit label.
+// It is comparable, including when it carries an explicit list of replacements.
 type WriteOptions struct {
-	Confidence *string  `json:"confidence,omitempty"`
-	Source     *string  `json:"source,omitempty"`
-	Quote      *string  `json:"quote,omitempty"`
-	Subject    *string  `json:"subject,omitempty"`
-	Replaces   []string `json:"replaces,omitempty"`
+	Confidence *string        `json:"confidence,omitempty"`
+	Source     *string        `json:"source,omitempty"`
+	Quote      *string        `json:"quote,omitempty"`
+	Subject    *string        `json:"subject,omitempty"`
+	Replaces   ReplacementIDs `json:"-"`
 }
 
 func (o WriteOptions) Validate() error {

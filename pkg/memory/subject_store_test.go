@@ -115,7 +115,7 @@ func TestSubjectLegacyMergeAndDeclaredReplacementAmbiguity(t *testing.T) {
 	a := putSubject(t, s, "A", "alpha").Fact
 	b := putSubject(t, s, "B", "beta").Fact
 	before := revisionDBSnapshot(t, s)
-	_, err := s.PutManyReturningReceipts(context.Background(), subjectNS, []WriteFact{{Text: "new merge", Options: WriteOptions{Replaces: []string{a.ID, b.ID}}}})
+	_, err := s.PutManyReturningReceipts(context.Background(), subjectNS, []WriteFact{{Text: "new merge", Options: WriteOptions{Replaces: testReplacementIDs(t, a.ID, b.ID)}}})
 	if !errors.Is(err, ErrSubjectAmbiguous) || !reflect.DeepEqual(before, revisionDBSnapshot(t, s)) {
 		t.Fatalf("undeclared merge %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSubjectLegacyMergeAndDeclaredReplacementAmbiguity(t *testing.T) {
 	if !errors.Is(err, ErrSubjectAmbiguous) || !reflect.DeepEqual(before, revisionDBSnapshot(t, s)) {
 		t.Fatalf("shared head split %v", err)
 	}
-	next, err := s.PutManyReturningReceipts(context.Background(), subjectNS, []WriteFact{{Text: "declared combined", Options: WriteOptions{Replaces: []string{merged.ID}}}})
+	next, err := s.PutManyReturningReceipts(context.Background(), subjectNS, []WriteFact{{Text: "declared combined", Options: WriteOptions{Replaces: testReplacementIDs(t, merged.ID)}}})
 	if err != nil || len(next[0].Subjects) != 2 || next[0].Subjects[0].Name != "A" || next[0].Subjects[1].Name != "B" || next[0].Subjects[1].Revisions != 2 {
 		t.Fatalf("lost associations %+v %v", next, err)
 	}
@@ -242,8 +242,12 @@ func TestSubjectOptionsSnapshotBeforeEmbedding(t *testing.T) {
 	}}})
 	first := putSubject(t, s, "policy", "old")
 	ids := []string{first.Fact.ID}
-	input := []WriteFact{{Text: "new", Options: WriteOptions{Replaces: ids}}}
-	mutate = func() { ids[0] = "missing"; input[0].Text = "changed" }
+	input := []WriteFact{{Text: "new", Options: WriteOptions{Replaces: testReplacementIDs(t, ids...)}}}
+	mutate = func() {
+		ids[0] = "missing"
+		input[0].Text = "changed"
+		input[0].Options.Replaces = ReplacementIDs{}
+	}
 	got, err := s.PutManyReturningReceipts(context.Background(), subjectNS, input)
 	if err != nil || got[0].Fact.Text != "new" || got[0].Replaced[0].ID != first.Fact.ID {
 		t.Fatalf("caller mutation affected write %+v %v", got, err)

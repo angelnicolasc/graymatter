@@ -252,6 +252,22 @@ func (s *Server) handleCheckpointSave(ctx context.Context, req mcp.CallToolReque
 		fmt.Sprintf("Checkpoint %q saved for agent %q.", saved.ID, agentID))
 }
 
+func (s *Server) resumeCheckpoint(agentID string) (*session.Checkpoint, error) {
+	if !s.fullCatalog {
+		return s.backend.CheckpointResume(agentID)
+	}
+	// Full restores the most recent persisted row, including hook markers.
+	// Listing reuses the historical order and propagates decoding failures.
+	checkpoints, err := s.backend.CheckpointList(agentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(checkpoints) == 0 {
+		return nil, fmt.Errorf("%w for agent %q", session.ErrNoCheckpoint, agentID)
+	}
+	return &checkpoints[0], nil
+}
+
 func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	agentID, ok := getString(args, "agent_id")
@@ -273,7 +289,7 @@ func (s *Server) handleCheckpointResume(ctx context.Context, req mcp.CallToolReq
 		onMissing = value
 	}
 
-	cp, err := s.backend.CheckpointResume(agentID)
+	cp, err := s.resumeCheckpoint(agentID)
 	if err != nil {
 		if errors.Is(err, session.ErrNoCheckpoint) {
 			if !s.fullCatalog {

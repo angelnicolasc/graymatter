@@ -30,7 +30,7 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "MCP server's session instructions", "docs/AGENTS.md", "--tools full", "never store secrets"} {
+	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "MCP server's session instructions", "docs/AGENTS.md", "default `full` catalog lists all seven tools", "--tools core", "never store secrets"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
 		}

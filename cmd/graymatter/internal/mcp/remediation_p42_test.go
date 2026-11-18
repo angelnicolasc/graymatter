@@ -114,13 +114,16 @@ func TestRP42BatchFieldErrorsAreAtomic(t *testing.T) {
 	}
 }
 
-func TestRP42FullStillRejectsBatchCitationFields(t *testing.T) {
-	srv, _ := utilityContractServer(t, WithFullCatalog())
+func TestRP42FullRequiresTextForOrdinaryAdd(t *testing.T) {
+	srv, mem := utilityContractServer(t, WithFullCatalog())
 	got := utilityContractCall(t, srv, "memory_add", map[string]any{
 		"agent_id": "a", "source": "private source", "facts": []map[string]any{{"text": "one"}},
 	})
-	const want = "source requires the core tools profile; restart mcp serve --tools core"
-	if !got.IsError || got.text() != want {
-		t.Fatalf("want unchanged full error %q, got %s", want, got.Raw)
+	if !got.IsError || got.text() != "text is required" {
+		t.Fatalf("expected an ordinary add validation error: %s", got.Raw)
+	}
+	facts, err := mem.Advanced().List("a")
+	if err != nil || len(facts) != 0 {
+		t.Fatalf("invalid full add wrote facts: %+v / %v", facts, err)
 	}
 }

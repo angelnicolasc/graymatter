@@ -490,9 +490,9 @@ Batch applies one global policy to all input queries and its merged view.
 
 ### Checkpoint resume absence and default
 
-Latest resume selects the newest resumable checkpoint in the agent namespace.
-It skips historical PreCompact and SessionEnd markers that carry only hook
-provenance. These entries remain visible when listing checkpoints or loading
+MCP `checkpoint_resume` in `full` returns the latest record in the agent
+namespace, including historical PreCompact and SessionEnd markers. In
+`core`, latest resume skips markers that carry only hook provenance. These entries remain visible when listing checkpoints or loading
 by ID. A namespace with only these markers has the same resume result as one
 with no checkpoints.
 

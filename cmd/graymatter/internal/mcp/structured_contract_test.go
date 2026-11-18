@@ -189,6 +189,10 @@ func (b resumeErrorBackend) CheckpointResume(string) (*session.Checkpoint, error
 	return nil, b.err
 }
 
+func (b resumeErrorBackend) CheckpointList(string) ([]session.Checkpoint, error) {
+	return nil, b.err
+}
+
 func TestCheckpointResumeBackendFailure(t *testing.T) {
 	for _, cause := range []error{errors.New("memory store not initialised"), errors.New("daemon connection lost"), errors.New("no checkpoints")} {
 		t.Run(cause.Error(), func(t *testing.T) {

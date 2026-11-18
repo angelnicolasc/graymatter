@@ -118,25 +118,43 @@ func TestCitationMCPBatchLimitsAndInvalidArgumentsAtomic(t *testing.T) {
 	}
 }
 
-func TestCitationMCPFullRejectsNewFields(t *testing.T) {
+func TestCitationMCPFullIgnoresUnadvertisedFields(t *testing.T) {
 	srv, mem := utilityContractServer(t, WithFullCatalog())
+	const added = "Deployment gate is approved."
+	const reflected = "Deployment owner is Kat."
 	for _, tc := range []struct {
 		name string
 		args map[string]any
 	}{
-		{"memory_add", map[string]any{"agent_id": "a", "text": "x", "source": "doc", "quote": "literal"}},
-		{"memory_reflect", map[string]any{"agent_id": "a", "action": "add", "text": "x", "quote": "literal"}},
-		{"memory_search", map[string]any{"agent_id": "a", "query": "x", "evidence_budget_bytes": 0}},
-		{"memory_search", map[string]any{"agent_id": "a", "fact_id": "id", "content_hash": "hash"}},
+		{"memory_add", map[string]any{"agent_id": "a", "text": added, "source": "doc", "quote": "literal"}},
+		{"memory_reflect", map[string]any{"agent_id": "a", "action": "add", "text": reflected, "quote": "literal"}},
 	} {
-		r := utilityContractCall(t, srv, tc.name, tc.args)
-		if !r.IsError || !strings.Contains(r.text(), "core") {
-			t.Fatalf("full ignored new argument: %s", r.Raw)
+		if got := utilityContractCall(t, srv, tc.name, tc.args); got.IsError {
+			t.Fatalf("full did not perform an ordinary write: %s", got.Raw)
 		}
 	}
 	facts, err := mem.Advanced().List("a")
-	if err != nil || len(facts) != 0 {
-		t.Fatalf("full mutated: %v %v", facts, err)
+	if err != nil || len(facts) != 2 {
+		t.Fatalf("full ordinary facts: %+v / %v", facts, err)
+	}
+	for _, fact := range facts {
+		if fact.Evidence != nil || fact.IsSuperseded() {
+			t.Fatalf("full applied an unadvertised write option: %+v", fact)
+		}
+	}
+	args := map[string]any{
+		"agent_id": "a", "query": "deployment", "evidence_budget_bytes": 0,
+		"fact_id": facts[0].ID, "content_hash": memory.NewEvidenceSnapshot(facts[0]).ContentHash,
+	}
+	got := utilityContractCall(t, srv, "memory_search", args)
+	if got.IsError || got.Structured["query"] != "deployment" || got.Structured["count"] != float64(2) ||
+		!strings.Contains(got.text(), added) || !strings.Contains(got.text(), reflected) {
+		t.Fatalf("extended full search did not return the ordinary results: %s", got.Raw)
+	}
+	delete(args, "query")
+	got = utilityContractCall(t, srv, "memory_search", args)
+	if !got.IsError || got.text() != "query is required" {
+		t.Fatalf("expected an ordinary search validation error: %s", got.Raw)
 	}
 }
 

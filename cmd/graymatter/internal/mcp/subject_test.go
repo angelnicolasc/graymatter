@@ -56,7 +56,7 @@ func TestSubjectMCPReplacementReceiptsAndIDTargets(t *testing.T) {
 	}
 }
 
-func TestSubjectMCPInvalidIntentAndFullRejectBeforeWriting(t *testing.T) {
+func TestSubjectMCPInvalidCoreIntentNeverWrites(t *testing.T) {
 	srv, mem := utilityContractServer(t)
 	for _, args := range []map[string]any{
 		{"agent_id": "a", "text": "bad", "subject": nil},
@@ -80,18 +80,6 @@ func TestSubjectMCPInvalidIntentAndFullRejectBeforeWriting(t *testing.T) {
 		if got := utilityContractCall(t, srv, "memory_reflect", args); !got.IsError {
 			t.Fatalf("invalid reflect intent accepted: %s", got.Raw)
 		}
-	}
-	full := New(NewDirectBackend(mem, nil), "full", WithFullCatalog())
-	for _, args := range []map[string]any{
-		{"agent_id": "a", "text": "bad", "subject": "x"},
-		{"agent_id": "a", "text": "bad", "replaces": []any{"id"}},
-	} {
-		if got := utilityContractCall(t, full, "memory_add", args); !got.IsError {
-			t.Fatalf("full accepted new fields: %s", got.Raw)
-		}
-	}
-	if got := utilityContractCall(t, full, "memory_reflect", map[string]any{"agent_id": "a", "action": "pin", "target": "id", "target_type": "id"}); !got.IsError {
-		t.Fatalf("full accepted selector: %s", got.Raw)
 	}
 	rows, _ := mem.Advanced().List("a")
 	if len(rows) != 0 {
@@ -119,7 +107,11 @@ func TestSubjectMCPNeverFallsBackToLegacyWriter(t *testing.T) {
 	backend := &subjectLegacyWriter{}
 	srv := &Server{backend: backend}
 	subject := "policy"
-	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: []string{"old-id"}}} {
+	replaces, err := memory.NewReplacementIDs([]string{"old-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: replaces}} {
 		if _, err := srv.putWithIdentity(context.Background(), "a", "new", opts); !errors.Is(err, memory.ErrSubjectUnsupported) {
 			t.Fatalf("identity error: %v", err)
 		}

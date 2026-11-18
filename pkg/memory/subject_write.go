@@ -43,6 +43,7 @@ func subjectWritePlansTx(tx *bolt.Tx, namespace string, inputs []WriteFact, sugg
 	usedKeys := map[string]bool{}
 	for i, in := range inputs {
 		plan := &plans[i]
+		replaces := in.Options.Replaces.IDs()
 		if in.Options.Subject != nil {
 			key, err := NormalizeSubject(*in.Options.Subject)
 			if err != nil {
@@ -50,16 +51,16 @@ func subjectWritePlansTx(tx *bolt.Tx, namespace string, inputs []WriteFact, sugg
 			}
 			assignment := subjectAssignment{Key: key, Name: *in.Options.Subject}
 			prior, exists := idx.Heads[key]
-			if in.Options.Replaces != nil && (!exists || prior.Unresolved == nil) {
+			if replaces != nil && (!exists || prior.Unresolved == nil) {
 				return nil, fmt.Errorf("subject and replaces are alternatives")
 			}
 			if exists {
 				assignment.Prior = &prior
 				if prior.Unresolved != nil {
-					if in.Options.Replaces == nil {
+					if replaces == nil {
 						return nil, fmt.Errorf("%w; recover with memory_add using subject and replaces: [live fact ID, or recorded head ID %q if no live fact remains]", prior.Unresolved, prior.Head.Reference.FactID)
 					}
-					plan.Sources, err = subjectRecoverySourcesTx(tx, namespace, idx, prior, in.Options.Replaces[0])
+					plan.Sources, err = subjectRecoverySourcesTx(tx, namespace, idx, prior, replaces[0])
 					if err != nil {
 						return nil, err
 					}
@@ -78,9 +79,9 @@ func subjectWritePlansTx(tx *bolt.Tx, namespace string, inputs []WriteFact, sugg
 				}
 			}
 			plan.Assignments = []subjectAssignment{assignment}
-		} else if in.Options.Replaces != nil {
+		} else if replaces != nil {
 			keys := map[string]bool{}
-			for _, id := range in.Options.Replaces {
+			for _, id := range replaces {
 				fact, err := resolveFactIDTx(tx, namespace, id, false)
 				if err != nil {
 					return nil, err

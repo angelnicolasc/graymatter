@@ -67,7 +67,7 @@ func TestSubjectExplicitRecoveryFromCorruptSnapshotWithExactCanonicalProof(t *te
 	}
 
 	recovered, err := s.PutWithOptionsReturningFact(ctx, subjectNS, "Current routing policy", WriteOptions{
-		Subject: &subject, Replaces: []string{old.ID},
+		Subject: &subject, Replaces: testReplacementIDs(t, old.ID),
 	})
 	if err != nil {
 		t.Fatalf("explicit recovery with an exact canonical proof failed: %v", err)

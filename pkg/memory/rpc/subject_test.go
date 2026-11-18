@@ -50,6 +50,20 @@ func TestSubjectRPCRoundTripReplacementAndID(t *testing.T) {
 	if err != nil || historical.Evidence == nil || historical.Evidence.Source != source || historical.Evidence.Quote != quote {
 		t.Fatalf("old version evidence %+v %v", historical, err)
 	}
+	replaces, err := memory.NewReplacementIDs([]string{next[0].Fact.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit, err := c.PutManyReturningReceipts(ctx, "a", []memory.WriteFact{{
+		Text: "Retention is 45 days", Options: memory.WriteOptions{Replaces: replaces},
+	}})
+	if err != nil || len(explicit) != 1 || len(explicit[0].Replaced) != 1 || explicit[0].Replaced[0].ID != next[0].Fact.ID {
+		t.Fatalf("explicit replacement lost across RPC: %+v %v", explicit, err)
+	}
+	found, err = c.SearchScoped(ctx, "a", []string{"Retention"}, 8, false, memory.RecallOptions{})
+	if err != nil || len(found.Facts) != 1 || found.Facts[0].ID != explicit[0].Fact.ID {
+		t.Fatalf("explicit replacement did not retire its target: %+v %v", found, err)
+	}
 }
 
 func TestSubjectRPCRejectsOldCapabilityBeforeMutation(t *testing.T) {
@@ -232,7 +246,11 @@ func TestSubjectRPCNeverDowngradesToIdentityOnlyWrite(t *testing.T) {
 	c := &Client{rpc: netrpc.NewClientWithCodec(jsonrpc.NewClientCodec(clientConn)), conn: clientConn, callTimeout: time.Second}
 	t.Cleanup(func() { _ = c.Close(); _ = serverConn.Close() })
 	subject := "topic"
-	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: []string{"id"}}} {
+	replaces, err := memory.NewReplacementIDs([]string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: replaces}} {
 		if _, err := c.PutWithOptionalIdentity(context.Background(), "a", "new", opts); err == nil {
 			t.Fatal("identity fallback accepted subject intent")
 		}
@@ -248,7 +266,11 @@ func TestSubjectRPCNeverDowngradesToIdentityOnlyWrite(t *testing.T) {
 func TestSubjectRPCRejectsContradictoryRevisionBeforeDispatch(t *testing.T) {
 	c := &Client{}
 	subject := "topic"
-	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: []string{"id"}}} {
+	replaces, err := memory.NewReplacementIDs([]string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range []memory.WriteOptions{{Subject: &subject}, {Replaces: replaces}} {
 		if _, err := c.ReviseWithOptions(context.Background(), "a", "old", "new", opts); err == nil {
 			t.Fatal("revision accepted subject intent")
 		}

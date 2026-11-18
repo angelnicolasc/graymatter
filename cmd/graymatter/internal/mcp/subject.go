@@ -50,7 +50,7 @@ type coreWriteMetadata struct {
 }
 
 func hasSubjectIntent(opts memory.WriteOptions) bool {
-	return opts.Subject != nil || opts.Replaces != nil
+	return opts.HasSubjectIntent()
 }
 
 func supportsSubjects(backend Backend) bool {
@@ -93,10 +93,14 @@ func (s *Server) putCoreReceipts(ctx context.Context, namespace string, inputs [
 		if resolver, ok := s.backend.(subjectTargetResolver); ok {
 			for i := range inputs {
 				options := &inputs[i].Options
-				if options.Subject == nil || len(options.Replaces) != 1 {
+				if options.Subject == nil {
 					continue
 				}
-				target := options.Replaces[0]
+				replaces := options.Replaces.IDs()
+				if len(replaces) != 1 {
+					continue
+				}
+				target := replaces[0]
 				facts, err := resolver.ResolveFactTargets(ctx, namespace, target, "id", false)
 				if err != nil {
 					// A recorded anchor can still authorize recovery after its
@@ -110,7 +114,10 @@ func (s *Server) putCoreReceipts(ctx context.Context, namespace string, inputs [
 					!strings.HasPrefix(facts[0].ID, target) {
 					return nil, fmt.Errorf("recovery target did not resolve to one live fact")
 				}
-				options.Replaces = []string{facts[0].ID}
+				options.Replaces, err = memory.NewReplacementIDs([]string{facts[0].ID})
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		return writer.PutManyReturningReceipts(ctx, namespace, inputs)

@@ -65,6 +65,7 @@ type Backend interface {
 	UpdateFact(agentID string, f memory.Fact) error
 	CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error)
 	CheckpointResume(agentID string) (*session.Checkpoint, error)
+	CheckpointList(agentID string) ([]session.Checkpoint, error)
 	AuditWrite(e audit.Entry) error
 	KGLink(from, to, relation string) error
 }
@@ -277,6 +278,14 @@ func (b *DirectBackend) CheckpointResume(agentID string) (*session.Checkpoint, e
 		return nil, errors.New("memory store not initialised")
 	}
 	return session.Resume(store.DB(), agentID)
+}
+
+func (b *DirectBackend) CheckpointList(agentID string) ([]session.Checkpoint, error) {
+	store := b.mem.Advanced()
+	if store == nil {
+		return nil, errors.New("memory store not initialised")
+	}
+	return session.List(store.DB(), agentID)
 }
 
 func (b *DirectBackend) AuditWrite(e audit.Entry) error {

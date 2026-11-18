@@ -310,10 +310,14 @@ func TestUtilityCoreSearchPendingPointerAndCompletion(t *testing.T) {
 	}
 }
 
-func TestUtilityFullLegacyOutputAndExplicitExtensionErrors(t *testing.T) {
-	srv, _ := utilityContractServer(t, WithFullCatalog())
-	utilityContractAdd(t, srv, "legacy", "Preserved full contract.")
-	result := utilityContractCall(t, srv, "memory_search", map[string]any{"agent_id": "legacy", "query": "Preserved full contract."})
+func TestUtilityFullLegacyOutputAndExtensionIsolation(t *testing.T) {
+	srv, mem := utilityContractServer(t, WithFullCatalog())
+	const original = "Preserved full contract."
+	const ordinary = "Ordinary full add."
+	utilityContractAdd(t, srv, "legacy", original)
+	result := utilityContractCall(t, srv, "memory_search", map[string]any{
+		"agent_id": "legacy", "query": original, "scope": "all", "queries": []string{"unrelated"},
+	})
 	if result.IsError {
 		t.Fatalf("full search failed: %s", result.Raw)
 	}
@@ -324,17 +328,40 @@ func TestUtilityFullLegacyOutputAndExplicitExtensionErrors(t *testing.T) {
 	if result.text() != "Found 1 relevant memories for agent \"legacy\":\n\n1. Preserved full contract.\n" {
 		t.Fatalf("legacy prose changed: %q", result.text())
 	}
-	for _, step := range []struct {
-		name string
-		args map[string]any
-	}{
-		{"memory_search", map[string]any{"agent_id": "legacy", "queries": []string{"contract"}}},
-		{"memory_search", map[string]any{"agent_id": "legacy", "query": "contract", "scope": "project"}},
-		{"memory_add", map[string]any{"agent_id": "legacy", "facts": []any{map[string]any{"text": "unsupported batch"}}}},
-	} {
-		result := utilityContractCall(t, srv, step.name, step.args)
-		if !result.IsError || !strings.Contains(strings.ToLower(result.text()), "core") {
-			t.Errorf("full extension was ignored or lacks profile guidance: %s", result.Raw)
+	missingQuery := utilityContractCall(t, srv, "memory_search", map[string]any{
+		"agent_id": "legacy", "queries": []string{"contract"},
+	})
+	if !missingQuery.IsError || missingQuery.text() != "query is required" {
+		t.Fatalf("full accepted a missing ordinary query: %s", missingQuery.Raw)
+	}
+	added := utilityContractCall(t, srv, "memory_add", map[string]any{
+		"agent_id": "legacy", "text": ordinary, "facts": []map[string]any{{"text": "Unsupported batch"}},
+	})
+	if added.IsError || added.Structured["stored"] != true {
+		t.Fatalf("full did not perform an ordinary add: %s", added.Raw)
+	}
+	pinned := utilityContractCall(t, srv, "memory_reflect", map[string]any{
+		"agent_id": "legacy", "action": "pin", "target": original, "target_type": "id",
+	})
+	if pinned.IsError {
+		t.Fatalf("full did not look up the target by text: %s", pinned.Raw)
+	}
+	rows, err := mem.Advanced().List("legacy")
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("full wrote an unintended batch or lost a fact: %+v / %v", rows, err)
+	}
+	for _, row := range rows {
+		switch row.Text {
+		case original:
+			if !row.Pinned {
+				t.Fatalf("full did not pin the original fact: %+v", row)
+			}
+		case ordinary:
+			if row.Pinned {
+				t.Fatalf("full pinned an unrelated fact: %+v", row)
+			}
+		default:
+			t.Fatalf("full stored an unintended fact: %+v", row)
 		}
 	}
 }

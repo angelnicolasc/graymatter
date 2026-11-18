@@ -217,7 +217,7 @@ func (r *reconnectingStore) PutWithOptionalIdentity(ctx context.Context, agentID
 		case rpc.ConfidenceWriter:
 			fact, err = writer.PutWithOptionsReturningFact(ctx, agentID, text, opts)
 		default:
-			if opts.Subject != nil || opts.Replaces != nil {
+			if opts.HasSubjectIntent() {
 				return memory.ErrSubjectUnsupported
 			}
 			if opts.HasEvidence() {
