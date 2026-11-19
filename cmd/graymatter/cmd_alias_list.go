@@ -33,11 +33,18 @@ func aliasListCmd() *cobra.Command {
 		Long: `List the alias facts for an agent: the term, its equivalents, and who
 authored each one.
 
-  authored   written by an agent through ` + "`alias`" + ` / memory_alias
-  usage      promoted by the store from observed reformulations, with no
-             agent action (StoreConfig.UsageAliasLearning / GRAYMATTER_USAGE_ALIAS)
+  authored   an empty stored source, used for aliases written through alias
+             or memory_alias and for older aliases without a source
+  usage      promoted by the store from observed reformulations
+             (StoreConfig.UsageAliasLearning / GRAYMATTER_USAGE_ALIAS)
 
-Retired aliases stop expanding queries and are hidden unless --all is given.`,
+Other source values are shown as stored. Live authored aliases are exempt from
+decay and pruning. A live unpinned usage alias returns to full weight when its
+expansion adds a query token. Other live aliases record an activation without
+resetting weight. Pins preserve weight and prevent pruning.
+
+Retired aliases stop expanding and age normally unless pinned. They are hidden
+unless --all is given.`,
 		Example: `  graymatter alias list backend
   graymatter alias list backend --all --json`,
 		Args: cobra.ExactArgs(1),

@@ -87,7 +87,7 @@ func confidenceHTTP(t *testing.T, f *issue81Fixture, project, store string, dire
 	addr := listener.Addr().String()
 	_ = listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	args := []string{"--dir", store, "mcp", "serve", "--http", addr, "--token", "confidence-fixture-bearer"}
+	args := []string{"--dir", store, "mcp", "serve", "--tools", "full", "--http", addr, "--token", "confidence-fixture-bearer"}
 	if direct {
 		args = append(args, "--no-daemon")
 	}

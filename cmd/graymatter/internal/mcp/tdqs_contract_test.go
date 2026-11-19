@@ -149,7 +149,10 @@ func TestToolDefinitionContract(t *testing.T) {
 		// Behavioral transparency: with annotations already carrying the safety
 		// hints, the description must add what they cannot express — what comes
 		// back, and what happens on the empty path.
-		if !strings.Contains(desc, "Returns") && !strings.Contains(desc, "Errors") {
+		// The frozen full catalog describes reflect's return with this exact
+		// legacy sentence. Preserve its bytes while testing the return contract.
+		legacyReflectReturn := name == "memory_reflect" && strings.Contains(desc, "Add/update report the committed fact_id when supported.")
+		if !strings.Contains(desc, "Returns") && !strings.Contains(desc, "Errors") && !legacyReflectReturn {
 			t.Errorf("%s: description must disclose its return or error behavior", name)
 		}
 	}
@@ -261,4 +264,29 @@ func firstWord(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+func TestToolRetentionContract(t *testing.T) {
+	tools := listToolDefs(t)
+	for name, want := range map[string]string{
+		"memory_search":  "Retired facts are excluded immediately.",
+		"memory_add":     "Unpinned facts decay (30-day default half-life) and may eventually be pruned.",
+		"memory_reflect": "Retirement leaves a tombstone that ordinary pruning can remove.",
+	} {
+		if !strings.Contains(tools[name].Description, want) {
+			t.Errorf("%s description must include %q", name, want)
+		}
+	}
+
+	var input struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tools["memory_search"].InputSchema, &input); err != nil {
+		t.Fatalf("decode memory_search inputSchema: %v", err)
+	}
+	if got := input.Properties["explain"].Description; !strings.Contains(got, "reachable through retained tombstones") {
+		t.Errorf("explain must describe the retained lineage, got %q", got)
+	}
 }

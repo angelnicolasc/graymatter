@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 func TestProviderURLDaemonLifetime(t *testing.T) {
@@ -175,5 +176,133 @@ func TestDaemonInvalidProviderURLStartupDiagnostic(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store, "gray.db")); !os.IsNotExist(err) || daemon.ReadPIDFile(store) != 0 {
 		t.Fatalf("rejected daemon acquired persistence or published a PID: gray.db stat = %v", err)
+	}
+}
+
+func TestProviderURLDaemonOwnsExplicitReviewAndGraphExtraction(t *testing.T) {
+	const (
+		namespace = "synthetic-owner-project"
+		key       = "synthetic-owner-key"
+		entity    = "Owner fixture entity"
+		summary   = "Owner fixture proposal"
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	store, err := memory.Open(memory.StoreConfig{DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := store.PutReturningFact(ctx, namespace, "The fixture stores a local synthetic fact.")
+	if closeErr := store.Close(); err != nil || closeErr != nil {
+		t.Fatalf("prepare store: write=%v close=%v", err, closeErr)
+	}
+
+	var extractionCalls, reviewCalls, wrongCalls atomic.Int32
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.EscapedPath() == "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.EscapedPath() != "/owner%2F/v1/messages" ||
+			r.Header.Get("X-Api-Key") != key || r.Header.Get("Anthropic-Version") != "2023-06-01" {
+			wrongCalls.Add(1)
+			http.Error(w, "unexpected fixture request", http.StatusBadRequest)
+			return
+		}
+		var request struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode fixture request: %v", err)
+			http.Error(w, "invalid fixture request", http.StatusBadRequest)
+			return
+		}
+		var reply []byte
+		switch request.MaxTokens {
+		case 1024:
+			extractionCalls.Add(1)
+			reply, _ = json.Marshal(map[string]any{"nodes": []map[string]string{{"label": entity, "entity_type": "concept"}}, "edges": []any{}})
+		case 2048:
+			reviewCalls.Add(1)
+			reply, _ = json.Marshal(map[string]any{"summary": summary, "consumes": []string{fact.ID}})
+		default:
+			wrongCalls.Add(1)
+			http.Error(w, "unexpected fixture operation", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_fixture", "type": "message", "role": "assistant", "model": "fixture-model",
+			"content":     []map[string]string{{"type": "text", "text": string(reply)}},
+			"stop_reason": "end_turn", "usage": map[string]int{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	t.Cleanup(gateway.Close)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("VOYAGE_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", key)
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_BASE_URL", gateway.URL+"/owner%2F")
+	t.Setenv("GRAYMATTER_KG_LLM_EXTRACT", "1")
+	t.Setenv("GRAYMATTER_OLLAMA_URL", gateway.URL)
+
+	ready, done := make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- daemon.Run(daemon.RunOptions{
+			DataDir: dir,
+			KG:      true,
+			Logf: func(format string, _ ...any) {
+				if strings.HasPrefix(format, "graymatter daemon ready:") {
+					close(ready)
+				}
+			},
+		})
+	}()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("daemon exited before startup: %v", err)
+	case <-ctx.Done():
+		t.Fatal("daemon did not become ready")
+	}
+
+	client, err := daemon.ConnectNoSpawn(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = client.Shutdown()
+		_ = client.Close()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("daemon shutdown: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("daemon did not stop")
+		}
+	})
+
+	// Change the caller environment only after the owner's config is fixed.
+	t.Setenv("ANTHROPIC_BASE_URL", gateway.URL+"/wrong-client")
+	t.Setenv("ANTHROPIC_API_KEY", "other-synthetic-key")
+	if err := client.Consolidate(ctx, namespace); err != nil {
+		t.Fatal(err)
+	}
+	if extractionCalls.Load() != 1 || reviewCalls.Load() != 0 || wrongCalls.Load() != 0 {
+		t.Fatalf("maintenance requests: graph=%d review=%d wrong=%d", extractionCalls.Load(), reviewCalls.Load(), wrongCalls.Load())
+	}
+	nodes, err := client.KGNodes()
+	if err != nil || len(nodes) != 1 || nodes[0].Label != entity {
+		t.Fatalf("owner extraction did not reach the graph: %+v, %v", nodes, err)
+	}
+	rows, err := client.ReviewAnalyze(ctx, namespace, "anthropic", "")
+	if err != nil || len(rows) != 1 || rows[0].Kind != memory.ReviewKindSummary || reviewCalls.Load() != 1 || wrongCalls.Load() != 0 {
+		t.Fatalf("owner review: results=%+v calls=%d wrong=%d err=%v", rows, reviewCalls.Load(), wrongCalls.Load(), err)
+	}
+	facts, err := client.List(namespace)
+	if err != nil || len(facts) != 1 || facts[0].ID != fact.ID || facts[0].IsSuperseded() {
+		t.Fatalf("review changed active facts: %+v, %v", facts, err)
 	}
 }

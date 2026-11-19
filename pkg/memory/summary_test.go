@@ -37,8 +37,20 @@ func TestFactSummaryStreamingMatchesLegacyAndDoesNotWrite(t *testing.T) {
 	}
 	// Hide the optional capability to exercise backward-compatible fallback.
 	legacy, err := ReadFactSummary(ctx, struct{ listOnlyFacts }{s}, "a")
-	if err != nil || !reflect.DeepEqual(streamed, legacy) {
-		t.Fatalf("summary parity: %+v %+v %v", streamed, legacy, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if streamed.All.LiveEvidenceCount == nil || *streamed.All.LiveEvidenceCount != 0 || streamed.Live.LiveEvidenceCount == nil || *streamed.Live.LiveEvidenceCount != 0 {
+		t.Fatalf("new store must report known zero evidence: %+v", streamed)
+	}
+	if legacy.All.LiveEvidenceCount != nil || legacy.Live.LiveEvidenceCount != nil {
+		t.Fatalf("list-only fallback must leave evidence count unavailable: %+v", legacy)
+	}
+	// This optional capability is intentionally absent from the legacy adapter.
+	comparable := streamed
+	comparable.All.LiveEvidenceCount, comparable.Live.LiveEvidenceCount = nil, nil
+	if !reflect.DeepEqual(comparable, legacy) {
+		t.Fatalf("summary parity: %+v %+v", comparable, legacy)
 	}
 	if streamed.All.FactCount != 3 || streamed.Live.FactCount != 2 || streamed.Tombstones != 1 || streamed.Recalls != 6 || streamed.Live.AvgWeight != .625 {
 		t.Fatalf("summary: %+v", streamed)

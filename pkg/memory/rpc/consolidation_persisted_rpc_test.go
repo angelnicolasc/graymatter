@@ -2,13 +2,11 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,13 +22,22 @@ type persistedReportConfig struct {
 func (c persistedReportConfig) GetConsolidateLLM() string    { return "ollama" }
 func (c persistedReportConfig) GetConsolidateThreshold() int { return 1 }
 func (c persistedReportConfig) GetOllamaURL() string         { return c.url }
+func (c persistedReportConfig) GetDecayHalfLife() time.Duration {
+	return 30 * 24 * time.Hour
+}
 
 type persistedReportServer struct {
 	*Server
 	calls       atomic.Int32
+	legacy      atomic.Int32
 	committed   chan ConsolidateWithReportResponse
 	drop        net.Conn
 	waitForExit <-chan struct{}
+}
+
+func (s *persistedReportServer) Consolidate(_ *ConsolidateRequest, _ *ConsolidateResponse) error {
+	s.legacy.Add(1)
+	return errors.New("unexpected legacy consolidation")
 }
 
 func (s *persistedReportServer) ConsolidateWithReport(req *ConsolidateWithReportRequest, resp *ConsolidateWithReportResponse) error {
@@ -45,9 +52,8 @@ func (s *persistedReportServer) ConsolidateWithReport(req *ConsolidateWithReport
 	return s.drop.Close()
 }
 
-func TestReportResponseLostAfterPersistedCommit(t *testing.T) {
+func TestReportResponseLostAfterPersistedMaintenance(t *testing.T) {
 	const agent = "audit"
-	const summary = "Synthetic summary from the real store behind RPC"
 	for _, name := range []string{"disconnect", "cancel"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -56,41 +62,38 @@ func TestReportResponseLostAfterPersistedCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = store.Close() })
-			first, err := store.PutReturningFact(context.Background(), agent, "Synthetic first input")
-			if err != nil {
-				t.Fatal(err)
+			fixture := func(text string, age time.Duration) memory.Fact {
+				t.Helper()
+				fact, err := store.PutReturningFact(context.Background(), agent, text)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fact.Weight = 1
+				fact.CreatedAt = time.Now().UTC().Add(-age)
+				fact.AccessedAt = fact.CreatedAt
+				if err := store.UpdateFact(agent, fact); err != nil {
+					t.Fatal(err)
+				}
+				return fact
 			}
-			second, err := store.PutReturningFact(context.Background(), agent, "Synthetic second input")
-			if err != nil {
-				t.Fatal(err)
-			}
+			fixture("Old source that should be pruned", 201*24*time.Hour)
+			survivor := fixture("Old source that should survive with a decayed weight", 30*24*time.Hour)
+
 			var providerRequests atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				providerRequests.Add(1)
-				body, err := io.ReadAll(r.Body)
-				if err != nil || r.Method != http.MethodPost || r.URL.Path != "/api/generate" {
-					t.Errorf("unexpected provider request: %s %s (%v)", r.Method, r.URL.Path, err)
-				}
-				source := first.ID
-				if !strings.Contains(string(body), source) {
-					source = second.ID
-				}
-				if !strings.Contains(string(body), source) {
-					t.Error("provider request did not contain a seeded source")
-				}
-				proposal, _ := json.Marshal(map[string]any{"summary": summary, "consumes": []string{source}})
-				_ = json.NewEncoder(w).Encode(map[string]string{"response": string(proposal)})
+				http.NotFound(w, r)
 			}))
 			t.Cleanup(provider.Close)
-			server := &persistedReportServer{
+			handler := &persistedReportServer{
 				Server:    NewServer(store, persistedReportConfig{url: provider.URL}),
 				committed: make(chan ConsolidateWithReportResponse, 2),
 			}
-			client, transport := reportPipeConnection(t, server)
-			server.drop = transport
+			client, transport := reportPipeConnection(t, handler)
+			handler.drop = transport
 			if name == "cancel" {
 				release := make(chan struct{})
-				server.waitForExit = release
+				handler.waitForExit = release
 				t.Cleanup(func() { close(release) })
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -103,13 +106,13 @@ func TestReportResponseLostAfterPersistedCommit(t *testing.T) {
 				}
 				out <- err
 			}()
-			var committed memory.ConsolidationReport
 			select {
-			case outcome := <-server.committed:
-				if outcome.Fatal != nil || outcome.Report.Status != memory.ConsolidationApplied || outcome.Report.SourcesRetired != 1 {
-					t.Fatalf("server did not confirm the expected mutation: %+v", outcome)
+			case outcome := <-handler.committed:
+				want := memory.ConsolidationReport{Status: memory.ConsolidationSkipped, Reason: "disabled"}
+				expectedEffects := memory.ConsolidationMaintenanceReport{Decay: memory.MaintenanceComplete, Prune: memory.MaintenanceComplete, Graph: memory.MaintenanceSkipped, FactsDecayed: 2, FactsPruned: 1}
+				if outcome.Fatal != nil || outcome.Report.Status != want.Status || outcome.Report.Reason != want.Reason || outcome.Report.Maintenance == nil || *outcome.Report.Maintenance != expectedEffects {
+					t.Fatalf("server did not confirm maintenance completion: %+v", outcome)
 				}
-				committed = outcome.Report
 			case <-ctx.Done():
 				t.Fatal("server did not reach the response boundary")
 			}
@@ -125,8 +128,8 @@ func TestReportResponseLostAfterPersistedCommit(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("report call did not return")
 			}
-			if server.calls.Load() != 1 || providerRequests.Load() != 1 {
-				t.Fatalf("unexpected mutation calls=%d provider requests=%d", server.calls.Load(), providerRequests.Load())
+			if handler.calls.Load() != 1 || handler.legacy.Load() != 0 || providerRequests.Load() != 0 {
+				t.Fatalf("unexpected report=%d legacy=%d provider=%d", handler.calls.Load(), handler.legacy.Load(), providerRequests.Load())
 			}
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
@@ -137,20 +140,8 @@ func TestReportResponseLostAfterPersistedCommit(t *testing.T) {
 			}
 			defer reopened.Close()
 			facts, err := reopened.List(agent)
-			if err != nil {
-				t.Fatal(err)
-			}
-			summaries, retired := 0, 0
-			for _, f := range facts {
-				if f.ID == committed.SummaryFactID && f.Text == summary && !f.IsSuperseded() {
-					summaries++
-				}
-				if (f.ID == first.ID || f.ID == second.ID) && f.SupersededBy == committed.SummaryFactID {
-					retired++
-				}
-			}
-			if len(facts) != 3 || summaries != 1 || retired != 1 {
-				t.Fatalf("reopened store differs from server result %+v: %+v", committed, facts)
+			if err != nil || len(facts) != 1 || facts[0].ID != survivor.ID || facts[0].IsSuperseded() || math.Abs(facts[0].Weight-0.5) > 1e-4 {
+				t.Fatalf("reopened maintenance differs: %+v, %v", facts, err)
 			}
 		})
 	}

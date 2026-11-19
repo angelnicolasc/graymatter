@@ -144,6 +144,24 @@ func TestReadOnlyTUIRecallUsesOnlyPreview(t *testing.T) {
 	}
 }
 
+type acknowledgedCurationRollback struct{ *inspectionFake }
+
+func (*acknowledgedCurationRollback) CurateFact(context.Context, string, string, string, string, memory.Fact) (memory.Fact, error) {
+	return memory.Fact{}, context.DeadlineExceeded
+}
+
+func TestReconnectingCurationPreservesAcknowledgedRollback(t *testing.T) {
+	backend := &acknowledgedCurationRollback{inspectionFake: &inspectionFake{}}
+	store := newReconnectingStoreAt(backend, func() (cliStore, error) {
+		t.Fatal("acknowledged rollback triggered a retry")
+		return nil, nil
+	})
+	fact, err := store.CurateFact(context.Background(), "a", "id", "revise", "text", memory.Fact{})
+	if fact.ID != "" || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, memory.ErrMutationOutcomeUnknown) {
+		t.Fatalf("acknowledged rollback was misreported: %+v %v", fact, err)
+	}
+}
+
 func TestReconnectingCurationDoesNotReplayDroppedWrite(t *testing.T) {
 	dead, fresh := &inspectionFake{}, &inspectionFake{}
 	reopens := 0

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,6 +86,10 @@ type Server struct {
 // used when handling RPC ConsolidateRequest calls; pass the same Config
 // the daemon uses elsewhere so consolidation policy is consistent.
 func NewServer(backend Backend, consolidateCfg memory.ConsolidateConfig) *Server {
+	// Capability probes must only call methods on an available backend.
+	if isNilValue(backend) {
+		backend = nil
+	}
 	s := &Server{
 		backend:        backend,
 		consolidateCfg: consolidateCfg,
@@ -436,6 +441,18 @@ func (s *Server) UpdateFact(req *UpdateFactRequest, resp *UpdateFactResponse) er
 	return s.backend.UpdateFact(req.AgentID, req.Fact)
 }
 
+// UpdateFactWithLineage applies the versioned full-update contract.
+func (s *Server) UpdateFactWithLineage(req *UpdateFactRequest, resp *UpdateFactWithLineageResponse) error {
+	defer s.touch()
+	if s.lineageBackend() == nil {
+		return ErrLineageUnsupported
+	}
+	if err := s.backend.UpdateFact(req.AgentID, req.Fact); err != nil {
+		resp.Error, resp.ErrorCode = err.Error(), revisionErrorCode(err)
+	}
+	return nil
+}
+
 // Consolidate handles a remote consolidation request, applying the
 // daemon-side consolidation policy.
 func (s *Server) Consolidate(req *ConsolidateRequest, resp *ConsolidateResponse) error {
@@ -453,6 +470,14 @@ func (s *Server) PendingVectorCount(req *PendingVectorCountRequest, resp *Pendin
 	return nil
 }
 
+func (s *Server) maintenanceOnly() bool {
+	if store, ok := s.backend.(*memory.Store); ok {
+		return store != nil
+	}
+	custom, optedIn := s.backend.(interface{ MaintenanceOnly() bool })
+	return optedIn && !isNilValue(custom) && custom.MaintenanceOnly()
+}
+
 // Ping handles a liveness probe. Touches activity so a heartbeat keeps
 // the daemon alive — useful for long-idle TUIs that just want the
 // dashboard refreshed without making writes.
@@ -461,8 +486,52 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 	resp.Protocol = Protocol
 	resp.Capabilities = s.confidenceCapabilities()
 	resp.Capabilities = append(resp.Capabilities, s.inspectionCapabilities()...)
+	review := s.reviewBackend() != nil
+	lineage := s.lineageBackend() != nil
+	if review {
+		resp.Capabilities = append(resp.Capabilities, ReviewJournalV1)
+	}
+	if lineage {
+		resp.Capabilities = append(resp.Capabilities, AuthoritativeLineageV1, LineageSubjectArchiveV1)
+	}
+	if (review || lineage) && !slices.Contains(resp.Capabilities, InspectionContextV1) {
+		resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+	}
+	if s.maintenanceOnly() {
+		resp.Capabilities = append(resp.Capabilities, MaintenanceOnlyV1)
+		if _, ok := s.backend.(returningFactWriter); ok {
+			resp.Capabilities = append(resp.Capabilities, FactIdentityV1)
+		}
+	}
 	if s.supportsConsolidationReporting() {
 		resp.Capabilities = append(resp.Capabilities, ConsolidationReportV1)
+	}
+	if _, ok := s.scopedBatchRecaller(); ok {
+		resp.Capabilities = append(resp.Capabilities, ScopedBatchRecallV1)
+	}
+	if _, ok := s.utilityStore(); ok {
+		resp.Capabilities = append(resp.Capabilities, UtilityV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if s.citationBackend() != nil {
+		resp.Capabilities = append(resp.Capabilities, CitationEvidenceV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if s.subjectBackend() != nil {
+		resp.Capabilities = append(resp.Capabilities, SubjectHeadsV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
+	}
+	if _, ok := s.backend.(subjectIssueCatalog); ok {
+		resp.Capabilities = append(resp.Capabilities, SubjectIssuesV1)
+		if !slices.Contains(resp.Capabilities, InspectionContextV1) {
+			resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
+		}
 	}
 	weight := memory.DefaultConfidenceWeight
 	if provider, ok := s.backend.(DefaultConfidenceProvider); ok {

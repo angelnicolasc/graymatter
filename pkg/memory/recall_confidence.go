@@ -10,11 +10,15 @@ import (
 // recallPolicy is immutable request state. It owns copied option values so a
 // request never changes the store configuration or another query's policy.
 type recallPolicy struct {
-	preview   bool // inspection suppresses every retrieval hook and durable side effect
-	minimum   *string
-	weight    float64
-	metadata  bool
-	embedding *confidenceEmbeddingCache
+	collectReceipts  bool
+	citationIdentity bool // core keeps independently cited versions distinct
+	omitGraphHints   bool // compact results require canonical namespace identities
+	preview          bool // inspection suppresses every retrieval hook and durable side effect
+	minimum          *string
+	weight           float64
+	metadata         bool
+	embedding        *confidenceEmbeddingCache
+	vectorFallback   *string
 }
 
 // A single pipeline may fall back from the compact index to a canonical scan
@@ -79,15 +83,27 @@ func (p recallPolicy) eligible(raw string) bool {
 func (p recallPolicy) factor(raw string) float64 {
 	return 1 + p.weight*float64(ConfidenceLevel(raw)-1)
 }
+func (p recallPolicy) noteVectorFallback(reason string) {
+	if reason != "" && p.vectorFallback != nil && *p.vectorFallback == "" {
+		*p.vectorFallback = reason
+	}
+}
+
 func (p recallPolicy) retrieval() *RetrievalMetadata {
-	if !p.metadata {
+	var vectorFallback string
+	if p.vectorFallback != nil {
+		vectorFallback = *p.vectorFallback
+	}
+	if !p.metadata && vectorFallback == "" {
 		return nil
 	}
 	kg := "hints_without_confidence_receipts"
 	if p.filtered() {
 		kg = "suppressed_min_confidence"
+	} else if p.omitGraphHints {
+		kg = "suppressed_namespace_scope"
 	}
-	return &RetrievalMetadata{MinConfidence: p.minimum, ConfidenceWeight: p.weight, Policy: ConfidencePolicy, KG: kg}
+	return &RetrievalMetadata{MinConfidence: p.minimum, ConfidenceWeight: p.weight, Policy: ConfidencePolicy, KG: kg, VectorFallback: vectorFallback}
 }
 
 func recallTopK(topK int) int {
@@ -113,8 +129,10 @@ func (s *Store) RecallWithOptions(ctx context.Context, agentID, query string, to
 	if err != nil {
 		return RecallResult{}, err
 	}
-	facts, feedback, err := s.recallDetailedWithPolicy(ctx, agentID, query, recallTopK(topK), p)
-	return RecallResult{Facts: facts, Feedback: feedback, Retrieval: p.retrieval()}, err
+	var vectorFallback string
+	p.vectorFallback = &vectorFallback
+	facts, feedback, activity, err := s.recallDetailedCollectWithPolicy(ctx, agentID, query, recallTopK(topK), p, touchImmediately)
+	return RecallResult{Facts: facts, Feedback: feedback, Retrieval: p.retrieval(), ReviewNotices: s.recalledReviewNotices(ctx, activity.facts)}, err
 }
 
 // RecallExplainWithOptions reads out the same ranking that selects plain facts.
@@ -123,6 +141,8 @@ func (s *Store) RecallExplainWithOptions(ctx context.Context, agentID, query str
 	if err != nil {
 		return RecallExplainResult{}, err
 	}
+	var vectorFallback string
+	p.vectorFallback = &vectorFallback
 	receipts, err := s.recallExplainWithPolicy(ctx, agentID, query, recallTopK(topK), p)
 	return RecallExplainResult{Receipts: receipts, Retrieval: p.retrieval()}, err
 }
@@ -138,19 +158,26 @@ func (s *Store) RecallAllWithOptions(ctx context.Context, agentID, query string,
 	if err != nil {
 		return RecallResult{}, err
 	}
+	var vectorFallback string
+	p.vectorFallback = &vectorFallback
 	return s.recallAllWithPolicy(ctx, agentID, query, recallTopK(topK), p)
 }
 
 // Both public All methods share collection and bookkeeping. The older method
 // supplies its original raw topK semantics; option-aware calls normalize it.
 func (s *Store) recallAllWithPolicy(ctx context.Context, agentID, query string, topK int, p recallPolicy) (RecallResult, error) {
-	agent, af, agentSelected, err := s.recallDetailedCollectWithPolicy(ctx, agentID, query, topK, p, false)
+	result, _, err := s.recallAllCollectWithPolicy(ctx, agentID, query, topK, p, touchImmediately)
+	return result, err
+}
+
+func (s *Store) recallAllCollectWithPolicy(ctx context.Context, agentID, query string, topK int, p recallPolicy, mode recallTouchMode) (RecallResult, recallActivity, error) {
+	agent, af, agentActivity, err := s.recallDetailedCollectWithPolicy(ctx, agentID, query, topK, p, deferRecallActivity)
 	if err != nil {
-		return RecallResult{}, fmt.Errorf("recall agent: %w", err)
+		return RecallResult{}, recallActivity{}, fmt.Errorf("recall agent: %w", err)
 	}
-	shared, sf, sharedSelected, err := s.recallDetailedCollectWithPolicy(ctx, SharedAgentID, query, topK, p, false)
+	shared, sf, sharedActivity, err := s.recallDetailedCollectWithPolicy(ctx, SharedAgentID, query, topK, p, deferRecallActivity)
 	if err != nil {
-		return RecallResult{}, fmt.Errorf("recall shared: %w", err)
+		return RecallResult{}, recallActivity{}, fmt.Errorf("recall shared: %w", err)
 	}
 	feedback := af
 	if sf != "" && sf != af {
@@ -160,14 +187,14 @@ func (s *Store) recallAllWithPolicy(ctx context.Context, agentID, query string, 
 		feedback += sf
 	}
 	facts := fuseRecallResults(agent, shared, topK)
-	selectedByText := make(map[string]Fact, len(agentSelected)+len(sharedSelected))
+	selectedByText := make(map[string]Fact, len(agentActivity.facts)+len(sharedActivity.facts))
 	// Namespace fusion gives agent facts the stable preference on a text
 	// duplicate. Bookkeeping follows that same canonical identity rather than
 	// touching every duplicate that contributed to the merged ranking.
-	for _, f := range agentSelected {
+	for _, f := range agentActivity.facts {
 		selectedByText[f.Text] = f
 	}
-	for _, f := range sharedSelected {
+	for _, f := range sharedActivity.facts {
 		if _, exists := selectedByText[f.Text]; !exists {
 			selectedByText[f.Text] = f
 		}
@@ -178,23 +205,59 @@ func (s *Store) recallAllWithPolicy(ctx context.Context, agentID, query string, 
 			touched = append(touched, f)
 		}
 	}
-	s.touchFacts(touched)
-	return RecallResult{Facts: facts, Feedback: feedback, Retrieval: p.retrieval()}, nil
+	if p.citationIdentity {
+		facts, touched = fuseCitationFacts(agentActivity.facts, sharedActivity.facts, topK, p)
+	}
+	activity := recallActivity{
+		corpusSize: agentActivity.corpusSize + sharedActivity.corpusSize,
+		facts:      touched,
+		aliases:    append(agentActivity.aliases, sharedActivity.aliases...),
+	}
+	if p.collectReceipts {
+		activity.receipts = make(map[string]RecallReceipt, len(touched))
+		for _, f := range touched {
+			key := f.AgentID + "\x00" + f.ID
+			if r, ok := agentActivity.receipts[key]; ok {
+				activity.receipts[key] = r
+			} else if r, ok := sharedActivity.receipts[key]; ok {
+				activity.receipts[key] = r
+			}
+		}
+	}
+	s.recordRecallActivity(activity, mode)
+	return RecallResult{Facts: facts, Feedback: feedback, Retrieval: p.retrieval(), ReviewNotices: s.recalledReviewNotices(ctx, touched)}, activity, nil
 }
 
-// vectorSearchWithPolicy preserves the original backend request when no filter
-// is present. A filtered request needs an explicit completeness capability;
-// VectorStore's at-most-n contract cannot establish exhaustion.
-func (s *Store) vectorSearchWithPolicy(ctx context.Context, agentID, query string, n int, eligible map[string]int, p recallPolicy) ([]VectorResult, error) {
-	if !p.filtered() {
+// Untouched namespaces preserve the existing vector query contract. Revised
+// namespaces exclude retired IDs before the backend's result budget is cut.
+func (s *Store) vectorSearchWithPolicy(ctx context.Context, agentID, query string, n int, eligible map[string]int, p recallPolicy, revised bool) ([]VectorResult, error) {
+	if !p.filtered() && !revised {
+		var embedding []float32
+		var err error
 		if p.embedding == nil {
-			return s.vectorSearch(ctx, agentID, query, n)
+			embedding, err = s.embedder.Embed(ctx, query)
+			if err != nil {
+				return nil, nil
+			}
+		} else {
+			embedding, err = s.embedConfidenceQuery(ctx, query, p)
 		}
-		embedding, err := s.embedConfidenceQuery(ctx, query, p)
 		if err != nil || len(embedding) == 0 {
 			return nil, err
 		}
-		return s.vectors.Query(ctx, agentID, embedding, n)
+		results, err := s.vectors.Query(ctx, agentID, embedding, n)
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range results {
+			if _, live := eligible[result.ID]; !live {
+				// An older store can retain external vectors after their
+				// canonical tombstones were pruned. The limited result set
+				// cannot establish which live vectors they displaced.
+				return s.searchCanonicalVectors(ctx, agentID, embedding, n, eligible)
+			}
+		}
+		return results, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -207,21 +270,40 @@ func (s *Store) vectorSearchWithPolicy(ctx context.Context, agentID, query strin
 		return nil, fmt.Errorf("filtered vector embedding: %w", err)
 	}
 	if len(emb) == 0 {
+		if !p.filtered() {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("filtered vector embedding is empty")
+	}
+	restricted, restrictedOK := s.vectors.(EligibleVectorStore)
+	exhaustive, exhaustiveOK := s.vectors.(ExhaustiveVectorStore)
+	if !restrictedOK && !exhaustiveOK {
+		if revised {
+			return s.searchCanonicalVectors(ctx, agentID, emb, n, eligible)
+		}
+		return nil, fmt.Errorf("filtered vector retrieval requires eligible-query or explicit-exhaustion capability")
 	}
 	ids := make(map[string]bool, len(eligible))
 	for id := range eligible {
 		ids[id] = true
 	}
-	if backend, ok := s.vectors.(EligibleVectorStore); ok {
-		results, exhausted, err := backend.QueryEligible(ctx, agentID, emb, n, ids)
+	if restrictedOK {
+		results, exhausted, err := restricted.QueryEligible(ctx, agentID, emb, n, ids)
 		if err != nil {
 			return nil, err
 		}
 		if err := validateConfidenceVectors(results); err != nil {
+			if revised {
+				return s.searchCanonicalVectors(ctx, agentID, emb, n, eligible)
+			}
 			return nil, err
 		}
-		results = orderedEligibleVectors(results, ids)
+		ordered := orderedEligibleVectors(results, ids)
+		if revised && (len(results) > n || len(ordered) != len(results) ||
+			len(ordered) < min(n, len(eligible)) || len(ordered) < n && !exhausted) {
+			return s.searchCanonicalVectors(ctx, agentID, emb, n, eligible)
+		}
+		results = ordered
 		if len(results) < n && !exhausted {
 			return nil, fmt.Errorf("filtered vector query incomplete: exhaustion was not established")
 		}
@@ -230,17 +312,13 @@ func (s *Store) vectorSearchWithPolicy(ctx context.Context, agentID, query strin
 		}
 		return results, ctx.Err()
 	}
-	backend, ok := s.vectors.(ExhaustiveVectorStore)
-	if !ok {
-		return nil, fmt.Errorf("filtered vector retrieval requires eligible-query or explicit-exhaustion capability")
-	}
 	requested := n
 	seen := make(map[string]VectorResult)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		results, exhausted, err := backend.QueryExhaustive(ctx, agentID, emb, requested)
+		results, exhausted, err := exhaustive.QueryExhaustive(ctx, agentID, emb, requested)
 		if err != nil {
 			return nil, err
 		}
@@ -272,6 +350,9 @@ func (s *Store) vectorSearchWithPolicy(ctx context.Context, agentID, query strin
 			return all[:n], nil
 		}
 		if exhausted {
+			if revised && len(all) < min(n, len(eligible)) {
+				return s.searchCanonicalVectors(ctx, agentID, emb, n, eligible)
+			}
 			return all, nil
 		}
 		if !progress {

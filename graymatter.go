@@ -109,6 +109,7 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 	}
 
 	store, err := memory.Open(memory.StoreConfig{
+		MaxQuoteBytes:           cfg.MaxQuoteBytes,
 		DataDir:                 cfg.DataDir,
 		Embedder:                embedder,
 		DecayHalfLife:           cfg.DecayHalfLife,
@@ -272,12 +273,11 @@ func (m *Memory) Recall(ctx context.Context, agentID, query string) ([]string, e
 	return facts, nil
 }
 
-// Consolidate summarises and compacts memories for agentID.
-// It calls the configured LLM to produce summary facts, applies the
-// exponential decay curve, and prunes dead facts.
+// Consolidate runs decay, pruning, and configured knowledge-graph maintenance
+// for agentID. Automatic generative compaction is disabled.
 //
-// Consolidate is automatically triggered async after Remember when
-// Config.AsyncConsolidate is true. Call it manually for synchronous control.
+// Remember schedules this maintenance when Config.AsyncConsolidate is true.
+// Call Consolidate directly to run maintenance synchronously.
 func (m *Memory) Consolidate(ctx context.Context, agentID string) error {
 	if m.store == nil {
 		return nil
@@ -285,11 +285,12 @@ func (m *Memory) Consolidate(ctx context.Context, agentID string) error {
 	return m.store.Consolidate(ctx, agentID, m.cfg)
 }
 
-// ConsolidateWithReport runs consolidation and reports the outcome of its
-// summary phase. A report can accompany an error if effects are known.
+// ConsolidateWithReport runs one maintenance pass and reports that synthesis
+// was skipped. A report can accompany a maintenance error.
 func (m *Memory) ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error) {
 	if m.store == nil {
-		return memory.ConsolidationReport{Status: memory.ConsolidationNotAttempted, Reason: "operation_unavailable"}, memory.NewConsolidationError("operation_unavailable", m.initErr)
+		return memory.ConsolidationReport{Status: memory.ConsolidationNotAttempted, Reason: "operation_unavailable"},
+			memory.NewConsolidationError("operation_unavailable", m.initErr)
 	}
 	return m.store.ConsolidateWithReport(ctx, agentID, m.cfg)
 }

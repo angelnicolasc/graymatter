@@ -2,8 +2,8 @@ package session
 
 import bolt "go.etcd.io/bbolt"
 
-// Resume loads the latest checkpoint for agentID and returns it, ready to
-// reconstruct conversation context for the next agent run.
+// Resume loads the latest resumable checkpoint in the agentID namespace.
+// Callers may use its state and any saved messages to reconstruct context.
 //
 // Typical usage:
 //

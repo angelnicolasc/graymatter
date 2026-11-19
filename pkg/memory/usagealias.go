@@ -229,7 +229,7 @@ func (s *Store) recordPendingMiss(agentID string, terms []string) {
 	if err != nil {
 		return
 	}
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucketReformPending)
 		if err != nil {
 			return err
@@ -273,7 +273,7 @@ func (s *Store) peekPendingMiss(agentID string) (pendingMiss, bool) {
 
 // clearPendingMiss drops the agent's pending miss.
 func (s *Store) clearPendingMiss(agentID string) {
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketReformPending)
 		if b == nil {
 			return nil
@@ -297,7 +297,7 @@ func pairKey(agentID, u, v string) string {
 func (s *Store) recordPair(agentID, u, v string) int {
 	key := pairKey(agentID, u, v)
 	count := 0
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucketReformPairs)
 		if err != nil {
 			return err
@@ -322,7 +322,7 @@ func (s *Store) recordPair(agentID, u, v string) int {
 
 // clearPair drops the evidence after a successful promotion.
 func (s *Store) clearPair(agentID, u, v string) {
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketReformPairs)
 		if b == nil {
 			return nil
@@ -341,7 +341,7 @@ func (s *Store) promoteUsageAlias(ctx context.Context, agentID, u, v string) (Fa
 // reaching the promotion threshold. Runs once at Open.
 func (s *Store) pruneReformPairs() {
 	cutoff := s.now().Add(-pairMaxAge).UnixNano()
-	_ = s.db.Update(func(tx *bolt.Tx) error {
+	_ = s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketReformPairs)
 		if b == nil {
 			return nil

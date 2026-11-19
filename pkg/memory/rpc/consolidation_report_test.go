@@ -7,6 +7,7 @@ import (
 	"net"
 	netrpc "net/rpc"
 	"net/rpc/jsonrpc"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -18,13 +19,19 @@ import (
 
 const confirmedSummary = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
+func skippedReport() memory.ConsolidationReport {
+	return memory.ConsolidationReport{Status: memory.ConsolidationSkipped, Reason: "disabled", Maintenance: &memory.ConsolidationMaintenanceReport{
+		Decay: memory.MaintenanceComplete, Prune: memory.MaintenanceComplete, Graph: memory.MaintenanceSkipped,
+	}}
+}
+
 type reportingTestBackend struct {
 	failingBackend
-	reports, legacy atomic.Int32
-	probe           bool
-	result          memory.ConsolidationReport
-	err             error
-	deadline        chan time.Time
+	reports, legacy    atomic.Int32
+	probe, maintenance bool
+	result             memory.ConsolidationReport
+	err                error
+	deadline           chan time.Time
 }
 
 func (b *reportingTestBackend) ConsolidateWithReport(ctx context.Context, _ string, _ memory.ConsolidateConfig) (memory.ConsolidationReport, error) {
@@ -42,9 +49,10 @@ func (b *reportingTestBackend) Consolidate(context.Context, string, memory.Conso
 }
 
 func (b *reportingTestBackend) SupportsConsolidationReport() bool { return b.probe }
+func (b *reportingTestBackend) MaintenanceOnly() bool             { return b.maintenance }
 
 func TestReportingServerPreflightAndCapability(t *testing.T) {
-	backend := &reportingTestBackend{probe: true}
+	backend := &reportingTestBackend{probe: true, maintenance: true}
 	for _, tc := range []struct {
 		name    string
 		backend Backend
@@ -54,7 +62,8 @@ func TestReportingServerPreflightAndCapability(t *testing.T) {
 		{"missing config", backend, nil},
 		{"typed nil config", backend, (*rpcTestConfig)(nil)},
 		{"typed nil backend", (*reportingTestBackend)(nil), rpcTestConfig{}},
-		{"negative delegated capability", &reportingTestBackend{}, rpcTestConfig{}},
+		{"negative delegated capability", &reportingTestBackend{maintenance: true}, rpcTestConfig{}},
+		{"reporter without maintenance policy", &reportingTestBackend{probe: true}, rpcTestConfig{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := NewServer(tc.backend, tc.cfg)
@@ -87,8 +96,8 @@ func TestReportingServerPreflightAndCapability(t *testing.T) {
 }
 
 func TestReportServerRejectsInvalidBackendResultWithoutEcho(t *testing.T) {
-	backend := &reportingTestBackend{probe: true, result: memory.ConsolidationReport{
-		Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "ollama",
+	backend := &reportingTestBackend{probe: true, maintenance: true, result: memory.ConsolidationReport{
+		Status: "applied", Reason: "summary_applied", Provider: "ollama",
 		SummaryFactID: "invalid summary CANARY", SourcesRetired: 1,
 	}}
 	server := NewServer(backend, rpcTestConfig{})
@@ -102,9 +111,7 @@ func TestReportServerRejectsInvalidBackendResultWithoutEcho(t *testing.T) {
 }
 
 func TestContextDialReportAndLegacyMethods(t *testing.T) {
-	backend := &reportingTestBackend{probe: true, deadline: make(chan time.Time, 2), result: memory.ConsolidationReport{
-		Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: confirmedSummary, SourcesRetired: 2,
-	}}
+	backend := &reportingTestBackend{probe: true, maintenance: true, deadline: make(chan time.Time, 2), result: skippedReport()}
 	server := NewServer(backend, rpcTestConfig{})
 	dir, token := t.TempDir(), mustToken(t)
 	server.SetAuthToken(token)
@@ -138,7 +145,7 @@ func TestContextDialReportAndLegacyMethods(t *testing.T) {
 	defer cancelParent()
 	wantDeadline, _ := parent.Deadline()
 	result, err := client.ConsolidateWithReport(parent, "fixture")
-	if err != nil || result != backend.result || backend.reports.Load() != 1 || backend.legacy.Load() != 1 {
+	if err != nil || !reflect.DeepEqual(result, backend.result) || backend.reports.Load() != 1 || backend.legacy.Load() != 1 {
 		t.Fatalf("report=%+v err=%v report calls=%d legacy calls=%d", result, err, backend.reports.Load(), backend.legacy.Load())
 	}
 	if got := <-backend.deadline; !got.Equal(wantDeadline) {
@@ -236,7 +243,7 @@ func TestReportAgainstLegacyPeerNeverFallsBack(t *testing.T) {
 
 func TestReportCancellationWhilePingingNeverSendsMutation(t *testing.T) {
 	peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{
-		caps: []string{ConsolidationReportV1}, pingStarted: make(chan struct{}), pingRelease: make(chan struct{}),
+		caps: []string{ConsolidationReportV1, MaintenanceOnlyV1}, pingStarted: make(chan struct{}), pingRelease: make(chan struct{}),
 	}}
 	client := reportPipeClient(t, peer)
 	t.Cleanup(func() { close(peer.pingRelease) })
@@ -258,7 +265,7 @@ func TestReportCancellationWhilePingingNeverSendsMutation(t *testing.T) {
 
 func TestReportDeadlineWhilePingingNeverSendsMutation(t *testing.T) {
 	peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{
-		caps: []string{ConsolidationReportV1}, pingStarted: make(chan struct{}), pingRelease: make(chan struct{}),
+		caps: []string{ConsolidationReportV1, MaintenanceOnlyV1}, pingStarted: make(chan struct{}), pingRelease: make(chan struct{}),
 	}}
 	client := reportPipeClient(t, peer)
 	t.Cleanup(func() { close(peer.pingRelease) })
@@ -279,8 +286,8 @@ func TestReportDeadlineWhilePingingNeverSendsMutation(t *testing.T) {
 
 func TestReportDisconnectAfterPeerCommitDoesNotReplay(t *testing.T) {
 	committed, releaseResponse := make(chan struct{}), make(chan struct{})
-	peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{caps: []string{ConsolidationReportV1}}, handle: func(out *ConsolidateWithReportResponse) error {
-		out.Report = memory.ConsolidationReport{Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "ollama", SummaryFactID: confirmedSummary, SourcesRetired: 1}
+	peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{caps: []string{ConsolidationReportV1, MaintenanceOnlyV1}}, handle: func(out *ConsolidateWithReportResponse) error {
+		out.Report = skippedReport()
 		close(committed)
 		<-releaseResponse
 		return nil
@@ -328,7 +335,7 @@ func TestReportBlockedWriterClosesAndIsUnknownWithoutReplay(t *testing.T) {
 	client := newClient(conn, "pipe", DialOptions{CallTimeout: time.Second})
 	client.owned = true
 	defer client.Close()
-	if err := client.acceptPing(PingResponse{Protocol: Protocol, Capabilities: []string{ConsolidationReportV1}}); err != nil {
+	if err := client.acceptPing(PingResponse{Protocol: Protocol, Capabilities: []string{ConsolidationReportV1, MaintenanceOnlyV1}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -378,7 +385,7 @@ func TestReportCancellationBeforeDispatchAttemptsNoWrite(t *testing.T) {
 	client := newClient(conn, "pipe", DialOptions{CallTimeout: time.Second})
 	client.owned = true
 	defer client.Close()
-	if err := client.acceptPing(PingResponse{Protocol: Protocol, Capabilities: []string{ConsolidationReportV1}}); err != nil {
+	if err := client.acceptPing(PingResponse{Protocol: Protocol, Capabilities: []string{ConsolidationReportV1, MaintenanceOnlyV1}}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := client.ConsolidateWithReport(ctx, "fixture")
@@ -417,56 +424,47 @@ func TestAuthenticationWriteHonorsContextAndRejectsPartialPreamble(t *testing.T)
 }
 
 func TestReportWireKeepsKnownFatalAndRejectsInvalidResponsesAfterDispatch(t *testing.T) {
+	skipped := skippedReport()
 	for _, tc := range []struct {
 		name, expected string
 		report         memory.ConsolidationReport
 		fatal          *memory.ConsolidationDiagnostic
 		wireError      error
 	}{
-		{"uncertain summary", "summary_commit_uncertain", memory.ConsolidationReport{
-			Status: memory.ConsolidationUncertain, Reason: "summary_commit_uncertain", Provider: "anthropic", Diagnostic: &memory.ConsolidationDiagnostic{Code: "summary_commit_uncertain", Message: "diagnostic CANARY"},
-		}, &memory.ConsolidationDiagnostic{Code: "summary_commit_uncertain", Message: "fatal CANARY"}, nil},
-		{"hostile ID", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: "hostile ID CANARY\n", SourcesRetired: 1,
-		}, nil, nil},
-		{"lowercase ID", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: strings.ToLower(confirmedSummary), SourcesRetired: 1,
-		}, nil, nil},
-		{"overflow ID", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: "8" + confirmedSummary[1:], SourcesRetired: 1,
-		}, nil, nil},
-		{"overlong ID", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: confirmedSummary + "A", SourcesRetired: 1,
-		}, nil, nil},
-		{"negative retirement", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationApplied, Reason: "summary_applied", Provider: "anthropic", SummaryFactID: confirmedSummary, SourcesRetired: -1,
-		}, nil, nil},
-		{"skipped with provider", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationSkipped, Reason: "disabled", Provider: "anthropic",
-		}, nil, nil},
-		{"invalid HTTP diagnostic", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationFailed, Reason: "provider_error", Provider: "anthropic",
-			Diagnostic: &memory.ConsolidationDiagnostic{Code: "provider_http_error", Provider: "anthropic", HTTPStatus: 999},
-		}, nil, nil},
-		{"impossible tuple", "outcome_unknown", memory.ConsolidationReport{
-			Status: memory.ConsolidationPartial, Reason: "source_retirement_failed", Provider: "anthropic", SummaryFactID: confirmedSummary, Diagnostic: &memory.ConsolidationDiagnostic{Code: "source_retirement_failed"},
+		{"maintenance error", "store_error", skipped, &memory.ConsolidationDiagnostic{Code: "store_error", Message: "CANARY"}, nil},
+		{"reported synthesis", "outcome_unknown", memory.ConsolidationReport{
+			Status: "applied", Reason: "summary_applied", Provider: "anthropic", SummaryFactID: confirmedSummary, SourcesRetired: 1,
 		}, nil, nil},
 		{"unexpected RPC error after possible commit", "outcome_unknown", memory.ConsolidationReport{}, nil, errors.New("raw server CANARY")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{caps: []string{ConsolidationReportV1}}, handle: func(resp *ConsolidateWithReportResponse) error {
+			peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{caps: []string{ConsolidationReportV1, MaintenanceOnlyV1}}, handle: func(resp *ConsolidateWithReportResponse) error {
 				*resp = ConsolidateWithReportResponse{Report: tc.report, Fatal: tc.fatal}
 				return tc.wireError
 			}}
 			client := reportPipeClient(t, peer)
 			result, err := client.ConsolidateWithReport(context.Background(), "fixture")
 			var known *memory.ConsolidationError
-			if !errors.As(err, &known) || known.Diagnostic().Code != tc.expected || !errors.Is(err, memory.ErrMutationOutcomeUnknown) || strings.Contains(err.Error(), "CANARY") || peer.reports.Load() != 1 || peer.legacy.Load() != 0 {
+			if !errors.As(err, &known) || known.Diagnostic().Code != tc.expected || strings.Contains(err.Error(), "CANARY") || peer.reports.Load() != 1 || peer.legacy.Load() != 0 {
 				t.Fatalf("result=%+v error=%v report=%d legacy=%d", result, err, peer.reports.Load(), peer.legacy.Load())
 			}
-			if tc.expected == "outcome_unknown" && result.Status != "" || tc.expected == "summary_commit_uncertain" && (result.Status != memory.ConsolidationUncertain || result.Diagnostic == nil || strings.Contains(result.Diagnostic.Message, "CANARY")) {
-				t.Fatalf("incorrect handling of report: %+v", result)
+			unknown := tc.expected == "outcome_unknown"
+			if errors.Is(err, memory.ErrMutationOutcomeUnknown) != unknown || unknown && result.Status != "" || !unknown && !reflect.DeepEqual(result, skipped) {
+				t.Fatalf("incorrect handling of report: %+v, %v", result, err)
 			}
 		})
+	}
+}
+
+func TestReportAgainstPreG1ReportingPeerNeverMutates(t *testing.T) {
+	peer := &ReportWirePeer{LegacyReportPeer: &LegacyReportPeer{caps: []string{ConsolidationReportV1}},
+		handle: func(*ConsolidateWithReportResponse) error {
+			t.Error("pre-G1 reporting RPC was called")
+			return nil
+		}}
+	client := reportPipeClient(t, peer)
+	_, err := client.ConsolidateWithReport(context.Background(), "fixture")
+	if !errors.Is(err, ErrUnsupportedCapability) || peer.reports.Load() != 0 || peer.legacy.Load() != 0 {
+		t.Fatalf("unsupported peer returned %v; report calls=%d legacy calls=%d", err, peer.reports.Load(), peer.legacy.Load())
 	}
 }

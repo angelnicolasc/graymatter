@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -226,9 +225,7 @@ func TestConsolidate_Empty(t *testing.T) {
 	}
 }
 
-// TestConsolidate_SummarizeGuard verifies that with no LLM configured the
-// summarisation step is skipped gracefully (no data loss, no error).
-func TestConsolidate_SummarizeGuard(t *testing.T) {
+func TestConsolidate_MaintenancePreservesYoungFacts(t *testing.T) {
 	s, cleanup := openTestStore(t)
 	defer cleanup()
 
@@ -238,160 +235,17 @@ func TestConsolidate_SummarizeGuard(t *testing.T) {
 		_ = s.Put(ctx, "noLLM-agent", fmt.Sprintf("Important fact %d", i))
 	}
 
-	// threshold=n → summarise would fire, but llm="" → should be skipped.
-	cfg := &testConsolidateCfg{threshold: n, halfLife: 720 * time.Hour, llm: ""}
+	cfg := &testConsolidateCfg{threshold: n - 1, halfLife: 720 * time.Hour}
 	if err := s.Consolidate(ctx, "noLLM-agent", cfg); err != nil {
 		t.Fatalf("Consolidate with no LLM: %v", err)
 	}
-	// All facts should still exist (no summarisation happened).
-	facts, _ := s.List("noLLM-agent")
-	if len(facts) == 0 {
-		t.Error("all facts vanished despite no LLM summarisation running")
+	facts, err := s.List("noLLM-agent")
+	if err != nil || len(facts) != n {
+		t.Fatalf("expected %d young facts after maintenance, got %d: %v", n, len(facts), err)
 	}
 }
 
-func TestConsolidate_ConcurrentIdenticalPutKeepsSummaryIdentity(t *testing.T) {
-	s, cleanup := openTestStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	var tick atomic.Int64
-	s.now = func() time.Time { return time.Unix(tick.Add(1), 0).UTC() }
-
-	const agent = "concurrent-consolidators"
-	const summary = "the deploy window is Tuesday 02:00 UTC"
-	first, err := s.putReturningFact(ctx, agent, "deploys used to be Monday")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := s.putReturningFact(ctx, agent, "the deploy window moved once already")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	summaryCommitted := make(chan string)
-	releaseConsolidation := make(chan struct{})
-	var claimed atomic.Bool
-	s.cfg.OnPut = func(_, id string, _ time.Duration) {
-		if claimed.CompareAndSwap(false, true) {
-			summaryCommitted <- id
-			<-releaseConsolidation
-		}
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.applyProposal(ctx, agent, []Fact{first, second}, &consolidationProposal{
-			Summary:  summary,
-			Consumes: []string{first.ID, second.ID},
-		})
-		done <- err
-	}()
-
-	correctID := <-summaryCommitted // committed by this cycle; applyProposal is held before tombstoning
-	interloper, putErr := s.putReturningFact(ctx, agent, summary)
-	close(releaseConsolidation)
-	applyErr := <-done
-	if putErr != nil {
-		t.Fatal(putErr)
-	}
-	if interloper.ID == correctID {
-		t.Fatal("interleaved write reused the consolidation summary identity")
-	}
-	if applyErr != nil {
-		t.Fatal(applyErr)
-	}
-	for _, victim := range []Fact{first, second} {
-		stored, ok := s.loadFact(agent, victim.ID)
-		if !ok || stored.SupersededBy != correctID {
-			t.Errorf("victim %q: present=%v SupersededBy=%q, want %q (interloper %q)",
-				victim.ID, ok, stored.SupersededBy, correctID, interloper.ID)
-		}
-	}
-}
-
-// TestConsolidate_PutBeforeDelete verifies the atomic contract: when
-// summarisation succeeds, old facts are deleted; if Put fails, nothing is lost.
-// We test the happy path here (Put succeeds, batch is deleted).
-func TestConsolidate_PutBeforeDelete(t *testing.T) {
-	s, cleanup := openTestStore(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	const n = 20
-	for i := 0; i < n; i++ {
-		_ = s.Put(ctx, "atomic-agent", fmt.Sprintf("Batch fact %d", i))
-	}
-
-	// Weight all facts identically so all qualify for the summarise batch.
-	// With llm="" the summarise step is skipped — nothing deleted.
-	cfg := &testConsolidateCfg{threshold: n, halfLife: 720 * time.Hour, llm: ""}
-	if err := s.Consolidate(ctx, "atomic-agent", cfg); err != nil {
-		t.Fatalf("Consolidate: %v", err)
-	}
-
-	facts, _ := s.List("atomic-agent")
-	// Without a real LLM no summarisation fires; original n facts intact.
-	if len(facts) != n {
-		t.Errorf("expected %d facts, got %d", n, len(facts))
-	}
-}
-
-// TestConsolidate_OllamaUnreachableReports covers the misconfiguration that
-// used to be invisible. Ollama is a supported embedding backend, so setting
-// ConsolidateLLM="ollama" looks reasonable — and when nothing answers on that
-// URL, consolidation must say so through OnConsolidateError instead of
-// quietly doing nothing forever. The cycle itself still runs decay and
-// pruning, and the batch stays live: a broken summariser degrades to the
-// exact behaviour of ConsolidateLLM="".
-func TestConsolidate_OllamaUnreachableReports(t *testing.T) {
-	var reported []error
-	dir := t.TempDir()
-	s, err := Open(StoreConfig{
-		DataDir:       dir,
-		Embedder:      embedding.AutoDetect(embedding.Config{Mode: embedding.ModeKeyword}),
-		DecayHalfLife: 720 * time.Hour,
-		OnConsolidateError: func(_ string, err error) {
-			reported = append(reported, err)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer s.Close()
-
-	ctx := context.Background()
-	// Port 1 on localhost is reserved and refuses connections immediately.
-	cfg := &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour, llm: "ollama",
-		ollamaURL: "http://127.0.0.1:1"}
-	for i := 0; i < 5; i++ { // over the threshold, so summarisation is attempted
-		if err := s.Put(ctx, "ollama-agent", fmt.Sprintf("observation number %d", i)); err != nil {
-			t.Fatalf("Put: %v", err)
-		}
-	}
-
-	if err := s.Consolidate(ctx, "ollama-agent", cfg); err != nil {
-		t.Fatalf("Consolidate: %v", err)
-	}
-
-	if len(reported) == 0 {
-		t.Error("an unreachable consolidation LLM reported nothing")
-	}
-	for _, e := range reported {
-		if errors.Is(e, ErrConsolidateLLMUnsupported) {
-			t.Errorf("sentinel ErrConsolidateLLMUnsupported is retired but was returned: %v", e)
-		}
-	}
-	facts, _ := s.List("ollama-agent")
-	if len(facts) != 5 {
-		t.Errorf("fallback must leave the store untouched; got %d facts, want 5", len(facts))
-	}
-}
-
-// TestConsolidate_DisabledLLMReportsNothing is the other half: an empty
-// ConsolidateLLM means summarisation is off by choice, not broken, and must
-// stay silent.
-func TestConsolidate_DisabledLLMReportsNothing(t *testing.T) {
+func TestConsolidate_MaintenanceReportsNoProviderError(t *testing.T) {
 	var reported []error
 	dir := t.TempDir()
 	s, err := Open(StoreConfig{

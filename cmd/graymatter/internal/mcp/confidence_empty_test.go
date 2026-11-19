@@ -12,7 +12,7 @@ import (
 )
 
 func TestConfidenceMCPEmptyResultsKeepSchemaAndTextPolicy(t *testing.T) {
-	s, _ := confidenceTestServer(t)
+	s, _ := confidenceFullTestServer(t)
 	add := confidenceToolCall(t, s, "memory_add", map[string]any{"agent_id": "excluded", "text": "concealed unverified fact", "confidence": "unverified"})
 	if add["isError"] == true {
 		t.Fatalf("seed failed: %#v", add)
@@ -79,12 +79,12 @@ func (b *confidenceUnsupportedBackend) RecallExplain(context.Context, string, st
 }
 
 func TestConfidenceMCPInvalidAndUnsupportedOptionsHaveNoEffects(t *testing.T) {
-	_, mem := confidenceTestServer(t)
+	_, mem := confidenceFullTestServer(t)
 	if err := mem.Remember(context.Background(), "a", "original fact"); err != nil {
 		t.Fatal(err)
 	}
 	backend := &confidenceUnsupportedBackend{Backend: NewDirectBackend(mem, nil)}
-	s := New(backend, "test")
+	s := New(backend, "test", WithFullCatalog())
 	for _, call := range []struct {
 		tool string
 		args map[string]any
@@ -127,9 +127,9 @@ func (*confidenceFailedRecallBackend) RecallExplainWithOptions(context.Context, 
 }
 
 func TestConfidenceMCPAllFailedBatchIsAnError(t *testing.T) {
-	_, mem := confidenceTestServer(t)
+	_, mem := confidenceFullTestServer(t)
 	backend := &confidenceFailedRecallBackend{Backend: NewDirectBackend(mem, nil)}
-	s := New(backend, "test")
+	s := New(backend, "test", WithFullCatalog())
 	result := confidenceToolCall(t, s, "memory_search_batch", map[string]any{"agent_id": "a", "queries": []string{"first", "second"}, "confidence_weight": 0.2})
 	wire, _ := json.Marshal(result)
 	if result["isError"] != true || result["structuredContent"] != nil || backend.calls.Load() != 2 || !strings.Contains(string(wire), "All recall queries failed") || !strings.Contains(string(wire), "explicit backend failure") {
@@ -167,7 +167,7 @@ func (b *confidenceFlappingDefaultBackend) RecallExplainWithOptions(ctx context.
 }
 
 func TestConfidenceMCPBatchResolvesConfiguredPolicyOnce(t *testing.T) {
-	_, mem := confidenceTestServerWithWeight(t, .2)
+	_, mem := confidenceFullTestServerWithWeight(t, .2)
 	verified := "verified"
 	if _, err := mem.RememberWithOptions(context.Background(), "a", "policy archive routing", memory.WriteOptions{Confidence: &verified}); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestConfidenceMCPBatchResolvesConfiguredPolicyOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			direct := NewDirectBackend(mem, nil)
 			backend := &confidenceFlappingDefaultBackend{Backend: direct, recaller: direct, weights: make(chan float64, 3)}
-			s := New(backend, "test")
+			s := New(backend, "test", WithFullCatalog())
 			args := map[string]any{"agent_id": "a", "queries": []string{"policy", "archive", "routing"}}
 			if filtered {
 				args["min_confidence"] = verified

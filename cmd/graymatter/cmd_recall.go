@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/lineageview"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
@@ -32,7 +34,8 @@ recall (semantic + keyword + recency).
 With --explain, each returned fact carries its receipt: the per-signal
 ranks that produced its fused score, its stored weight and age, and its
 provenance (fact ID, written-at instant, tombstone state). The same
-ranking runs either way — explain only reads it out.
+ranking runs either way — explain only reads it out. Results affected by an
+open conflict include its ID and source state.
 
 --min-confidence filters before ranking. --confidence-weight applies the
 bounded preference base RRF * (1 + weight*c), where c is 1 for verified,
@@ -111,6 +114,10 @@ is a writer declaration, not automated verification.`,
 				return err
 			}
 
+			issues, err := readSubjectIssues(ctx, store, recallSubjectNamespaces(agentID, settings)...)
+			if err != nil {
+				return fmt.Errorf("subject diagnostics: %w", err)
+			}
 			if jsonOut {
 				out := map[string]any{
 					"agent_id": agentID,
@@ -122,6 +129,12 @@ is a writer declaration, not automated verification.`,
 				}
 				if result.Retrieval != nil {
 					out["retrieval"] = result.Retrieval
+				}
+				if len(result.ReviewNotices) > 0 {
+					out["conflict_notices"] = result.ReviewNotices
+				}
+				if issues != nil {
+					out["subject_issues"] = issues
 				}
 				data, _ := json.Marshal(out)
 				fmt.Println(string(data))
@@ -138,6 +151,7 @@ is a writer declaration, not automated verification.`,
 				if feedback != "" {
 					fmt.Printf("\n%s\n", feedback)
 				}
+				printSubjectWarning(issues)
 				return nil
 			}
 
@@ -151,6 +165,10 @@ is a writer declaration, not automated verification.`,
 			if feedback != "" {
 				fmt.Printf("\n%s\n", feedback)
 			}
+			if notice := memory.ReviewNoticesText(result.ReviewNotices); notice != "" {
+				fmt.Printf("\n%s\n", notice)
+			}
+			printSubjectWarning(issues)
 			return nil
 		},
 	}
@@ -162,6 +180,22 @@ is a writer declaration, not automated verification.`,
 	cmd.Flags().StringVar(&minimum, "min-confidence", "", "minimum effective confidence: unverified, inferred or verified; suppresses graph hints")
 	cmd.Flags().Float64Var(&weight, "confidence-weight", memory.DefaultConfidenceWeight, "confidence preference in [0,0.5]; zero preserves an explicit filter")
 	return cmd
+}
+
+func recallSubjectNamespaces(agentID string, settings recallSettings) []string {
+	if settings.shared {
+		return []string{memory.SharedAgentID}
+	}
+	if settings.all && agentID != memory.SharedAgentID {
+		return []string{agentID, memory.SharedAgentID}
+	}
+	return []string{agentID}
+}
+
+func printSubjectWarning(issues *memory.SubjectIssues) {
+	if warning := issues.Warning(); warning != "" {
+		fmt.Println(warning)
+	}
 }
 
 // runRecallBatch answers several queries in one invocation.
@@ -191,6 +225,12 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 	}
 	// Fully omitted zero policy uses the compatibility endpoints, keeping one
 	// zero policy even if the daemon restarts with a different default mid-batch.
+	confidenceMetadata := useOptions
+	if journal, ok := store.(interface{ ReviewJournalSupported() bool }); ok && journal.ReviewJournalSupported() && !useOptions {
+		zero := 0.0
+		opts.ConfidenceWeight = &zero
+		useOptions = true
+	}
 	settings.options, settings.legacy = opts, !useOptions
 
 	ctx := cmd.Context()
@@ -203,48 +243,41 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		Facts     []string                  `json:"facts"`
 		Error     string                    `json:"error,omitempty"`
 		Retrieval *memory.RetrievalMetadata `json:"retrieval,omitempty"`
+		Notices   []memory.ReviewNotice     `json:"-"`
 	}
-	rows := make([]row, len(queries))
-	limit := runtime.GOMAXPROCS(0)
-	if limit > len(queries) {
-		limit = len(queries)
+	batch, batchError := cliRecallBatch(ctx, store, agentID, queries, topK, settings)
+	if batchError != nil && len(batch) == 0 {
+		batch = make([]memory.BatchResult, len(queries))
+		for i, query := range queries {
+			batch[i] = memory.BatchResult{Query: query, Err: batchError}
+		}
 	}
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-	for i, q := range queries {
-		wg.Add(1)
-		go func(i int, q string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			rows[i].Query = q
-			result, err := cliRecall(ctx, store, agentID, q, topK, settings)
-			if err != nil {
-				// One bad query must not lose the answers to the others.
-				rows[i].Error = err.Error()
-				return
+	rows := make([]row, len(batch))
+	for i, result := range batch {
+		rows[i].Query = result.Query
+		if result.Err != nil {
+			rows[i].Error = result.Err.Error()
+			batch[i].Facts = nil
+		} else {
+			rows[i].Facts, rows[i].Notices = result.Facts, result.ReviewNotices
+			if confidenceMetadata {
+				rows[i].Retrieval = result.Retrieval
 			}
-			rows[i].Facts, rows[i].Retrieval = result.Facts, result.Retrieval
-		}(i, q)
-	}
-	wg.Wait()
-
-	batch := make([]memory.BatchResult, 0, len(rows))
-	for _, r := range rows {
-		batch = append(batch, memory.BatchResult{Query: r.Query, Facts: r.Facts})
+		}
 	}
 	merged := memory.MergedFacts(batch)
 	var retrieval *memory.RetrievalMetadata
 	var failures []string
+	var notices []memory.ReviewNotice
 	for _, r := range rows {
-		if r.Retrieval != nil {
+		notices = memory.MergeReviewNotices(notices, r.Notices)
+		if r.Retrieval != nil && (retrieval == nil || retrieval.VectorFallback == "") {
 			retrieval = r.Retrieval
 		}
 		if r.Error != "" {
 			failures = append(failures, r.Error)
 		}
 	}
-	var batchError error
 	if len(rows) > 0 && len(failures) == len(rows) {
 		batchError = fmt.Errorf("all recall queries failed: %s", strings.Join(failures, "; "))
 	}
@@ -253,6 +286,10 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		scope = "all"
 	} else if settings.shared {
 		scope = "shared"
+	}
+	issues, err := readSubjectIssues(ctx, store, recallSubjectNamespaces(agentID, settings)...)
+	if err != nil {
+		return fmt.Errorf("subject diagnostics: %w", err)
 	}
 
 	if jsonOut {
@@ -268,6 +305,12 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		}
 		if retrieval != nil {
 			out["retrieval"] = retrieval
+		}
+		if len(notices) > 0 {
+			out["conflict_notices"] = notices
+		}
+		if issues != nil {
+			out["subject_issues"] = issues
 		}
 		data, _ := json.Marshal(out)
 		fmt.Println(string(data))
@@ -291,6 +334,7 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 		if len(failures) > 0 {
 			fmt.Printf("%d queries failed: %s\n", len(failures), strings.Join(failures, "; "))
 		}
+		printSubjectWarning(issues)
 		return batchError
 	}
 	// Grouped by query, not as one merged block.
@@ -320,7 +364,45 @@ func runRecallBatch(cmd *cobra.Command, agentID string, queries []string, topK i
 			fmt.Println(strings.Join(r.Facts, "\n"))
 		}
 	}
+	if notice := memory.ReviewNoticesText(notices); notice != "" {
+		fmt.Printf("\n%s\n", notice)
+	}
+	printSubjectWarning(issues)
 	return batchError
+}
+
+func cliRecallBatch(ctx context.Context, store cliStore, agentID string, queries []string, topK int, settings recallSettings) ([]memory.BatchResult, error) {
+	if recaller, ok := store.(memory.ScopedBatchRecaller); ok {
+		namespace := agentID
+		if settings.shared {
+			namespace = memory.SharedAgentID
+		}
+		var options *memory.RecallOptions
+		if !settings.legacy {
+			options = &settings.options
+		}
+		rows, err := recaller.BatchRecallScoped(ctx, namespace, queries, topK, settings.all, options)
+		if !errors.Is(err, memory.ErrBatchRecallUnsupported) {
+			return rows, err
+		}
+	}
+
+	rows := make([]memory.BatchResult, len(queries))
+	limit := min(runtime.GOMAXPROCS(0), len(queries))
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i, query := range queries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			result, err := cliRecall(ctx, store, agentID, query, topK, settings)
+			rows[i] = memory.BatchResult{Query: query, Facts: result.Facts, Retrieval: result.Retrieval, ReviewNotices: result.ReviewNotices, Err: err}
+		}()
+	}
+	wg.Wait()
+	return rows, nil
 }
 
 // runRecallExplain is the --explain path. The receipt payload is the stable
@@ -348,6 +430,10 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		return err
 	}
 
+	issues, err := readSubjectIssues(cmd.Context(), store, agentID)
+	if err != nil {
+		return fmt.Errorf("subject diagnostics: %w", err)
+	}
 	if jsonOut {
 		out := map[string]any{
 			"agent_id": agentID,
@@ -358,6 +444,9 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		}
 		if retrieval != nil {
 			out["retrieval"] = retrieval
+		}
+		if issues != nil {
+			out["subject_issues"] = issues
 		}
 		data, _ := json.Marshal(out)
 		fmt.Println(string(data))
@@ -371,13 +460,16 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		if !quiet {
 			fmt.Printf("No memories found for agent %q matching %q.\n", agentID, query)
 		}
+		printSubjectWarning(issues)
 		return nil
 	}
 
 	if !quiet {
 		fmt.Printf("# Memory receipts [%s] / %q\n\n", agentID, query)
 	}
+	var notices []memory.ReviewNotice
 	for i, r := range receipts {
+		notices = memory.MergeReviewNotices(notices, r.ReviewNotices)
 		fmt.Printf("%d. %s\n", i+1, r.Text)
 		fmt.Printf("   score %.4f (vector %d · keyword %d · recency %d · k %.0f) · weight %.3f · age %.1fd · written %s\n",
 			r.Ranks.FusedScore, r.Ranks.VectorRank, r.Ranks.KeywordRank, r.Ranks.RecencyRank,
@@ -386,21 +478,19 @@ func runRecallExplain(cmd *cobra.Command, store cliStore, agentID, query string,
 		if r.Ranking != nil {
 			fmt.Printf("   final score %.8f = base %.8f * factor %g; effective confidence %s, weight %g, policy %s\n", r.Ranking.FinalScore, r.Ranking.BaseScore, r.Ranking.Factor, r.Ranking.EffectiveConfidence, r.Ranking.ConfidenceWeight, r.Ranking.Policy)
 		}
-		// A corrected value is worth more than the value alone: it says the
-		// store held something else and that this replaced it. Without the
-		// line, a revision is indistinguishable from a fact nobody ever
-		// questioned.
-		if n := len(r.Provenance.Supersedes); n > 0 {
-			noun := "version"
-			if n > 1 {
-				noun = "versions"
-			}
-			fmt.Printf("   supersedes %d earlier %s: %s\n", n, noun,
-				strings.Join(r.Provenance.Supersedes, ", "))
+		for _, line := range lineageview.Lines(r.Provenance.LineageProjection) {
+			fmt.Printf("   %s\n", line)
+		}
+		if len(r.Provenance.Supersedes) > 0 {
+			fmt.Printf("   Supersedes IDs (compatibility field) · %s\n", strings.Join(r.Provenance.Supersedes, ", "))
 		}
 		if len(r.KGLinks) > 0 {
 			fmt.Printf("   kg_links %s\n", strings.Join(r.KGLinks, ", "))
 		}
 	}
+	if notice := memory.ReviewNoticesText(notices); notice != "" {
+		fmt.Printf("\n%s\n", notice)
+	}
+	printSubjectWarning(issues)
 	return nil
 }

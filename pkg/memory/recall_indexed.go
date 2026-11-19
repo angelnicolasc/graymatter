@@ -60,31 +60,36 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 	}
 	start := time.Now()
 	doStem := s.cfg.StemKeywords
-	// Compact ranking and canonical head/feedback loads use several read
-	// transactions. A confidence mutation between them must not mix an old
-	// eligibility/score with new provenance. Guard only active confidence
-	// calls; legacy zero-weight calls retain their existing read cost.
+	// Index and canonical reads span several transactions. A revision
+	// overlapping this pass requires one canonical snapshot instead.
 	var initial indexState
 	var initialFound bool
-	if policy.metadata {
-		if err := s.db.View(func(tx *bolt.Tx) error {
+	var vectorState recallVectorState
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		vectorState = recallVectorStateTx(tx, agentID)
+		if policy.metadata {
 			initial, initialFound = idxReadState(tx, agentID)
-			return nil
-		}); err != nil {
-			return nil, err
 		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if vectorState.pending {
+		return nil, errIndexUnusable
 	}
 	stable := func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !policy.metadata {
-			return nil
-		}
 		return s.db.View(func(tx *bolt.Tx) error {
-			current, found := idxReadState(tx, agentID)
-			if !initialFound || !found || current != initial {
+			if recallVectorStateTx(tx, agentID).revision != vectorState.revision {
 				return errIndexUnusable
+			}
+			if policy.metadata {
+				current, found := idxReadState(tx, agentID)
+				if !initialFound || !found || current != initial {
+					return errIndexUnusable
+				}
 			}
 			return nil
 		})
@@ -123,6 +128,15 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 			spineIdx[live[i].id] = i
 		}
 	}
+	effectiveQuery := query
+	var activated []string
+	if len(aliasIDs) != 0 {
+		aliases, err := s.idxFetchContext(ctx, agentID, aliasIDs)
+		if err != nil {
+			return nil, err
+		}
+		effectiveQuery, activated = expandQuery(query, parseAliasFacts(aliases))
+	}
 	if len(live) == 0 {
 		if err := stable(); err != nil {
 			return nil, err
@@ -130,21 +144,17 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 		if !policy.preview && s.cfg.OnRecall != nil {
 			s.cfg.OnRecall(agentID, query, 0, time.Since(start))
 		}
+		if len(activated) != 0 {
+			return &recallPipeline{activatedAliases: activated, activityOnly: true, nowT: s.now()}, nil
+		}
 		return nil, nil
 	}
-
-	aliases, err := s.idxFetchContext(ctx, agentID, aliasIDs)
-	if err != nil {
-		return nil, err
-	}
-	aliasMap := parseAliasFacts(aliases)
-	effectiveQuery := expandQuery(query, aliasMap, doStem)
 
 	// Vector search names its own candidates; they join the set so a fact the
 	// embedder likes is scored and returnable even when it shares no term with
 	// the query.
 	vectorRank := make(map[string]int, min(vectorBudget(topK), len(live)))
-	vecResults, vecErr := s.vectorSearchWithPolicy(ctx, agentID, effectiveQuery, vectorBudget(topK), spineIdx, policy)
+	vecResults, vectorFallback, vecErr := s.searchSnapshotVectors(ctx, agentID, effectiveQuery, vectorBudget(topK), spineIdx, policy, vectorState, len(tombIDs) != 0)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -431,7 +441,7 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 				return nil
 			}
 			tf := make(map[string]int)
-			for _, t := range tokenizeStem(f.Text, doStem) {
+			for _, t := range tokenizeStem(factLexicalText(f), doStem) {
 				tf[t]++
 			}
 			tfByID[id] = tf
@@ -450,7 +460,11 @@ func (s *Store) runRecallPipelineIndexedWithPolicy(ctx context.Context, agentID,
 	if err := stable(); err != nil {
 		return nil, err
 	}
+	policy.noteVectorFallback(vectorFallback)
 	return &recallPipeline{
+		corpusSize:       len(live),
+		activatedAliases: activated,
+
 		policy:          policy,
 		baseScores:      baseScores,
 		facts:           factsOut,
@@ -839,7 +853,7 @@ func (s *Store) idxSeedDocsContext(ctx context.Context, agentID string, seeds ma
 		if ctx.Err() != nil {
 			return nil
 		}
-		toks := tokenizeStem(f.Text, doStem)
+		toks := tokenizeStem(factLexicalText(f), doStem)
 		tf := make(map[string]int, len(toks))
 		for _, t := range toks {
 			tf[t]++

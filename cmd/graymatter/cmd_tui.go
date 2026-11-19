@@ -170,12 +170,13 @@ type agentsLoadedMsg struct {
 	generation uint64
 }
 type factsLoadedMsg struct {
-	facts      []factItem
-	agent      string
-	generation uint64
-	next       string
-	total      int
-	appendPage bool
+	facts         []factItem
+	agent         string
+	generation    uint64
+	next          string
+	total         int
+	appendPage    bool
+	subjectIssues *memory.SubjectIssues
 }
 type sessionsLoadedMsg struct {
 	sessions   []sessionItem
@@ -195,10 +196,11 @@ type checkpointsLoadedMsg struct {
 	err         error
 }
 type recallLoadedMsg struct {
-	agent, query string
-	generation   uint64
-	receipts     []memory.RecallReceipt
-	err          error
+	agent, query  string
+	generation    uint64
+	receipts      []memory.RecallReceipt
+	err           error
+	subjectIssues *memory.SubjectIssues
 }
 type mutationMsg struct {
 	action, agent string
@@ -261,6 +263,8 @@ type tuiModel struct {
 	factQuery                  string
 	nextFactCursor             string
 	factTotal                  int
+	factSubjectWarning         string
+	recallSubjectWarning       string
 	factsGeneration            uint64
 	recallGeneration           uint64
 	checkpointGeneration       uint64
@@ -270,7 +274,8 @@ type tuiModel struct {
 	input                      textinput.Model
 	editor                     textarea.Model
 	inputMode                  string // palette, filter, recall, namespace, graph-source
-	modal                      string // add, revise, retire, kill, help
+	modal                      string // add, revise, retire, kill, help, lineage
+	lineage                    tuiLineage
 	modalFact                  memory.Fact
 	modalAgent, modalSession   string
 	busy                       bool
@@ -416,6 +421,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		var facts []memory.Fact
+		var issues *memory.SubjectIssues
 		var err error
 		var next string
 		total := 0
@@ -428,6 +434,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 			var page memory.FactPage
 			page, err = p.ListFacts(ctx, agent, mode, query, cursor, 100)
 			facts, next, total = page.Facts, page.NextCursor, page.Total
+			issues = page.SubjectIssues
 		} else {
 			facts, err = st.List(agent)
 			if err == nil {
@@ -448,7 +455,7 @@ func (m *tuiModel) loadFactPage(agent, cursor string) tea.Cmd {
 		for i, f := range facts {
 			items[i] = factItem{f}
 		}
-		return factsLoadedMsg{facts: items, agent: agent, generation: g, next: next, total: total, appendPage: cursor != ""}
+		return factsLoadedMsg{facts: items, agent: agent, generation: g, next: next, total: total, appendPage: cursor != "", subjectIssues: issues}
 	}
 }
 func matchFact(f memory.Fact, mode, query string) bool {
@@ -550,7 +557,11 @@ func (m *tuiModel) inspectRecall(query string) tea.Cmd {
 			return recallLoadedMsg{agent: agent, query: query, generation: g, err: fmt.Errorf("safe inspection unavailable; update the store daemon")}
 		}
 		rs, e := p.InspectRecall(ctx, agent, query, 8)
-		return recallLoadedMsg{agent, query, g, rs, e}
+		result := recallLoadedMsg{agent: agent, query: query, generation: g, receipts: rs, err: e}
+		if e == nil {
+			result.subjectIssues, result.err = readSubjectIssues(ctx, st, agent)
+		}
+		return result
 	}
 }
 
@@ -563,6 +574,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		changed := m.width != msg.Width || m.height != msg.Height
 		m.width, m.height = msg.Width, msg.Height
+		if m.modal == "lineage" {
+			m.sizeLineageView()
+		}
 		m.updateSizes()
 		m.syncPreview(false)
 		if changed {
@@ -587,6 +601,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.handleMouse(msg))
 		}
 	case tea.MouseWheelMsg:
+		if m.mouse && m.modal == "lineage" {
+			var cmd tea.Cmd
+			m.lineage.view, cmd = m.lineage.view.Update(msg)
+			return m, cmd
+		}
 		if m.mouse && m.modal == "" && m.inputMode == "" {
 			if m.activeTab == tabUsage {
 				return m, m.updateUsage(msg)
@@ -644,6 +663,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.factsGeneration = msg.generation
 		m.loaded("memory", nil)
+		m.factSubjectWarning = msg.subjectIssues.Warning()
 		old := m.selectedFactID()
 		if old == "" {
 			old = m.restoreFactID
@@ -720,12 +740,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			setListItems(&m.checkpointList, items)
 			m.syncPreview(false)
 		}
+	case lineageLoadedMsg:
+		m.lineageLoaded(msg)
 	case recallLoadedMsg:
 		if msg.generation != m.recallGeneration || msg.agent != m.namespace {
 			break
 		}
 		m.loaded("recall", msg.err)
 		if msg.err == nil {
+			m.recallSubjectWarning = msg.subjectIssues.Warning()
 			items := make([]list.Item, len(msg.receipts))
 			for i, r := range msg.receipts {
 				items[i] = receiptItem{r, i + 1}
@@ -768,7 +791,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case mutationMsg:
 		m.busy = false
-		if msg.err != nil {
+		knownRevision := msg.action == "revise" && msg.fact.ID != ""
+		if msg.err != nil && !knownRevision {
 			m.status = "Action failed: " + tuiPlain(msg.err.Error())
 			if errors.Is(msg.err, memory.ErrMutationOutcomeUnknown) {
 				m.modal = ""
@@ -784,6 +808,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.modal = ""
 			m.status = msg.action + " confirmed"
+			if msg.err != nil {
+				m.status = "Revision committed as " + tuiPlain(msg.fact.ID) + ". Follow-up error: " + tuiPlain(msg.err.Error())
+			}
 			if msg.agent == m.namespace {
 				cmds = append(cmds, m.loadFacts(m.namespace))
 			}
@@ -862,6 +889,7 @@ func (m *tuiModel) chooseNamespace(agent string) tea.Cmd {
 		m.detail.SetContent("")
 		m.previewText = ""
 		m.nextFactCursor, m.factTotal = "", 0
+		m.factSubjectWarning, m.recallSubjectWarning = "", ""
 		m.restoreFactID = ""
 		for _, resource := range []string{"memory", "recall", "checkpoints"} {
 			m.resources[resource] = resourceState{}
@@ -954,7 +982,7 @@ func max(a, b int) int {
 func tuiCmd() *cobra.Command {
 	var readOnly, mouse bool
 	var theme string
-	cmd := &cobra.Command{Use: "tui", Short: "Explore, inspect and curate agent memory", Long: "Interactive memory workbench: Memory, Recall, Activity, Graph, Usage and Status.\nUse / or Ctrl+K for commands, f to filter, n to choose a namespace.\nRecall inspection does not touch access counts. Retiring preserves history.", RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "tui", Short: "Explore, inspect and curate agent memory", Long: "Interactive memory workbench: Memory, Recall, Activity, Graph, Usage and Status.\nUse / or Ctrl+K for commands, f to filter, n to choose a namespace.\nRecall inspection does not touch access counts. Retirement leaves a tombstone that ordinary pruning can remove.", RunE: func(cmd *cobra.Command, args []string) error {
 		if theme != "" && theme != "dark" && theme != "light" && theme != "terminal" {
 			return fmt.Errorf("theme must be dark, light, or terminal")
 		}

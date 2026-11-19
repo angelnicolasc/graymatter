@@ -50,7 +50,7 @@ func SupportsConsolidationReporting(backend any) bool {
 }
 
 func (s *Server) supportsConsolidationReporting() bool {
-	return !isNilValue(s.consolidateCfg) && SupportsConsolidationReporting(s.backend)
+	return s.maintenanceOnly() && !isNilValue(s.consolidateCfg) && SupportsConsolidationReporting(s.backend)
 }
 
 func isNilValue(value any) bool {
@@ -142,10 +142,10 @@ func (c *Client) ConsolidateWithReport(ctx context.Context, agentID string) (mem
 		}
 	}
 	c.capMu.Lock()
-	supported := c.capabilities[ConsolidationReportV1]
+	supported := c.capabilities[ConsolidationReportV1] && c.capabilities[MaintenanceOnlyV1]
 	c.capMu.Unlock()
 	if !supported {
-		return memory.ConsolidationReport{}, memory.NewConsolidationError("unsupported_capability", nil)
+		return memory.ConsolidationReport{}, memory.NewConsolidationError("unsupported_capability", unsupported(ConsolidationReportV1))
 	}
 	deadline, _ := ctx.Deadline()
 	request := &ConsolidateWithReportRequest{AgentID: agentID, DeadlineUnixNano: deadline.UnixNano()}
@@ -161,6 +161,9 @@ func (c *Client) ConsolidateWithReport(ctx context.Context, agentID string) (mem
 		return memory.ConsolidationReport{}, memory.NewConsolidationError("outcome_unknown", err)
 	}
 	if fatal != nil {
+		if fatal.Code == "unsupported_capability" {
+			return report, memory.NewConsolidationError(fatal.Code, unsupported(ConsolidationReportV1))
+		}
 		return report, memory.NewConsolidationErrorFromDiagnostic(*fatal)
 	}
 	return report, nil

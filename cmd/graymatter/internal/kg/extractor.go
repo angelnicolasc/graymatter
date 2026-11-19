@@ -27,6 +27,9 @@ type ExtractorConfig struct {
 	// Model is the Anthropic model for LLM extraction.
 	// Default: "claude-haiku-4-5-20251001" (fast + cheap).
 	Model string
+
+	// AnthropicBaseURL selects the Messages base for this extractor.
+	AnthropicBaseURL string
 }
 
 // EntityExtractor pulls entities from a text string, returning Nodes and Edges
@@ -39,11 +42,7 @@ type EntityExtractor interface {
 // The default (UseLLM=false) extractor uses only regex — zero API calls.
 func NewExtractor(cfg ExtractorConfig) EntityExtractor {
 	if cfg.UseLLM {
-		model := cfg.Model
-		if model == "" {
-			model = "claude-haiku-4-5-20251001"
-		}
-		return NewLLMExtractor(cfg.APIKey, model)
+		return newLLMExtractor(cfg.APIKey, cfg.Model, cfg.AnthropicBaseURL)
 	}
 	return &regexExtractor{}
 }
@@ -54,11 +53,15 @@ func NewExtractor(cfg ExtractorConfig) EntityExtractor {
 // never to silence: an agent that opted into LLM extraction keeps getting a
 // graph even when the model is down.
 func NewLLMExtractor(apiKey, model string) EntityExtractor {
+	return newLLMExtractor(apiKey, model, "")
+}
+
+func newLLMExtractor(apiKey, model, baseURL string) EntityExtractor {
 	if model == "" {
 		model = "claude-haiku-4-5-20251001"
 	}
 	llm := &llmExtractor{apiKey: apiKey, model: model}
-	base := providerurl.Select("", providerurl.AnthropicEnv, providerurl.AnthropicDefault)
+	base := providerurl.Select(baseURL, providerurl.AnthropicEnv, providerurl.AnthropicDefault)
 	endpoint, err := providerurl.Parse("anthropic", base)
 	if err != nil {
 		llm.initErr = err
@@ -72,8 +75,16 @@ func NewLLMExtractor(apiKey, model string) EntityExtractor {
 // for LLM extraction, so daemon and direct-store wiring agree without each
 // knowing flag plumbing.
 func ExtractorFromEnv() EntityExtractor {
-	useLLM := os.Getenv("GRAYMATTER_KG_LLM_EXTRACT") == "1"
-	return NewExtractor(ExtractorConfig{UseLLM: useLLM})
+	return ExtractorForStore("", "")
+}
+
+// ExtractorForStore uses the owning store configuration when LLM extraction is enabled.
+func ExtractorForStore(apiKey, baseURL string) EntityExtractor {
+	return NewExtractor(ExtractorConfig{
+		UseLLM:           os.Getenv("GRAYMATTER_KG_LLM_EXTRACT") == "1",
+		APIKey:           apiKey,
+		AnthropicBaseURL: baseURL,
+	})
 }
 
 // --- regex extractor (default, zero deps) ---

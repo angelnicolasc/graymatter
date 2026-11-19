@@ -15,8 +15,7 @@ type reportingStore interface {
 	Close() error
 }
 
-// openReportingStore keeps legacy daemon connection startup out of the report
-// path. Direct stores still open before the report-method budget begins.
+// openReportingStore selects the owner before opening a dedicated daemon connection.
 func openReportingStore(ctx context.Context) (reportingStore, error) {
 	return selectReportingStore(ctx, dataDir, noDaemon, os.Getenv("GRAYMATTER_NO_DAEMON"), func(dir string) (reportingStore, error) {
 		return openDirectStoreAt(dir)
@@ -59,27 +58,4 @@ func (d daemonReportingStore) ConsolidateWithReport(ctx context.Context, agentID
 
 func (d *directStore) ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error) {
 	return d.mem.ConsolidateWithReport(ctx, agentID)
-}
-
-func (d daemonStore) reportingDataDir() string {
-	if d.Client == nil {
-		return ""
-	}
-	return d.DataDir()
-}
-
-func (d daemonStore) ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error) {
-	dir := d.reportingDataDir()
-	if dir == "" {
-		return memory.ConsolidationReport{}, memory.NewConsolidationError("unsupported_capability", nil)
-	}
-	store := daemonReportingStore{dir: dir}
-	return store.ConsolidateWithReport(ctx, agentID)
-}
-
-func (r *reconnectingStore) ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error) {
-	if r.report == nil {
-		return memory.ConsolidationReport{}, memory.NewConsolidationError("unsupported_capability", nil)
-	}
-	return r.report.ConsolidateWithReport(ctx, agentID)
 }

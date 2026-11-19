@@ -26,6 +26,15 @@ import (
 // through the real wire by TestBackendErrorSurface.
 type failingBackend struct{}
 
+func (failingBackend) MaintenanceOnly() bool              { return true }
+func (failingBackend) SupportsAuthoritativeLineage() bool { return true }
+func (failingBackend) InspectLineage(context.Context, string, string, string) (memory.LineageInspection, error) {
+	return memory.LineageInspection{}, errors.New("backend down")
+}
+func (failingBackend) ExportLineage(context.Context, string) (memory.LineageArchive, error) {
+	return memory.LineageArchive{}, errors.New("backend down")
+}
+
 func (failingBackend) Put(context.Context, string, string) error { return errors.New("backend down") }
 func (failingBackend) PutShared(context.Context, string) error {
 	return errors.New("backend down")
@@ -175,7 +184,7 @@ func TestConsolidate_WithoutConfiguredPolicyFails(t *testing.T) {
 	dataDir, _ := startServer(t, mustToken(t))
 	c := dialT(t, dataDir)
 	err := c.Consolidate(context.Background(), "any")
-	if err == nil || !strings.Contains(err.Error(), "not configured") {
+	if err == nil || errors.Is(err, memory.ErrMutationOutcomeUnknown) || !strings.Contains(err.Error(), "not configured") {
 		t.Errorf("err = %v, want consolidation-not-configured", err)
 	}
 }

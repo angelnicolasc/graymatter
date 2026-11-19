@@ -25,6 +25,7 @@ var knownRoutes = map[string]bool{
 	"/recall":      true,
 	"/consolidate": true,
 	"/facts":       true,
+	"/lineage":     true,
 	"/forget":      true,
 	"/metrics":     true,
 }

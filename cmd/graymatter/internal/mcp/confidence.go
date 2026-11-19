@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,6 +14,76 @@ import (
 type confidenceWriter interface {
 	PutWithOptionsReturningFact(context.Context, string, string, memory.WriteOptions) (memory.Fact, error)
 }
+type optionalIdentityWriter interface {
+	PutWithOptionalIdentity(context.Context, string, string, memory.WriteOptions) (memory.Fact, error)
+}
+
+type returningFactWriter interface {
+	PutReturningFact(context.Context, string, string) (memory.Fact, error)
+}
+
+// Select the route before dispatch. A failure after invoking a writer never
+// permits a fallback write because the first operation may have committed.
+func (s *Server) putWithIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if hasSubjectIntent(opts) {
+		if !supportsSubjects(s.backend) {
+			return memory.Fact{}, memory.ErrSubjectUnsupported
+		}
+		writer, ok := s.backend.(subjectWriter)
+		if !ok {
+			return memory.Fact{}, memory.ErrSubjectUnsupported
+		}
+		receipts, err := writer.PutManyReturningReceipts(ctx, agentID, []memory.WriteFact{{Text: text, Options: opts}})
+		if len(receipts) == 1 {
+			return confirmedIdentity(receipts[0].Fact, err)
+		}
+		if err != nil {
+			return memory.Fact{}, err
+		}
+		return memory.Fact{}, errors.New("subject write returned no committed identity")
+	}
+	if opts.Source != nil || opts.Quote != nil {
+		if support, ok := s.backend.(interface{ SupportsCitationEvidence() bool }); !ok || !support.SupportsCitationEvidence() {
+			return memory.Fact{}, memory.ErrCitationUnsupported
+		}
+	}
+	if writer, ok := s.backend.(optionalIdentityWriter); ok {
+		return writer.PutWithOptionalIdentity(ctx, agentID, text, opts)
+	}
+	if writer, ok := s.backend.(confidenceWriter); ok {
+		return confirmedIdentity(writer.PutWithOptionsReturningFact(ctx, agentID, text, opts))
+	}
+	if opts.HasEvidence() {
+		return memory.Fact{}, memory.ErrCitationUnsupported
+	}
+	if opts.Confidence != nil {
+		return memory.Fact{}, memory.ErrConfidenceUnsupported
+	}
+	if writer, ok := s.backend.(returningFactWriter); ok {
+		return confirmedIdentity(writer.PutReturningFact(ctx, agentID, text))
+	}
+	// Older in-process backends may only support Remember. A product daemon
+	// uses the optional identity capability path, including its policy gate.
+	return memory.Fact{}, s.backend.Remember(ctx, agentID, text)
+}
+
+func confirmedIdentity(fact memory.Fact, err error) (memory.Fact, error) {
+	if err == nil && fact.ID == "" {
+		return memory.Fact{}, errors.New("write returned no committed fact identity")
+	}
+	return fact, err
+}
+
+func writeIdentityNotice(id, confidence string) string {
+	if id == "" {
+		return ""
+	}
+	if confidence == "" {
+		return fmt.Sprintf(" fact_id %s.", id)
+	}
+	return fmt.Sprintf(" Confidence %s. fact_id %s.", confidence, id)
+}
+
 type confidenceReviser interface {
 	ReviseFactsWithOptions(context.Context, string, string, memory.WriteOptions, ...memory.Fact) (memory.Fact, error)
 }
@@ -66,6 +138,24 @@ func confidenceWeightSchema() mcp.ToolOption {
 
 func writeOptions(args map[string]any) (memory.WriteOptions, error) {
 	var opts memory.WriteOptions
+	for _, field := range []struct {
+		name string
+		dst  **string
+	}{{"source", &opts.Source}, {"quote", &opts.Quote}, {"subject", &opts.Subject}} {
+		if value, present := args[field.name]; present {
+			literal, ok := value.(string)
+			if !ok {
+				return opts, fmt.Errorf("%s must be a string", field.name)
+			}
+			*field.dst = &literal
+		}
+	}
+	if value, present := args["replaces"]; present {
+		raw, err := json.Marshal(value)
+		if err != nil || json.Unmarshal(raw, &opts.Replaces) != nil || !opts.Replaces.Present() {
+			return opts, fmt.Errorf("replaces must be a non-empty array of IDs")
+		}
+	}
 	if value, present := args["confidence"]; present {
 		s, ok := value.(string)
 		if !ok {
@@ -110,11 +200,40 @@ func recallOptions(args map[string]any) (memory.RecallOptions, error) {
 	return opts, opts.Validate()
 }
 
-// Validate only the new options. The existing MCP validation contract remains
-// intact; a recognized option on the wrong tool must never disappear silently.
+// fullRequest preserves the pre-core treatment of unadvertised arguments.
+// Remove core extensions before validation and before any write parser can
+// apply their effects. Keep the caller's arguments and ordinary fields intact.
+func fullRequest(tool string, req mcp.CallToolRequest) mcp.CallToolRequest {
+	args := req.GetArguments()
+	var legacy map[string]any
+	for _, key := range [...]string{
+		"source", "quote", "subject", "replaces", "target_type", "fact_id",
+		"content_hash", "evidence_budget_bytes", "facts", "scope", "queries",
+	} {
+		if _, present := args[key]; !present || key == "queries" && tool == "memory_search_batch" {
+			continue
+		}
+		if legacy == nil {
+			legacy = maps.Clone(args)
+		}
+		delete(legacy, key)
+	}
+	if legacy != nil {
+		req.Params.Arguments = legacy
+	}
+	return req
+}
+
+// Validate advertised confidence options and core extensions in their profiles.
 func (s *Server) confidenceGuard(tool string, next func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error)) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.fullCatalog {
+			req = fullRequest(tool, req)
+		}
 		args := req.GetArguments()
+		if err := s.citationArguments(tool, args); err != nil {
+			return toolError(err.Error())
+		}
 		for _, key := range []string{"confidence", "min_confidence", "confidence_weight"} {
 			if _, present := args[key]; !present {
 				continue

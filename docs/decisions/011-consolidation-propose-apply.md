@@ -1,6 +1,12 @@
 # 011 — Consolidation is propose/apply with tombstone receipts; Ollama is the offline summariser
 
-**Status:** Accepted — **Date:** 2026-08-25
+**Status:** Historical — **Date:** 2026-08-25
+
+The current runtime suspends automatic and explicit generative compaction.
+The maintenance cycle still applies decay, pruning, and configured graph
+extraction. Provider fields and historical counters remain readable for
+compatibility. The proposal and application design below describes the
+previous runtime.
 
 ## Context
 
@@ -89,3 +95,12 @@ to survive (measurable via the recall-quality gate in
 summarisers), the next step is requiring the proposal to quote consumed fact
 IDs *verbatim inside the summary* before apply accepts it — turning the
 summary itself into a receipt-checkable artifact.
+
+## Amendment — lifetime of a tombstone receipt
+
+Applying a summary retires consumed sources as tombstones. These fact rows
+provide lineage receipts while they remain in the store. A later maintenance
+cycle can prune an unpinned tombstone below the weight threshold, and explicit
+deletion can remove the row before that threshold. Removing a source row
+removes its tombstone receipt, even if the summary still exists. See
+[fact retention and deletion](../api-stability.md#fact-retention-and-deletion).

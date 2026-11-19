@@ -176,6 +176,12 @@ type UpdateFactRequest struct {
 // UpdateFactResponse carries no data.
 type UpdateFactResponse struct{}
 
+// UpdateFactWithLineageResponse preserves typed errors on the versioned path.
+type UpdateFactWithLineageResponse struct {
+	Error     string `json:",omitempty"`
+	ErrorCode string `json:",omitempty"`
+}
+
 // ConsolidateRequest triggers server-side consolidation for an agent.
 //
 // Note: unlike AdvancedStore.Consolidate, the wire form does NOT carry a
@@ -212,3 +218,6 @@ type PingResponse struct {
 // Protocol identifies the wire-format version. Bump on breaking changes;
 // clients refuse to talk to a server with a mismatched protocol string.
 const Protocol = "graymatter-rpc/1"
+
+// MaintenanceOnlyV1 identifies a backend that runs maintenance without generative compaction.
+const MaintenanceOnlyV1 = "maintenance-only-v1"

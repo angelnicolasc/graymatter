@@ -263,45 +263,84 @@ func TestProviderBaseURLEmbeddingsPersist(t *testing.T) {
 	}
 }
 
-func TestMemoryAnthropicBaseURLUsedForBothOperations(t *testing.T) {
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "fixture-environment-token")
-	t.Setenv("ANTHROPIC_API_KEY", "fixture-environment-key")
+func TestMemoryAnthropicBaseURLForExtractionAndExplicitReview(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_BASE_URL", "http://%zz/")
 	const extracted = "A synthetic fact produced by extraction."
-	const summary = "A distinct synthetic summary from consolidation."
-	var extractions, consolidations atomic.Int32
+	const summary = "A synthetic proposal for review."
+	var extractions, analyses atomic.Int32
+	var loseReviewResponse, redirectReview atomic.Bool
+	var redirectHits atomic.Int32
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.EscapedPath() != "/edge%2F/v1/messages" {
-			t.Errorf("wrong Messages request: %s %s", r.Method, r.URL.EscapedPath())
+		if r.URL.EscapedPath() == "/redirected-review" {
+			redirectHits.Add(1)
+			http.Error(w, "unexpected redirected review", http.StatusBadRequest)
+			return
 		}
-		if r.Header.Get("X-Api-Key") != "fixture-explicit-key" ||
-			r.Header.Get("Authorization") != "Bearer fixture-environment-token" ||
+		if r.Method != http.MethodPost || r.URL.EscapedPath() != "/edge%2F/v1/messages" ||
+			r.Header.Get("X-Api-Key") != "fixture-explicit-key" ||
 			r.Header.Get("Anthropic-Version") != "2023-06-01" {
-			t.Error("wrong Messages credential or version headers")
+			t.Errorf("unexpected provider route, method or test headers: %s %s", r.Method, r.URL.EscapedPath())
+			http.Error(w, "invalid fixture request", http.StatusBadRequest)
+			return
 		}
-		var request struct {
-			Model     string `json:"model"`
-			MaxTokens int    `json:"max_tokens"`
+		var raw struct {
+			Model     string            `json:"model"`
+			MaxTokens int               `json:"max_tokens"`
+			Messages  []json.RawMessage `json:"messages"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "fixture-claude" {
-			t.Errorf("invalid Messages payload: %+v %v", request, err)
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil || raw.Model != "fixture-claude" {
+			t.Errorf("invalid synthetic gateway request: %v", err)
+			http.Error(w, "invalid fixture payload", http.StatusBadRequest)
+			return
 		}
-		text := summary
-		switch request.MaxTokens {
-		case 512:
-			consolidations.Add(1)
+		var reply []byte
+		switch raw.MaxTokens {
 		case 1024:
 			extractions.Add(1)
-			raw, err := json.Marshal([]string{extracted})
-			if err != nil {
-				t.Errorf("fixture extraction: %v", err)
+			reply, _ = json.Marshal([]string{extracted})
+		case 2048:
+			var request struct {
+				Content string `json:"content"`
 			}
-			text = string(raw)
+			analyses.Add(1)
+			if redirectReview.Load() {
+				w.Header().Set("Location", "/redirected-review")
+				w.WriteHeader(http.StatusTemporaryRedirect)
+				return
+			}
+			if loseReviewResponse.Load() {
+				conn, _, err := http.NewResponseController(w).Hijack()
+				if err != nil {
+					t.Errorf("lose synthetic response: %v", err)
+					http.Error(w, "missing connection", http.StatusInternalServerError)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			if len(raw.Messages) != 1 || json.Unmarshal(raw.Messages[0], &request) != nil {
+				t.Error("explicit review omitted its synthetic evidence")
+				http.Error(w, "missing review evidence", http.StatusBadRequest)
+				return
+			}
+			var input struct {
+				Sources []memory.EvidenceSnapshot `json:"sources"`
+			}
+			if err := json.Unmarshal([]byte(request.Content), &input); err != nil || len(input.Sources) == 0 {
+				t.Errorf("review evidence payload: %v", err)
+				http.Error(w, "invalid review evidence", http.StatusBadRequest)
+				return
+			}
+			reply, _ = json.Marshal(map[string]any{"summary": summary, "consumes": []string{input.Sources[0].FactID}})
 		default:
-			t.Errorf("unexpected max_tokens: %d", request.MaxTokens)
+			t.Errorf("unexpected provider operation, max_tokens=%d", raw.MaxTokens)
+			http.Error(w, "unexpected operation", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"msg_fixture","type":"message","role":"assistant","content":[{"type":"text","text":%q}],"model":"fixture-claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, text)
+		fmt.Fprintf(w, `{"id":"msg_fixture","type":"message","role":"assistant","content":[{"type":"text","text":%q}],"model":"fixture-claude","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, string(reply))
 	}))
 	defer gateway.Close()
 	cfg := newURLTestConfig(t)
@@ -313,42 +352,50 @@ func TestMemoryAnthropicBaseURLUsedForBothOperations(t *testing.T) {
 	}
 	defer m.Close()
 
-	// URL is snapshotted, even though the SDK can read auth environment anew.
 	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:1/changed")
+	const namespace = "audit"
 	ctx := context.Background()
-	if err := m.RememberExtracted(ctx, "audit", "synthetic original extraction input"); err != nil {
+	if err := m.RememberExtracted(ctx, namespace, "synthetic extraction input"); err != nil {
 		t.Fatal(err)
 	}
-	facts, err := m.Advanced().List("audit")
+	facts, err := m.Advanced().List(namespace)
 	if err != nil || len(facts) != 1 || facts[0].Text != extracted || memory.EffectiveConfidence(facts[0].Confidence) != "unverified" {
-		t.Fatalf("did not persist LLM-derived fact: %+v, %v", facts, err)
+		t.Fatalf("did not persist unverified extraction: %+v, %v", facts, err)
 	}
-	if err := m.Remember(ctx, "audit", "a second synthetic original"); err != nil {
+	if err := m.Remember(ctx, namespace, "A second synthetic fact."); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Consolidate(ctx, "audit"); err != nil {
+	if err := m.Consolidate(ctx, namespace); err != nil {
 		t.Fatal(err)
 	}
-	facts, err = m.Advanced().List("audit")
+	if analyses.Load() != 0 || extractions.Load() != 1 {
+		t.Fatalf("maintenance called the provider: analysis=%d extraction=%d", analyses.Load(), extractions.Load())
+	}
+
+	opts, err := memory.ReviewOptionsFromConfig(m.Config(), "anthropic", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	summaryID := ""
+	records, err := m.store.ReviewAnalyze(ctx, namespace, opts)
+	if err != nil || len(records) != 1 || records[0].Kind != memory.ReviewKindSummary {
+		t.Fatalf("explicit review result: %+v, %v", records, err)
+	}
+	redirectReview.Store(true)
+	if _, err := m.store.ReviewAnalyze(ctx, namespace, opts); err == nil || !strings.Contains(err.Error(), "HTTP 307") || redirectHits.Load() != 0 || analyses.Load() != 2 {
+		t.Fatalf("redirected review: calls=%d followed=%d err=%v", analyses.Load(), redirectHits.Load(), err)
+	}
+	redirectReview.Store(false)
+	loseReviewResponse.Store(true)
+	if _, err := m.store.ReviewAnalyze(ctx, namespace, opts); err == nil || analyses.Load() != 3 {
+		t.Fatalf("lost review response was replayed or not reported: calls=%d err=%v", analyses.Load(), err)
+	}
+	facts, err = m.Advanced().List(namespace)
+	if err != nil || len(facts) != 2 {
+		t.Fatalf("review changed the active fact count: %+v, %v", facts, err)
+	}
 	for _, fact := range facts {
-		if fact.Text == summary {
-			summaryID = fact.ID
+		if fact.IsSuperseded() || fact.Text == summary {
+			t.Fatalf("review changed an active fact: %+v", fact)
 		}
-	}
-	if summaryID == "" {
-		t.Fatal("summary response was not persisted")
-	}
-	retired := 0
-	for _, fact := range facts {
-		if fact.SupersededBy == summaryID {
-			retired++
-		}
-	}
-	if retired != 1 || extractions.Load() != 1 || consolidations.Load() != 1 {
-		t.Fatalf("retired=%d extraction calls=%d consolidation calls=%d", retired, extractions.Load(), consolidations.Load())
 	}
 }

@@ -14,6 +14,7 @@ import (
 	graymatter "github.com/angelnicolasc/graymatter"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/internal/providerurl"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
@@ -81,11 +82,12 @@ func Run(opts RunOptions) error {
 	adv := mem.Advanced()
 	db := adv.DB()
 
-	var graph *kg.Graph
+	graph, graphErr := kg.Open(db)
 	var adapter *kg.GraphAdapter
-	if g, err := kg.Open(db); err == nil {
-		graph = g
-		adapter = kg.NewGraphAdapter(g)
+	if graphErr != nil {
+		logf("daemon: knowledge graph unavailable: %v", graphErr)
+	} else {
+		adapter = kg.NewGraphAdapter(graph)
 	}
 
 	// Knowledge-graph auto-population is opt-in: --kg here, GRAYMATTER_KG=1
@@ -93,11 +95,15 @@ func Run(opts RunOptions) error {
 	// `graymatter init --kg`. One decision point, so a daemon spawned by an
 	// MCP client (with the client's environment) and one run by hand always
 	// agree.
-	kgAuto := kgAutoEnabled(absDir, opts.KG)
+	kgAuto := adapter != nil && kgAutoEnabled(absDir, opts.KG)
 	if kgAuto {
-		extractor := kg.NewExtractorAdapter(kg.ExtractorFromEnv())
+		extractor := kg.NewExtractorAdapter(kg.ExtractorForStore(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL))
 		adv.SetKG(adapter, extractor)
 		logf("daemon: knowledge graph auto-population enabled")
+	} else if adapter != nil {
+		if maintainer, ok := adv.(interface{ SetGraphMaintenance(memory.GraphAccessor) }); ok {
+			maintainer.SetGraphMaintenance(adapter)
+		}
 	}
 
 	token, err := rpc.GenerateToken()
@@ -108,12 +114,13 @@ func Run(opts RunOptions) error {
 	srv := rpc.NewServer(withConsolidationReporting(rememberBackend{AdvancedStore: adv, mem: mem}), cfg)
 	srv.SetAuthToken(token)
 	srv.RegisterExtra(HostServiceName, &Host{
-		mem:     mem,
-		db:      db,
-		graph:   graph,
-		adapter: adapter,
-		kgAuto:  kgAuto,
-		stop:    srv.Stop,
+		mem:       mem,
+		db:        db,
+		graph:     graph,
+		adapter:   adapter,
+		kgAuto:    kgAuto,
+		kgInitErr: graphErr,
+		stop:      srv.Stop,
 	})
 
 	ln, cleanup, err := rpc.Listen(absDir, token)

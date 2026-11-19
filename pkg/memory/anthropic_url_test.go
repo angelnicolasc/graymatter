@@ -13,7 +13,7 @@ import (
 	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
-// These configurations use the two existing public method sets unchanged.
+// Existing configurations keep their method sets.
 var (
 	_ ExtractConfig     = (*testConsolidateCfg)(nil)
 	_ ConsolidateConfig = (*testConsolidateCfg)(nil)
@@ -29,19 +29,16 @@ func (c configWithOptionalBaseURL) GetAnthropicBaseURL() string { return c.base 
 func TestLegacyAnthropicConfigResolvesEnvironmentPerOperation(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	cfg := anthropicCfg()
+	cfg := &testConsolidateCfg{apiKey: "fake-extraction-key", model: "claude-test"}
 	explicitEmpty := configWithOptionalBaseURL{testConsolidateCfg: cfg}
 	ctx := context.Background()
 	for _, test := range []struct {
 		label  string
-		config interface {
-			ExtractConfig
-			ConsolidateConfig
-		}
+		config ExtractConfig
 	}{{"legacy", cfg}, {"empty-getter", explicitEmpty}} {
 		t.Run(test.label, func(t *testing.T) {
 			const sentinel = "Synthetic legacy extraction"
-			for i := 0; i < 2; i++ {
+			for range 2 {
 				var calls atomic.Int32
 				gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
@@ -57,11 +54,8 @@ func TestLegacyAnthropicConfigResolvesEnvironmentPerOperation(t *testing.T) {
 				if err != nil || result.Source != ExtractionLLM || !reflect.DeepEqual(result.Facts, []string{sentinel}) {
 					t.Fatalf("unexpected extraction result: %+v, %v", result, err)
 				}
-				if want, err := consolidateViaAnthropic(ctx, "synthetic input", test.config); err != nil || want != "[\""+sentinel+"\"]" {
-					t.Fatalf("unexpected consolidation result: %q, %v", want, err)
-				}
-				if calls.Load() != 2 {
-					t.Fatalf("current gateway got %d calls; want both operations", calls.Load())
+				if calls.Load() != 1 {
+					t.Fatalf("current gateway got %d calls; want one extraction", calls.Load())
 				}
 			}
 		})
@@ -70,19 +64,5 @@ func TestLegacyAnthropicConfigResolvesEnvironmentPerOperation(t *testing.T) {
 	var typed *providerurl.ConfigError
 	if _, err := ExtractFactsWithProvenance(ctx, "synthetic input", cfg); !errors.As(err, &typed) {
 		t.Fatalf("legacy malformed environment was not rejected before extraction: %v", err)
-	}
-	var callbacks int
-	store := openHookedStore(t, func(_ string, err error) {
-		callbacks++
-		if !errors.As(err, &typed) {
-			t.Errorf("legacy consolidation callback received %v", err)
-		}
-	})
-	seedBatch(t, store, "audit")
-	if err := store.Consolidate(ctx, "audit", cfg); err != nil {
-		t.Fatalf("legacy consolidation became fatal: %v", err)
-	}
-	if callbacks != 1 {
-		t.Fatalf("got %d consolidation callbacks, want one", callbacks)
 	}
 }

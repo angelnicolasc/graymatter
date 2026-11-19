@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -69,8 +70,8 @@ type RunConfig struct {
 	// MaxRetries is the maximum number of LLM call attempts. Default: 3
 	MaxRetries int
 
-	// ResumeID is a harness session ID or "latest". When non-empty, the prior
-	// message history is loaded from the selected checkpoint and prepended.
+	// ResumeID is a harness session ID or "latest". Latest is scoped to the
+	// agent namespace. The runner restores messages, not arbitrary state.
 	ResumeID string
 
 	// Stdout receives the final agent reply. Default: os.Stdout
@@ -129,9 +130,8 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 // Run executes the prepared agent, opening a local store if none was supplied.
 func (p *PreparedRun) Run(ctx context.Context, store Store) (*RunResult, error) {
 	cfg, def := p.cfg, p.def
-	// Obtain a Store. In production the caller injects the daemon client so
-	// the run never fights the bbolt lock; tests and --no-daemon fall back to
-	// an in-process open here.
+	// The CLI supplies the daemon-backed store. Library callers can use a
+	// local store that uses the same endpoint captured during preparation.
 	if store == nil {
 		ls, err := openLocalStore(cfg.DataDir, cfg.APIKey, p.baseURL)
 		if err != nil {
@@ -152,13 +152,18 @@ func (p *PreparedRun) Run(ctx context.Context, store Store) (*RunResult, error) 
 	switch cfg.ResumeID {
 	case "":
 	case "latest":
-		// Preserve the established meaning of latest: the newest checkpoint for
-		// this agent, even if a newer failed session has no checkpoint.
 		cp, cpErr := store.CheckpointResume(def.Name)
-		if cpErr == nil && cp != nil {
-			priorMessages = cp.Messages
-			fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", cfg.ResumeID, cp.ID)
+		if errors.Is(cpErr, session.ErrNoCheckpoint) {
+			break
 		}
+		if cpErr != nil {
+			return nil, fmt.Errorf("resume session %q: %w", cfg.ResumeID, cpErr)
+		}
+		if cp == nil {
+			return nil, fmt.Errorf("resume session %q: persistence backend returned no checkpoint", cfg.ResumeID)
+		}
+		priorMessages = cp.Messages
+		fmt.Fprintf(cfg.Stderr, "Resuming session %q from checkpoint %s...\n", cfg.ResumeID, cp.ID)
 	default:
 		resolvedID, cp, cpErr := loadSessionCheckpoint(store, def.Name, cfg.ResumeID)
 		if cpErr != nil {

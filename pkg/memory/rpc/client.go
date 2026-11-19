@@ -55,7 +55,7 @@ type DialOptions struct {
 	// CallTimeout bounds each RPC round-trip. A hung daemon otherwise
 	// blocks net/rpc forever and with it every one-shot CLI command.
 	// Defaults to 30 seconds. Consolidate uses an independent, longer
-	// bound (it proxies an LLM call).
+	// bound for maintenance over larger stores.
 	CallTimeout time.Duration
 
 	// PingOnDial, if true, sends a Ping RPC after connecting and verifies
@@ -67,8 +67,7 @@ type DialOptions struct {
 	DefaultConfidenceWeight *float64
 }
 
-// consolidateTimeout bounds Consolidate calls; the daemon-side work may
-// include an LLM round-trip, so the regular CallTimeout is too tight.
+// consolidateTimeout bounds maintenance calls over larger stores.
 const consolidateTimeout = 5 * time.Minute
 
 // ErrCallTimeout means an in-flight request exceeded its response deadline.
@@ -232,6 +231,33 @@ func (c *Client) acceptPing(resp PingResponse) error {
 	return nil
 }
 
+// Capability reports whether the peer advertised name in its last successful
+// Ping and whether a capability response has been received on this connection.
+func (c *Client) Capability(name string) (supported, known bool) {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	return c.capabilities[name], c.capKnown
+}
+
+// ErrMaintenancePolicyUnsupported means the daemon cannot confirm that its
+// write-triggered and explicit maintenance runs without generative compaction.
+var ErrMaintenancePolicyUnsupported = errors.New("daemon maintenance policy is unverified. Update and restart the daemon")
+
+func (c *Client) requireMaintenanceOnly(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, known := c.Capability(MaintenanceOnlyV1); !known {
+		if err := c.Ping(); err != nil {
+			return err
+		}
+	}
+	if supported, known := c.Capability(MaintenanceOnlyV1); !known || !supported {
+		return ErrMaintenancePolicyUnsupported
+	}
+	return ctx.Err()
+}
+
 // --- typed methods mirroring Backend ---
 
 // Put writes a fact for agentID.
@@ -242,11 +268,17 @@ func (c *Client) acceptPing(resp PingResponse) error {
 // foundation-mode because individual operations complete in <50 ms;
 // a future revision may add per-call deadline forwarding.
 func (c *Client) Put(ctx context.Context, agentID, text string) error {
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
+		return err
+	}
 	return c.call("Put", &PutRequest{AgentID: agentID, Text: text}, &PutResponse{})
 }
 
 // PutReturningFact writes a fact and returns the exact value committed remotely.
 func (c *Client) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
+		return memory.Fact{}, err
+	}
 	var resp PutReturningFactResponse
 	if err := c.call("PutReturningFact", &PutReturningFactRequest{AgentID: agentID, Text: text}, &resp); err != nil {
 		return memory.Fact{}, err
@@ -353,15 +385,34 @@ func (c *Client) Delete(agentID, factID string) error {
 
 // UpdateFact persists a modified fact.
 func (c *Client) UpdateFact(agentID string, f memory.Fact) error {
-	return c.call("UpdateFact", &UpdateFactRequest{AgentID: agentID, Fact: f}, &UpdateFactResponse{})
+	ctx, cancel := c.inspectionContext(context.Background())
+	defer cancel()
+	if err := c.requireLineage(ctx); err != nil {
+		return err
+	}
+	req := &UpdateFactRequest{AgentID: agentID, Fact: f}
+	var resp UpdateFactWithLineageResponse
+	if err := c.call("UpdateFactWithLineage", req, &resp); err != nil {
+		return lineageRPCError(err)
+	}
+	if resp.Error != "" {
+		return revisionError(resp.ErrorCode, resp.Error)
+	}
+	return nil
 }
 
-// Consolidate triggers server-side consolidation for agentID using the
-// daemon's own configuration. Clients cannot override the policy. Uses a
-// longer timeout than other calls because consolidation may proxy an LLM
-// round-trip.
+// Consolidate triggers server-side maintenance under the daemon's policy.
 func (c *Client) Consolidate(ctx context.Context, agentID string) error {
-	return c.CallService(ServiceName, "Consolidate", &ConsolidateRequest{AgentID: agentID}, &ConsolidateResponse{}, consolidateTimeout)
+	if err := c.requireMaintenanceOnly(ctx); err != nil {
+		return err
+	}
+	err := c.CallService(ServiceName, "Consolidate", &ConsolidateRequest{AgentID: agentID}, &ConsolidateResponse{}, consolidateTimeout)
+	var serverErr rpc.ServerError
+	if err != nil && !errors.As(err, &serverErr) {
+		// Only a response from the daemon can acknowledge this maintenance pass.
+		return fmt.Errorf("%w: %w", memory.ErrMutationOutcomeUnknown, err)
+	}
+	return err
 }
 
 // PendingVectorCount returns the number of facts waiting to be re-indexed.

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -33,6 +34,9 @@ func factInTx(tx *bolt.Tx, agentID, id string) (Fact, error) {
 	if f.AgentID != agentID || f.ID != id {
 		return Fact{}, fmt.Errorf("%w: fact identity mismatch", ErrFactChanged)
 	}
+	if err := hydrateLineageTx(tx, &f); err != nil {
+		return Fact{}, err
+	}
 	return f, nil
 }
 
@@ -41,20 +45,16 @@ func factInTx(tx *bolt.Tx, agentID, id string) (Fact, error) {
 // Returning errFactUnchanged without modifying the fact skips persistence and
 // returns the current fact successfully after rolling back the transaction.
 func (s *Store) patchFact(agentID, id string, patch func(*Fact) error) (Fact, error) {
-	fact, _, err := s.patchFactWithReceipt(agentID, id, patch, nil)
-	return fact, err
-}
-
-func (s *Store) patchFactWithReceipt(agentID, id string, patch func(*Fact) error, update commitUpdate) (Fact, commitReceipt, error) {
 	if s.readOnly {
-		return Fact{}, notCommitted, ErrStoreReadOnly
+		return Fact{}, ErrStoreReadOnly
 	}
 	var updated Fact
-	receipt, err := s.trackCommit(update, func(tx *bolt.Tx) error {
+	err := s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		current, err := factInTx(tx, agentID, id)
 		if err != nil {
 			return err
 		}
+		wasLive := !current.IsSuperseded()
 		if err := patch(&current); err != nil {
 			if err == errFactUnchanged {
 				updated = current
@@ -65,12 +65,15 @@ func (s *Store) patchFactWithReceipt(agentID, id string, patch func(*Fact) error
 			return err
 		}
 		updated = current
+		if wasLive && current.IsSuperseded() && lineageHeadKey(tx, agentID, id) != "" {
+			return collectLineageTx(tx, agentID, s.now().UTC())
+		}
 		return nil
 	})
 	if err == errFactUnchanged {
 		err = nil
 	}
-	return updated, receipt, err
+	return updated, err
 }
 
 func (s *Store) retireFact(agentID string, victim Fact, replacementID string, requireUnpinned bool) error {
@@ -85,22 +88,17 @@ func (s *Store) retireDerivedFact(agentID string, victim Fact, replacementID str
 }
 
 func (s *Store) retireSnapshotFact(agentID string, victim Fact, replacementID string, requireUnpinned, requireConfidence bool) error {
-	_, err := s.retireSnapshotFactWithReceipt(agentID, victim, replacementID, requireUnpinned, requireConfidence, nil)
-	return err
-}
-
-func (s *Store) retireSnapshotFactWithReceipt(agentID string, victim Fact, replacementID string, requireUnpinned, requireConfidence bool, update commitUpdate) (commitReceipt, error) {
 	if victim.AgentID != agentID {
-		return notCommitted, fmt.Errorf("retire: fact belongs to another agent")
+		return fmt.Errorf("retire: fact belongs to another agent")
 	}
-	_, receipt, err := s.patchFactWithReceipt(agentID, victim.ID, func(current *Fact) error {
+	_, err := s.patchFact(agentID, victim.ID, func(current *Fact) error {
 		if current.IsSuperseded() || current.Text != victim.Text || current.Kind != victim.Kind || (requireUnpinned && current.Pinned) || (requireConfidence && current.Confidence != victim.Confidence) {
 			return fmt.Errorf("%w: cannot retire fact %s", ErrFactChanged, victim.ID)
 		}
 		current.SupersededBy = replacementID
 		return nil
-	}, update)
-	return receipt, err
+	})
+	return err
 }
 
 // SetPinned changes pin metadata on exact live IDs without replaying a stale
@@ -132,22 +130,114 @@ func (s *Store) SetPinned(agentID string, pinned bool, victims ...Fact) error {
 	return errors.Join(errs...)
 }
 
-func (s *Store) decayFact(agentID, id string, now time.Time, lambda float64) (Fact, error) {
-	return s.patchFact(agentID, id, func(current *Fact) error {
-		if current.Pinned {
-			return errFactUnchanged
-		}
-		hours := now.Sub(current.AccessedAt).Hours()
-		current.Weight = math.Min(current.Weight, math.Exp(-lambda*hours))
-		return nil
-	})
+// agingExempt preserves pins and live authored vocabulary, including aliases
+// written before AliasSource existed. Retired aliases age like other rows.
+func (f Fact) agingExempt() bool {
+	return f.Pinned || (f.IsAlias() && !f.IsSuperseded() && f.AliasSource == "")
 }
 
-func (s *Store) pruneFact(agentID, id string) error {
+const minimumFactWeight = 0.01
+
+func weightAtAge(accessedAt, now time.Time, lambda float64) float64 {
+	return math.Exp(-lambda * now.Sub(accessedAt).Hours())
+}
+
+// Alias aging follows its source-specific policy. The age guard protects ordinary live facts.
+func pruneEligible(f Fact, now time.Time, lambda float64) bool {
+	return !f.agingExempt() && f.Weight < minimumFactWeight &&
+		(f.IsSuperseded() || f.IsAlias() || weightAtAge(f.AccessedAt, now, lambda) < minimumFactWeight)
+}
+
+const maintenanceDecayBatchSize = 256
+
+// decayBatch rereads each selected identity under the writer lock. A batch
+// whose durable values are already current rolls back without a metadata write.
+func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fact, now time.Time, lambda float64) error {
+	return s.decayBatchObserved(ctx, namespace, selected, now, lambda, nil)
+}
+
+func (s *Store) decayBatchObserved(ctx context.Context, namespace string, selected []Fact, now time.Time, lambda float64, effects *ConsolidationMaintenanceReport) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	err := s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
+		rows := lineageRowBucket(tx, namespace)
+		if rows == nil {
+			return errFactUnchanged
+		}
+		state, indexed := idxReadState(tx, namespace)
+		keepPostings := s.cfg.CandidateRetrieval && indexed && state.Version == indexVersion &&
+			state.Stemmed == s.cfg.StemKeywords && s.idxCounted(namespace)
+		changed := 0
+		for _, entry := range selected {
+			if rows.Get([]byte(entry.ID)) == nil {
+				continue // a concurrent delete already collected the row
+			}
+			current, err := factInTx(tx, namespace, entry.ID)
+			if err != nil {
+				return fmt.Errorf("decay fact %s: %w", entry.ID, err)
+			}
+			if current.agingExempt() {
+				continue
+			}
+			weight := math.Min(current.Weight, weightAtAge(current.AccessedAt, now, lambda))
+			if weight == current.Weight {
+				continue
+			}
+			current.Weight = weight
+			if keepPostings {
+				err = s.persistDecayedFactTx(tx, rows, namespace, current)
+			} else {
+				err = s.persistFactTx(tx, rows, namespace, current)
+			}
+			if err != nil {
+				return fmt.Errorf("decay fact %s: %w", entry.ID, err)
+			}
+			changed++
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if changed == 0 {
+			return errFactUnchanged
+		}
+		if effects != nil {
+			tx.OnCommit(func() { effects.FactsDecayed += changed })
+		}
+		return nil
+	})
+	if err == errFactUnchanged {
+		return nil
+	}
+	return err
+}
+
+// persistDecayedFactTx changes only Weight, which affects neither postings
+// nor the recency spine. Preserve citation validation and the index write
+// stamp used by cached readers.
+func (s *Store) persistDecayedFactTx(tx *bolt.Tx, rows *bolt.Bucket, namespace string, fact Fact) error {
+	if err := hydrateCitationTx(tx, &fact); err != nil {
+		return err
+	}
+	data, err := fact.marshal()
+	if err != nil {
+		return err
+	}
+	if err := rows.Put([]byte(fact.ID), data); err != nil {
+		return err
+	}
+	return idxBumpCount(tx, namespace, 0, s.cfg.StemKeywords)
+}
+
+func (s *Store) pruneFact(agentID, id string, now time.Time, lambda float64) error {
+	return s.pruneFactObserved(agentID, id, now, lambda, nil)
+}
+
+func (s *Store) pruneFactObserved(agentID, id string, now time.Time, lambda float64, effects *ConsolidationMaintenanceReport) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.updateSubjectReadView(agentID, true, func(tx *bolt.Tx) error {
 		current, err := factInTx(tx, agentID, id)
 		if errors.Is(err, ErrFactChanged) {
 			return nil // a concurrent delete already collected it
@@ -155,10 +245,19 @@ func (s *Store) pruneFact(agentID, id string) error {
 		if err != nil {
 			return err
 		}
-		if current.Pinned || current.Weight >= 0.01 {
+		if !pruneEligible(current, now, lambda) {
 			return nil
 		}
-		return s.deleteFactTx(tx, agentID, id)
+		if pending, err := pendingLegacyEvidenceTx(tx, current); err != nil || pending {
+			return err
+		}
+		if err := s.deleteFactTx(tx, agentID, id); err != nil {
+			return err
+		}
+		if effects != nil {
+			tx.OnCommit(func() { effects.FactsPruned++ })
+		}
+		return nil
 	})
 }
 

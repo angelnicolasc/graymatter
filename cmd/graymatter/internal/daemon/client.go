@@ -299,6 +299,32 @@ func (c *Client) KGEdges() ([]kg.Edge, error) {
 	return resp.Edges, nil
 }
 
+// KGInspect asks for provenance alongside the graph. Older daemons return
+// only edges, so retain their analytics and leave provenance unavailable.
+func (c *Client) KGInspect() (KGInspection, error) {
+	var resp KGEdgesResponse
+	if err := c.hostCall("KGEdges", &KGEdgesRequest{Inspect: true}, &resp); err != nil {
+		return KGInspection{}, err
+	}
+	if resp.Inspection != nil {
+		return *resp.Inspection, nil
+	}
+	nodes, err := c.KGNodes()
+	if err != nil {
+		return KGInspection{}, err
+	}
+	edges := make([]kg.EdgeInspection, 0, len(resp.Edges))
+	for _, edge := range resp.Edges {
+		edges = append(edges, kg.EdgeInspection{Edge: edge, PendingReason: "provenance_unavailable"})
+	}
+	return KGInspection{Nodes: nodes, Edges: edges}, nil
+}
+
+// KGReconcile applies an explicit proof without falling back to an edge link.
+func (c *Client) KGReconcile(req *KGReconcileRequest) error {
+	return c.hostCall("KGReconcile", req, &KGReconcileResponse{})
+}
+
 // KGLink creates an edge between two nodes on the daemon's graph.
 func (c *Client) KGLink(from, to, relation string) error {
 	return c.hostCall("KGLink", &KGLinkRequest{From: from, To: to, Relation: relation}, &KGLinkResponse{})
@@ -360,8 +386,19 @@ func (c *Client) KGState() (*KGStateResponse, error) {
 	return &resp, nil
 }
 
-// Remember stores a fact with full Remember semantics (the daemon backend
-// routes Put through Memory.Remember, async consolidation included).
+// ErrMaintenancePolicyUnsupported is returned when the daemon cannot confirm safe maintenance.
+var ErrMaintenancePolicyUnsupported = rpc.ErrMaintenancePolicyUnsupported
+
+// MaintenanceMode reports the policy advertised on this connection.
+// An empty mode means the daemon's policy has not been verified.
+func (c *Client) MaintenanceMode() string {
+	if supported, known := c.Client.Capability(rpc.MaintenanceOnlyV1); known && supported {
+		return MaintenanceOnly
+	}
+	return ""
+}
+
+// Remember stores a fact through the daemon's normal write and maintenance path.
 func (c *Client) Remember(ctx context.Context, agentID, text string) error {
 	return c.Put(ctx, agentID, text)
 }

@@ -7,6 +7,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/philippgille/chromem-go v0.7.0
 	go.etcd.io/bbolt v1.3.11
+	golang.org/x/text v0.27.0
 )
 
 require (

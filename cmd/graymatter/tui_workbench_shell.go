@@ -343,9 +343,9 @@ func (m tuiModel) renderFooter() string {
 	help := "Tab focus · ↑↓ scroll"
 	switch m.activeTab {
 	case tabMemory:
-		help = "f filter · n namespace · [ ] state · a add · e revise · p pin · d retire · y copy"
+		help = "f filter · n namespace · [ ] state · a add · e revise · p pin · d retire · v lineage · y copy"
 	case tabRecall:
-		help = "Enter query · Tab inspect · y copy"
+		help = "Enter query · Tab inspect · v lineage · y copy"
 	case tabSessions:
 		help = "c runs/checkpoints · Tab inspect · x stop run"
 	case tabGraph:
@@ -355,6 +355,8 @@ func (m tuiModel) renderFooter() string {
 	}
 	if m.modal == "add" || m.modal == "revise" {
 		help = "Ctrl+S save · Enter new line · Esc cancel"
+	} else if m.modal == "lineage" {
+		help = "Tab choose source · Enter follow · Backspace previous · ↑↓ scroll · Esc close"
 	} else if m.modal == "help" {
 		help = "Esc return"
 	} else if m.modal != "" {
@@ -363,8 +365,22 @@ func (m tuiModel) renderFooter() string {
 		help = "Type to search · ↑↓ choose · Enter apply · Esc return"
 	}
 	first := m.muted(" " + help)
-	if m.status != "" {
-		first = m.ink(" " + tuiPlain(m.status))
+	status := m.status
+	var subjectWarning string
+	switch m.activeTab {
+	case tabMemory:
+		subjectWarning = m.factSubjectWarning
+	case tabRecall:
+		subjectWarning = m.recallSubjectWarning
+	}
+	if subjectWarning != "" {
+		if status != "" {
+			subjectWarning += " · " + status
+		}
+		status = subjectWarning
+	}
+	if status != "" {
+		first = m.ink(" " + tuiPlain(status))
 	}
 	global := "/ commands · 1–6 tabs · r refresh · q quit "
 	gw := ansi.StringWidth(global)

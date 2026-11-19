@@ -27,3 +27,6 @@
 *.mjs           linguist-vendored
 Dockerfile      linguist-vendored
 Dockerfile.*    linguist-vendored
+
+# The compatibility test compares this capture byte-for-byte with MCP initialize.
+/cmd/graymatter/internal/mcp/testdata/full-instructions.txt text eol=lf

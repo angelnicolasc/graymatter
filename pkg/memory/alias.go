@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -49,28 +50,45 @@ func (s *Store) PutAlias(ctx context.Context, agentID, term string, equivalents 
 	return s.putReturningFactKind(ctx, agentID, text, KindAlias, "")
 }
 
+type aliasExpansion struct {
+	token  string
+	factID string
+}
+
 // parseAliasFacts compiles live alias facts into the bidirectional expansion
 // map the recall pipeline applies to every query. Single-token pairs map in
 // both directions; multi-token equivalents map forward only (see PutAlias).
 // Malformed texts are skipped silently — an alias the parser cannot read must
 // not be able to break recall, and doctor is the place to surface them.
-func parseAliasFacts(aliases []Fact) map[string][]string {
+func parseAliasFacts(aliases []Fact) map[string][]aliasExpansion {
 	if len(aliases) == 0 {
 		return nil
 	}
-	m := make(map[string][]string)
-	add := func(k, v string) {
+	// Both retrieval paths prefer the newest mapping. Break equal creation
+	// times by ID so the same fact receives credit for a duplicate mapping.
+	slices.SortFunc(aliases, func(a, b Fact) int {
+		if order := b.CreatedAt.Compare(a.CreatedAt); order != 0 {
+			return order
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	m := make(map[string][]aliasExpansion)
+	add := func(k, v, id string) {
 		if k == "" || v == "" || k == v {
 			return
 		}
 		for _, existing := range m[k] {
-			if existing == v {
+			if existing.token == v {
 				return
 			}
 		}
-		m[k] = append(m[k], v)
+		m[k] = append(m[k], aliasExpansion{token: v, factID: id})
 	}
 	for _, f := range aliases {
+		// Indexed fetch can observe a fact after its cached partition was read.
+		if !f.IsAlias() || f.IsSuperseded() {
+			continue
+		}
 		body, ok := strings.CutPrefix(f.Text, aliasPrefix)
 		if !ok {
 			continue
@@ -91,9 +109,9 @@ func parseAliasFacts(aliases []Fact) map[string][]string {
 			singlePair := len(leftToks) == 1 && len(eqToks) == 1
 			for _, lt := range leftToks {
 				for _, et := range eqToks {
-					add(lt, et)
+					add(lt, et, f.ID)
 					if singlePair {
-						add(et, lt)
+						add(et, lt, f.ID)
 					}
 				}
 			}
@@ -111,31 +129,35 @@ func parseAliasFacts(aliases []Fact) map[string][]string {
 // so an alias and the fact it bridges land on identical terms. Tokens already
 // present in the query are not appended again — duplicates would inflate the
 // TF-IDF term frequency of that term and skew the score.
-func expandQuery(query string, aliases map[string][]string, doStem bool) string {
+func expandQuery(query string, aliases map[string][]aliasExpansion) (string, []string) {
 	if len(aliases) == 0 {
-		return query
+		return query, nil
 	}
 	toks := tokenize(query)
 	if len(toks) == 0 {
-		return query
+		return query, nil
 	}
 	seen := make(map[string]bool, len(toks)*2)
 	for _, t := range toks {
 		seen[t] = true
 	}
-	var extra []string
+	var extra, activated []string
+	active := make(map[string]bool)
 	for _, t := range toks {
 		for _, alt := range aliases[t] {
-			for _, altTok := range tokenize(alt) {
-				if !seen[altTok] {
-					seen[altTok] = true
-					extra = append(extra, altTok)
-				}
+			if seen[alt.token] {
+				continue
+			}
+			seen[alt.token] = true
+			extra = append(extra, alt.token)
+			if !active[alt.factID] {
+				active[alt.factID] = true
+				activated = append(activated, alt.factID)
 			}
 		}
 	}
 	if len(extra) == 0 {
-		return query
+		return query, nil
 	}
-	return query + " " + strings.Join(extra, " ")
+	return query + " " + strings.Join(extra, " "), activated
 }

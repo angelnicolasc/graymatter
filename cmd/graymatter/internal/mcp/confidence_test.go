@@ -12,11 +12,11 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
-func confidenceTestServer(t *testing.T) (*Server, *graymatter.Memory) {
-	return confidenceTestServerWithWeight(t, 0)
+func confidenceFullTestServer(t *testing.T) (*Server, *graymatter.Memory) {
+	return confidenceFullTestServerWithWeight(t, 0)
 }
 
-func confidenceTestServerWithWeight(t *testing.T, weight float64) (*Server, *graymatter.Memory) {
+func confidenceFullTestServerWithWeight(t *testing.T, weight float64) (*Server, *graymatter.Memory) {
 	t.Helper()
 	cfg := graymatter.DefaultConfig()
 	cfg.DataDir = t.TempDir()
@@ -29,11 +29,11 @@ func confidenceTestServerWithWeight(t *testing.T, weight float64) (*Server, *gra
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mem.Close() })
-	return New(NewDirectBackend(mem, nil), "test"), mem
+	return New(NewDirectBackend(mem, nil), "test", WithFullCatalog()), mem
 }
 
 func TestConfidenceMCPConfiguredDefaultAndExplicitZero(t *testing.T) {
-	s, _ := confidenceTestServerWithWeight(t, 0.2)
+	s, _ := confidenceFullTestServerWithWeight(t, 0.2)
 	for _, label := range []string{"verified", "unverified"} {
 		result := confidenceToolCall(t, s, "memory_add", map[string]any{"agent_id": "a", "text": "policy " + label, "confidence": label})
 		if result["isError"] == true {
@@ -84,14 +84,14 @@ func (b *confidenceLateFailureBackend) ReviseFactsWithOptions(ctx context.Contex
 	if err != nil {
 		return fact, err
 	}
-	return fact, errors.New("required retirement phase failed")
+	return fact, errors.New("backend follow-up failed")
 }
 
 func TestConfidenceMCPLateFailureReportsKnownCommittedIdentity(t *testing.T) {
-	_, mem := confidenceTestServer(t)
+	_, mem := confidenceFullTestServer(t)
 	direct := NewDirectBackend(mem, nil)
 	backend := &confidenceLateFailureBackend{Backend: direct, writer: direct, reviser: direct}
-	s := New(backend, "test")
+	s := New(backend, "test", WithFullCatalog())
 	for _, call := range []struct {
 		tool string
 		args map[string]any
@@ -102,7 +102,11 @@ func TestConfidenceMCPLateFailureReportsKnownCommittedIdentity(t *testing.T) {
 	} {
 		result := confidenceToolCall(t, s, call.tool, call.args)
 		wire, _ := json.Marshal(result)
-		if result["isError"] != true || backend.last.ID == "" || !strings.Contains(string(wire), backend.last.ID) || !strings.Contains(string(wire), "after committing") {
+		committed := "after committing"
+		if call.args["action"] == "update" {
+			committed = "Update committed as"
+		}
+		if result["isError"] != true || backend.last.ID == "" || !strings.Contains(string(wire), backend.last.ID) || !strings.Contains(string(wire), committed) {
 			t.Fatalf("late failure hid durable identity or reported success: %s / %+v", wire, backend.last)
 		}
 	}
@@ -129,7 +133,7 @@ func confidenceToolCall(t *testing.T, s *Server, name string, args map[string]an
 }
 
 func TestConfidenceMCPRuntimeValidationHasNoEffects(t *testing.T) {
-	s, mem := confidenceTestServer(t)
+	s, mem := confidenceFullTestServer(t)
 	for _, value := range []any{nil, "", " verified", "Verified", "unknown", 1, true, []any{"verified"}, map[string]any{}} {
 		for _, tool := range []string{"memory_add", "memory_reflect"} {
 			args := map[string]any{"agent_id": "a", "text": "must not persist", "confidence": value}
@@ -178,7 +182,7 @@ func TestConfidenceMCPRuntimeValidationHasNoEffects(t *testing.T) {
 }
 
 func TestConfidenceMCPWritesFiltersReceiptsAndBatchSchemas(t *testing.T) {
-	s, mem := confidenceTestServer(t)
+	s, mem := confidenceFullTestServer(t)
 	for _, label := range []string{"verified", "inferred", "unverified"} {
 		out := confidenceToolCall(t, s, "memory_add", map[string]any{"agent_id": "a", "text": "policy " + label, "confidence": label})
 		if out["isError"] == true {

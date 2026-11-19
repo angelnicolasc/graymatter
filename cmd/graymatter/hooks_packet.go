@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	netrpc "net/rpc"
 	"strings"
 	"time"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/hookpacket"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
@@ -41,7 +43,8 @@ func hookRecallLexicalBlock(ctx context.Context, store cliStore, agent, query st
 		return hookPacketRecall(ctx, store, agent, query, k, true)
 	}, query, hookUserPromptSharedTopK)
 	r := hookPacketReceipt{Policy: "lexical", Unit: "utf8_bytes", MaxBytes: hookPacketBytes, Project: pr, Shared: sr}
-	return renderMemoryBlock(agent, project, shared), r, errors.Join(pe, se)
+	block, issuesErr := hookSubjectWarning(ctx, store, agent, renderMemoryBlock(agent, project, shared))
+	return block, r, errors.Join(pe, se, issuesErr)
 }
 
 // The general RPC Recall API retains context only for signature compatibility.
@@ -68,18 +71,22 @@ func hookPacketRecall(ctx context.Context, store cliStore, agent, query string, 
 			return nil, context.DeadlineExceeded
 		}
 		if shared {
-			var resp rpc.RecallSharedResponse
-			err := remote.CallService(rpc.ServiceName, "RecallShared", &rpc.RecallSharedRequest{Query: query, TopK: k}, &resp, timeout)
-			return resp.Facts, err
+			agent = memory.SharedAgentID
 		}
-		var resp rpc.RecallResponse
-		err := remote.CallService(rpc.ServiceName, "Recall", &rpc.RecallRequest{AgentID: agent, Query: query, TopK: k}, &resp, timeout)
+		var resp rpc.RecallForHooksResponse
+		err := remote.CallService(rpc.ServiceName, "RecallForHooksWithSubjects", &rpc.RecallForHooksRequest{AgentID: agent, Query: query, TopK: k}, &resp, timeout)
+		var remoteErr netrpc.ServerError
+		if errors.As(err, &remoteErr) {
+			if strings.Contains(string(remoteErr), "can't find method") || strings.HasPrefix(string(remoteErr), memory.ErrSubjectUnsupported.Error()) {
+				return nil, memory.ErrSubjectUnsupported
+			}
+			if string(remoteErr) == memory.ErrCitationUnsupported.Error() {
+				return nil, memory.ErrCitationUnsupported
+			}
+		}
 		return resp.Facts, err
 	}
-	if shared {
-		return store.RecallShared(ctx, query, k)
-	}
-	return store.Recall(ctx, agent, query, k)
+	return hookRecallProjection(ctx, store, agent, query, k, shared)
 }
 
 func hookRecallLexicalNamespace(ctx context.Context, recall func(context.Context, int) ([]string, error), query string, topK int) ([]string, hookNamespaceReceipt, error) {
@@ -90,6 +97,14 @@ func hookRecallLexicalNamespace(ctx context.Context, recall func(context.Context
 	}
 	facts, err := recall(ctx, 32)
 	r.Candidates = len(facts)
+	if errors.Is(err, memory.ErrSubjectUnsupported) {
+		r.Reason = "subject_capability_unavailable"
+		return nil, r, err
+	}
+	if errors.Is(err, memory.ErrCitationUnsupported) {
+		r.Reason = "citation_capability_unavailable"
+		return nil, r, err
+	}
 	reason := "candidate_recall_failed"
 	if err == nil {
 		var selected hookpacket.Result

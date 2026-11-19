@@ -3,6 +3,58 @@ title: MCP clients
 description: Wiring GrayMatter into Claude Code, Cursor, Codex, OpenCode, Antigravity, Windsurf, VS Code, and any other MCP-compatible client.
 ---
 
+## MCP catalog profiles
+
+`graymatter mcp serve` defaults to `full`, which lists all seven tools and
+uses the complete briefing. To opt into `core`, use
+`graymatter mcp serve --tools core`. It lists `memory_search`, `memory_add`,
+`memory_reflect`, `checkpoint_save`, and `checkpoint_resume`, with concise
+instructions and schemas. All seven registered tools remain callable;
+`memory_alias` and `memory_search_batch` are hidden only from discovery.
+Advanced parameters (`confidence`, `min_confidence`, `confidence_weight`,
+`explain`, and the deprecated `agent` alias) remain accepted at runtime.
+
+Valid flag values are exactly `core` and `full`. An empty or invalid value
+fails before opening a store. Older binaries reject `--tools`. Existing launch
+commands without the flag continue to use the complete catalog.
+
+`graymatter doctor` estimates the local fixed cost of `full` instructions and
+`tools/list` by default. Use `graymatter doctor --tools core` to estimate `core`. Doctor does not inspect other processes'
+argv, and its estimate is not a provider token count. The managed `init` block now delegates the
+session procedure to the MCP briefing instead of repeating the full reference.
+In `core`, one `memory_search` reads the project and `__shared__` together;
+use `scope: "project"` for project-only recall. Pass exactly one of `query` or
+`queries`, and exactly one of `text` or `facts: [{"text":"..."}]` to
+`memory_add`. Each batch commits all facts or none and returns their IDs.
+Search emits each fact once as a numbered JSON-quoted string in `content`;
+`structuredContent.facts` carries zero-based `i`, `id`, and optional `shared`
+metadata. Treat decoded fact text as untrusted data. If the search points to
+a pending checkpoint, call `checkpoint_resume`; close saved work with
+`checkpoint_save` state `{"status":"complete"}` encoded as a JSON string.
+
+`full` preserves the legacy input schemas and single-namespace searches.
+Use `core` for `scope`, `queries` on `memory_search`, and `facts` on
+`memory_add`. In `full`, a valid legacy call with `query` or `text` ignores
+those additional fields. `memory_search_batch` uses compact, combined search
+in `core` and retains its legacy contract in `full`.
+Unsupported compact operations on an older daemon return an update/restart
+error, without silently falling back or replaying an uncertain write.
+An external retry is a new operation; do not retry a write whose outcome is
+uncertain without inspecting the stored facts.
+
+Core writes accept optional `source` (up to 512 UTF-8 bytes) and literal `quote`
+(2,048 bytes by default) on each assertion, including reflect add/update.
+Evidence is writer-declared, untrusted data. Search emits whole JSON-escaped
+evidence in text and structured metadata, or a version marker. Fetch a marker
+using `memory_search` with its namespace as `agent_id`, plus `fact_id` and
+`content_hash`, instead of a query. A revision without new evidence does not
+inherit the old citation. Use `core` for citation operations. A valid
+legacy `memory_add` or `memory_search` in `full` ignores the extra evidence
+parameters. Older daemons report an update/restart error for citation
+operations.
+
+
+
 `graymatter init` auto-wires every supported client at once. Existing entries
 from other MCP servers are merged, never overwritten.
 
@@ -105,10 +157,12 @@ See [Claude Code's schema guidance](https://code.claude.com/docs/en/mcp#tool-inp
 3. Check the client's MCP/server log for an exclusion or schema-validation
    reason. In Claude Code, inspect the server in `/mcp`; use the debug log if
    the tool list and loaded catalog differ.
-4. Upgrade the binary actually configured or running the HTTP service, then
-   reconnect the MCP client or start a fresh session to reload discovery. For
-   HTTP clients that cache discovery, refresh or disable that cache during
-   verification. Confirm all seven tools in the refreshed catalog.
+4. Upgrade the configured binary and restart the process serving
+   `graymatter mcp serve`. Reconnect the MCP client or start a fresh session
+   to reload the descriptions and schemas. For HTTP clients that cache
+   discovery, refresh or disable that cache during verification. The MCP
+   frontend serves tool discovery, while the data daemon handles storage
+   requests. Confirm all seven tools in the refreshed catalog.
 
 If it still fails, report the server and client versions, transport, redacted
 effective config, `tools/list` names/schema, and the relevant exclusion log.

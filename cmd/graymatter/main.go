@@ -83,6 +83,7 @@ func main() {
 		statusCmd(),
 		mcpCmd(),
 		exportCmd(),
+		importCmd(),
 		tuiCmd(),
 		usageCmd(),
 		runCmd(),
@@ -97,6 +98,7 @@ func main() {
 		aliasCmd(),
 		hooksCmd(),
 		consolidateCmd(),
+		reviewCmd(),
 		demoCmd(),
 		kgCmd(),
 	)

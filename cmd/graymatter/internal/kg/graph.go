@@ -28,10 +28,8 @@ var (
 	// idSchemeVersion is the node-ID scheme this build writes. v1 IDs were
 	// bare lowercased labels, which merged distinct entities ("apple" the
 	// organization and "apple" the concept collapsed into one node). v2 IDs
-	// are type-scoped ("<type>:<label>"). Stores written under a different
-	// version are wiped on open and re-extracted from their facts by the
-	// next consolidation cycle - the extraction watermark makes that
-	// incremental pass rebuild everything exactly once.
+	// are type-scoped ("<type>:<label>"). A scheme change schedules typed
+	// re-extraction while preserving earlier graph rows and their evidence.
 	idSchemeVersion = "2"
 )
 
@@ -52,9 +50,10 @@ type Edge struct {
 	Relation  string    `json:"relation"` // mentioned_in / related_to / contradicts
 	CreatedAt time.Time `json:"created_at"`
 	Weight    float64   `json:"weight"`
-	// Sources lists (capped at 10) the fact IDs that produced this edge —
-	// every connection is traceable to the facts that mention it.
+	// Sources is the capped, deduplicated fact-ID projection retained for
+	// existing readers. It cannot establish that every support is known.
 	Sources []string `json:"sources,omitempty"`
+	*EdgeProvenance
 }
 
 // maxEdgeSources caps provenance receipts per edge.
@@ -66,32 +65,20 @@ type Graph struct {
 	db *bolt.DB
 }
 
-// Open initialises the kg buckets in db and returns a Graph. A store whose
-// graph was written under an older node-ID scheme is wiped here: nodes are
-// derivable state (re-extracted from facts via the watermark), so rebuilding
-// beats migrating by guesswork.
+// Open initializes the graph buckets and advances the provenance inventory.
+// A node-ID scheme change schedules re-extraction with typed IDs. Existing
+// rows remain available because a rebuild cannot reproduce all legacy support.
 func Open(db *bolt.DB) (*Graph, error) {
 	if err := db.Update(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{bucketNodes, bucketEdges, bucketKGMeta} {
+		for _, name := range [][]byte{bucketNodes, bucketEdges, bucketKGMeta, bucketSupportEdges} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
 		}
 		mb := tx.Bucket(bucketKGMeta)
 		if string(mb.Get([]byte(metaKeyScheme))) != idSchemeVersion {
-			// Wrong or absent scheme: drop derived graph state. The
-			// consolidation watermark lives in its own bucket; clearing it
-			// schedules every fact for one fresh extraction pass.
-			for _, name := range [][]byte{bucketNodes, bucketEdges} {
-				if b := tx.Bucket(name); b != nil {
-					if err := tx.DeleteBucket(name); err != nil {
-						return err
-					}
-					if _, err := tx.CreateBucket(name); err != nil {
-						return err
-					}
-				}
-			}
+			// The watermark is derived from facts. Clearing it schedules
+			// typed extraction without claiming to repair legacy evidence.
 			if wb := tx.Bucket([]byte("kg_extracted")); wb != nil {
 				if err := tx.DeleteBucket([]byte("kg_extracted")); err != nil {
 					return err
@@ -100,9 +87,11 @@ func Open(db *bolt.DB) (*Graph, error) {
 					return err
 				}
 			}
-			return mb.Put([]byte(metaKeyScheme), []byte(idSchemeVersion))
+			if err := mb.Put([]byte(metaKeyScheme), []byte(idSchemeVersion)); err != nil {
+				return err
+			}
 		}
-		return nil
+		return migrateProvenanceTx(tx, provenanceBatchSize)
 	}); err != nil {
 		return nil, fmt.Errorf("kg: init buckets: %w", err)
 	}
@@ -120,10 +109,12 @@ var ErrNoGraph = errors.New("kg: no graph in this database")
 // is a real failure.
 func OpenRead(db *bolt.DB) (*Graph, error) {
 	err := db.View(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{bucketNodes, bucketEdges} {
-			if tx.Bucket(name) == nil {
-				return ErrNoGraph
-			}
+		nodes, edges := tx.Bucket(bucketNodes), tx.Bucket(bucketEdges)
+		if nodes == nil && edges == nil {
+			return ErrNoGraph
+		}
+		if nodes == nil || edges == nil {
+			return errors.New("kg: graph buckets are incomplete")
 		}
 		return nil
 	})
@@ -136,6 +127,14 @@ func OpenRead(db *bolt.DB) (*Graph, error) {
 // Upsert inserts or updates a node. If a node with the same ID already exists,
 // its Label, EntityType, and LastSeen are updated; Weight is max(existing, new).
 func (g *Graph) Upsert(node Node) error {
+	return g.db.Update(func(tx *bolt.Tx) error { return g.UpsertTx(tx, node) })
+}
+
+// UpsertTx applies Upsert in a caller-owned graph transaction.
+func (g *Graph) UpsertTx(tx *bolt.Tx, node Node) error {
+	if tx == nil || tx.DB() != g.db {
+		return errors.New("kg: upsert: transaction belongs to another database")
+	}
 	if node.ID == "" {
 		return fmt.Errorf("kg: upsert: node ID must not be empty")
 	}
@@ -150,102 +149,23 @@ func (g *Graph) Upsert(node Node) error {
 		node.Weight = 1.0
 	}
 
-	return g.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketNodes)
-		existing := b.Get([]byte(node.ID))
-		if existing != nil {
-			var old Node
-			if err := json.Unmarshal(existing, &old); err == nil {
-				// Preserve FirstSeen; take the higher weight.
-				node.FirstSeen = old.FirstSeen
-				if old.Weight > node.Weight {
-					node.Weight = old.Weight
-				}
+	b := tx.Bucket(bucketNodes)
+	existing := b.Get([]byte(node.ID))
+	if existing != nil {
+		var old Node
+		if err := json.Unmarshal(existing, &old); err == nil {
+			// Preserve FirstSeen; take the higher weight.
+			node.FirstSeen = old.FirstSeen
+			if old.Weight > node.Weight {
+				node.Weight = old.Weight
 			}
 		}
-		data, err := json.Marshal(node)
-		if err != nil {
-			return err
-		}
-		return b.Put([]byte(node.ID), data)
-	})
-}
-
-// Link inserts or updates an edge between two nodes.
-// Edges are keyed by "from|to|relation" so duplicate links upsert, not append.
-//
-// Endpoints that do not exist yet are auto-upserted as placeholder nodes
-// ({Label: id, EntityType: "unknown"}) inside the same transaction. Agents
-// legitimately link before any extractor ran, and an edge whose endpoints are
-// missing is invisible to every traversal while still occupying storage —
-// the dangling-edge class behind issue #24. Creating the endpoints keeps the
-// invariant "every edge is traversable" unconditional; rejecting the link
-// instead would punish exactly the caller (link-before-extract) the tool is
-// meant to serve.
-func (g *Graph) Link(edge Edge) error {
-	if edge.From == "" || edge.To == "" {
-		return fmt.Errorf("kg: link: From and To must not be empty")
 	}
-	if edge.CreatedAt.IsZero() {
-		edge.CreatedAt = time.Now().UTC()
+	data, err := json.Marshal(node)
+	if err != nil {
+		return err
 	}
-	created := edge.CreatedAt
-	if edge.Weight == 0 {
-		edge.Weight = 1.0
-	}
-	key := edgeKey(edge.From, edge.To, edge.Relation)
-	return g.db.Update(func(tx *bolt.Tx) error {
-		nodes := tx.Bucket(bucketNodes)
-		for _, id := range [2]string{edge.From, edge.To} {
-			if nodes.Get([]byte(id)) != nil {
-				continue
-			}
-			placeholder := Node{
-				ID:         id,
-				Label:      id,
-				EntityType: "unknown",
-				FirstSeen:  created,
-				LastSeen:   created,
-				Weight:     1.0,
-			}
-			data, err := json.Marshal(placeholder)
-			if err != nil {
-				return fmt.Errorf("kg: link: marshal placeholder node %q: %w", id, err)
-			}
-			if err := nodes.Put([]byte(id), data); err != nil {
-				return err
-			}
-		}
-		eb := tx.Bucket(bucketEdges)
-		if len(edge.Sources) > 0 {
-			// Merge provenance into any existing edge so receipts accumulate
-			// across facts instead of being overwritten (capped, oldest kept).
-			if raw := eb.Get([]byte(key)); raw != nil {
-				var old Edge
-				if json.Unmarshal(raw, &old) == nil && len(old.Sources) > 0 {
-					seenSrc := map[string]bool{}
-					for _, s := range old.Sources {
-						seenSrc[s] = true
-					}
-					for _, s := range edge.Sources {
-						if !seenSrc[s] && len(old.Sources) < maxEdgeSources {
-							old.Sources = append(old.Sources, s)
-							seenSrc[s] = true
-						}
-					}
-					edge.Sources = old.Sources
-				}
-			}
-			if len(edge.Sources) > maxEdgeSources {
-				edge.Sources = edge.Sources[:maxEdgeSources]
-			}
-		}
-		data, err := json.Marshal(edge)
-		if err != nil {
-			return err
-		}
-		return eb.Put([]byte(key), data)
-	})
+	return b.Put([]byte(node.ID), data)
 }
 
 // Neighbors returns all nodes and edges reachable from nodeID within depth hops.
@@ -253,34 +173,30 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 	if depth <= 0 {
 		return nil, nil, nil
 	}
-
-	allEdges, err := g.allEdges()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// BFS.
-	visited := map[string]bool{nodeID: true}
-	frontier := []string{nodeID}
+	var resultNodes []Node
 	var resultEdges []Edge
+	err := g.db.View(func(tx *bolt.Tx) error {
+		allEdges, err := readEdgesTx(tx)
+		if err != nil {
+			return err
+		}
 
-	for d := 0; d < depth && len(frontier) > 0; d++ {
-		var next []string
-		for _, from := range frontier {
-			for _, e := range allEdges {
-				if e.From == from && !visited[e.To] {
-					visited[e.To] = true
-					next = append(next, e.To)
-					resultEdges = append(resultEdges, e)
+		visited := map[string]bool{nodeID: true}
+		frontier := []string{nodeID}
+		for d := 0; d < depth && len(frontier) > 0; d++ {
+			var next []string
+			for _, from := range frontier {
+				for _, edge := range allEdges {
+					if edge.From == from && !visited[edge.To] {
+						visited[edge.To] = true
+						next = append(next, edge.To)
+						resultEdges = append(resultEdges, edge)
+					}
 				}
 			}
+			frontier = next
 		}
-		frontier = next
-	}
 
-	// Load all visited nodes (excluding the seed node itself).
-	var resultNodes []Node
-	err = g.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketNodes)
 		if b == nil {
 			return nil
@@ -289,13 +205,9 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 			if id == nodeID {
 				continue
 			}
-			data := b.Get([]byte(id))
-			if data == nil {
-				continue
-			}
-			var n Node
-			if err := json.Unmarshal(data, &n); err == nil {
-				resultNodes = append(resultNodes, n)
+			var node Node
+			if err := json.Unmarshal(b.Get([]byte(id)), &node); err == nil {
+				resultNodes = append(resultNodes, node)
 			}
 		}
 		return nil
@@ -303,90 +215,94 @@ func (g *Graph) Neighbors(nodeID string, depth int) ([]Node, []Edge, error) {
 	return resultNodes, resultEdges, err
 }
 
-// DecayGraph recomputes node and edge weights from staleness and deletes
-// anything below the 0.01 prune floor. Called once per consolidation cycle
-// through the memory.GraphDecayer capability (wired via GraphAdapter).
+// DecayGraph recomputes graph weights and prunes stale orphan nodes.
 func (g *Graph) DecayGraph(halfLife time.Duration) error {
 	return g.DecayGraphAt(time.Now(), halfLife)
 }
 
-// DecayGraphAt is DecayGraph with an injected clock, so tests can assert
-// idempotency without racing the wall clock.
-//
-// Weight is recomputed from LastSeen, never multiplied into: multiplying
-// re-applied the entire elapsed period on every call, so decay frequency -
-// not elapsed time - drove forgetting. min() keeps decay from handing weight
-// back to a node a concurrent upsert just refreshed, mirroring the fact-decay
-// rule in pkg/memory.
+// DecayGraphAt accepts a fixed clock. Edge support governs removal. A stale
+// endpoint remains traversable until its final edge is removed.
 func (g *Graph) DecayGraphAt(now time.Time, halfLife time.Duration) error {
 	if halfLife <= 0 {
 		halfLife = 720 * time.Hour
 	}
 	lambda := math.Log(2) / halfLife.Hours()
-
 	return g.db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{bucketNodes, bucketEdges} {
-			b := tx.Bucket(bucket)
-			if b == nil {
-				continue
-			}
-			var toDelete [][]byte
-			if err := b.ForEach(func(k, v []byte) error {
-				if v == nil {
-					return nil // sub-bucket; not ours
-				}
-				hours, err := stalenessHours(bucket, k, v, now)
-				if err != nil {
-					return nil // unparseable entries are prune's problem, not decay's
-				}
-				w, err := weightOf(v)
-				if err != nil {
-					return nil
-				}
-				w = math.Min(w, math.Exp(-lambda*hours))
-				if w < 0.01 {
-					toDelete = append(toDelete, k)
-					return nil
-				}
-				nv, err := withWeight(v, w)
-				if err != nil {
-					return err
-				}
-				return b.Put(k, nv)
-			}); err != nil {
-				return err
-			}
-			for _, k := range toDelete {
-				if err := b.Delete(k); err != nil {
-					return err
-				}
-			}
+		if err := migrateProvenanceTx(tx, provenanceBatchSize); err != nil {
+			return err
 		}
-		return nil
+
+		incident := make(map[string]bool)
+		unreadableEdge := false
+		if err := decayBucket(tx.Bucket(bucketEdges), now, lambda, func(key, raw []byte) (time.Time, bool, bool) {
+			edge, err := decodeKeyedEdge(key, raw)
+			if err != nil {
+				unreadableEdge = true
+				return time.Time{}, false, false
+			}
+			incident[edge.From] = true
+			incident[edge.To] = true
+			return edge.CreatedAt, false, true
+		}); err != nil {
+			return err
+		}
+		return decayBucket(tx.Bucket(bucketNodes), now, lambda, func(key, raw []byte) (time.Time, bool, bool) {
+			var node Node
+			if err := json.Unmarshal(raw, &node); err != nil || node.ID == "" || node.ID != string(key) {
+				return time.Time{}, false, false
+			}
+			return node.LastSeen, !unreadableEdge && !incident[node.ID], true
+		})
 	})
 }
 
-// stalenessHours returns hours since the entry's freshness anchor: LastSeen
-// for nodes, CreatedAt for edges.
-func stalenessHours(bucket, key, val []byte, now time.Time) (float64, error) {
-	anchor := time.Time{}
-	if string(bucket) == string(bucketNodes) {
-		var n Node
-		if err := json.Unmarshal(val, &n); err != nil {
-			return 0, err
-		}
-		anchor = n.LastSeen
-	} else {
-		var e Edge
-		if err := json.Unmarshal(val, &e); err != nil {
-			return 0, err
-		}
-		anchor = e.CreatedAt
+// decayBucket receives the freshness anchor, pruning eligibility, and whether
+// the row is readable. Unreadable records stay available for inspection.
+func decayBucket(b *bolt.Bucket, now time.Time, lambda float64, classify func([]byte, []byte) (time.Time, bool, bool)) error {
+	if b == nil {
+		return nil
 	}
-	if anchor.IsZero() {
-		return 0, nil
+	type entry struct{ key, value []byte }
+	var changed []entry
+	var removed [][]byte
+	if err := b.ForEach(func(k, v []byte) error {
+		anchor, prunable, readable := classify(k, v)
+		if !readable {
+			return nil
+		}
+		var hours float64
+		if !anchor.IsZero() {
+			hours = now.Sub(anchor).Hours()
+		}
+		weight, err := weightOf(v)
+		if err != nil {
+			return nil
+		}
+		w := math.Min(weight, math.Exp(-lambda*hours))
+		if w < 0.01 && prunable {
+			removed = append(removed, append([]byte(nil), k...))
+		} else if w != weight {
+			nv, err := withWeight(v, w)
+			if err != nil {
+				return err
+			}
+			changed = append(changed, entry{append([]byte(nil), k...), nv})
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	return now.Sub(anchor).Hours(), nil
+	for _, entry := range changed {
+		if err := b.Put(entry.key, entry.value); err != nil {
+			return err
+		}
+	}
+	for _, key := range removed {
+		if err := b.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // weightOf extracts the weight field without mutating the rest of the record.
@@ -404,11 +320,15 @@ func weightOf(val []byte) (float64, error) {
 // withWeight rewrites only the weight field of a JSON record, preserving
 // every other byte-level field exactly as stored.
 func withWeight(val []byte, w float64) ([]byte, error) {
-	m := map[string]any{}
+	m := map[string]json.RawMessage{}
 	if err := json.Unmarshal(val, &m); err != nil {
 		return nil, err
 	}
-	m["weight"] = w
+	weight, err := json.Marshal(w)
+	if err != nil {
+		return nil, err
+	}
+	m["weight"] = weight
 	return json.Marshal(m)
 }
 
@@ -578,23 +498,41 @@ func (g *Graph) allNodes() ([]Node, error) {
 func (g *Graph) allEdges() ([]Edge, error) {
 	var edges []Edge
 	err := g.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketEdges)
-		if b == nil {
-			return nil
+		var err error
+		edges, err = readEdgesTx(tx)
+		return err
+	})
+	return edges, err
+}
+
+func readEdgesTx(tx *bolt.Tx) ([]Edge, error) {
+	var edges []Edge
+	b := tx.Bucket(bucketEdges)
+	if b == nil {
+		return nil, nil
+	}
+	err := b.ForEach(func(key, raw []byte) error {
+		if edge, err := decodeKeyedEdge(key, raw); err == nil {
+			edges = append(edges, edge)
 		}
-		return b.ForEach(func(_, v []byte) error {
-			var e Edge
-			if err := json.Unmarshal(v, &e); err == nil {
-				edges = append(edges, e)
-			}
-			return nil
-		})
+		return nil
 	})
 	return edges, err
 }
 
 func edgeKey(from, to, relation string) string {
 	return from + "|" + to + "|" + relation
+}
+
+func decodeKeyedEdge(key, raw []byte) (Edge, error) {
+	var edge Edge
+	if err := json.Unmarshal(raw, &edge); err != nil {
+		return Edge{}, err
+	}
+	if edge.From == "" || edge.To == "" || edgeKey(edge.From, edge.To, edge.Relation) != string(key) {
+		return Edge{}, errors.New("record identity mismatch")
+	}
+	return edge, nil
 }
 
 // writeEntitiesMOC writes _graphs/entities-index.md: one section per entity

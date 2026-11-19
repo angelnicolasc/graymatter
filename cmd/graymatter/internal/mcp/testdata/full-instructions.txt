@@ -1,0 +1,9 @@
+GrayMatter persists session memory.
+1. Resume work with checkpoint_resume first.
+2. Before your first substantive reply, inspect the newest hook block from the session's initial turn; ignore examples and older turns. Marker agent_id differs? run both project and __shared__ searches: shared duplicates may appear under ## Memory. Matching identity? Reuse non-empty sections; search every missing scope.
+3. Hooks and MCP are complementary: memory_search/memory_search_batch serve focused, ad-hoc lookups.
+4. memory_add stores durable preferences, decisions and milestones; memory_reflect action=update replaces stale versions.
+5. checkpoint_save before context overload or stopping mid-task.
+6. A weak-match note means vocabulary gaps: reformulate once with its terms; declare differing vocabulary with memory_alias before more synonyms.
+Confidence is writer-declared: verified/inferred/unverified, never automated verification. Add omission is inferred; update omission caps weakest target at inferred. Search/batch: min_confidence, confidence_weight [0,0.5], default 0; zero keeps filters. Filters suppress graph hints; explain shows final scores. Unsupported options require daemon upgrade/restart.
+Guide: docs/AGENTS.md.

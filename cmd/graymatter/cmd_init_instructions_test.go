@@ -30,22 +30,12 @@ func TestUpsertInstructions_CreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	for _, want := range []string{
-		instrBeginMarker, instrEndMarker, "weak-match", "hook recall ran",
-		"| `memory_search` | `agent_id`, `query` | `top_k` (default 8), `explain`, `min_confidence`, `confidence_weight` |",
-		"| `memory_search_batch` | `agent_id`, `queries` | `top_k` (default 8), `min_confidence`, `confidence_weight` |",
-		"| `memory_add` | `agent_id`, `text` | `confidence` |",
-		"| `memory_reflect` | `action`, `agent_id` (or deprecated `agent` alias) | `text`, `target` (required by action), `confidence` (add/update only) |",
-		"| `memory_alias` | `agent_id`, `term`, `equivalents` | teach the store a vocabulary bridge |",
-		"| `checkpoint_save` | `agent_id` | `state` |",
-		"| `checkpoint_resume` | `agent_id` | `on_missing`: `\"error\"` (default) or `\"empty\"` when no checkpoint is ordinary control flow |",
-		"`agent_id` is canonical for every tool",
-		"`agent_id` wins when both are valid",
-	} {
+	for _, want := range []string{instrBeginMarker, instrEndMarker, "memory_search", "MCP server's session instructions", "docs/AGENTS.md", "default `full` catalog lists all seven tools", "--tools core", "never store secrets"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created file missing %q", want)
 		}
 	}
+
 	for _, unwanted := range []string{"`agent`, not `agent_id`", "fails validation", "exactly one"} {
 		if strings.Contains(string(data), unwanted) {
 			t.Errorf("created file contains obsolete contract %q", unwanted)
@@ -146,29 +136,9 @@ func TestUpsertInstructions_ReplacesManagedBlockOnly(t *testing.T) {
 func TestInstructionsBlock_IsProcedural(t *testing.T) {
 	block := instructionsBlock()
 
-	for _, want := range []string{
-		"Every session, without exception",    // checkpoint/session protocol remains mandatory
-		"Before your first substantive reply", // concrete first action
-		"Hooks and MCP are\ncomplementary",    // neither integration is disabled
-		"hook recall ran",                     // describes the hook/MCP handshake
-		"session's initial turn",              // prior-turn markers do not count
-		"run both project and `__shared__`",   // namespace mismatch cannot hide deduped facts
-		"every missing section",               // empty scopes fall back to MCP
-		"focused, ad-hoc lookups",             // explicit searches remain available
-		"__shared__",                          // shared namespace is discoverable
-		"What triggers a call",                // trigger table, not prose
-		"root directory",                      // agent_id is derivable, not invented
-		"checkpoint_resume",
-		"checkpoint_save",
-		// --global puts this block in projects that may not have GrayMatter
-		// wired, so it has to guard on the tools existing. The guard is a
-		// capability check on purpose: phrased as judgement it would recreate
-		// the very hedge that made the old block ignorable.
-		"not in your toolbelt",
-		"not a\njudgement call",
-	} {
+	for _, want := range []string{"before your first substantive reply", "MCP server's session instructions", "root directory", "agent_id", "__shared__", "not in your toolbelt", "do not invent", "docs/AGENTS.md"} {
 		if !strings.Contains(block, want) {
-			t.Errorf("block no longer contains %q", want)
+			t.Errorf("bootstrap lost %q", want)
 		}
 	}
 
@@ -550,17 +520,11 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// instructionsBlockTokenBudget is the ceiling enforced by
-// TestInstructionsBlockBudget. The block is the single most expensive piece of
-// recurring copy GrayMatter ships: unlike the MCP handshake, which rides one
-// initialize per session, this text lives in CLAUDE.md / AGENTS.md and is read
-// on every turn of every session of every project it was installed into. The
-// handshake carries a separate 240-token ceiling for its compact instructions
-// (cmd/graymatter/internal/mcp/instructions.go); this is the same discipline at
-// the same ~14% headroom, applied where the cost is roughly four times larger.
-// Raise it in this constant, with reasoning, rather than letting the copy grow
-// silently.
-const instructionsBlockTokenBudget = 1060
+// instructionsBlockTokenBudget enforces U105 for the installed bootstrap.
+// CLAUDE.md / AGENTS.md can be supplied every turn, so the block delegates
+// the session procedure to the MCP briefing instead of repeating its catalog.
+// Use the same registered local estimator as the full MCP surface budget.
+const instructionsBlockTokenBudget = 250
 
 // TestInstructionsBlockBudget pins the recurring token cost of the installed
 // briefing with the same estimator the handshake budget and the benchmarks use,
@@ -627,31 +591,17 @@ func TestInstructionsBlock_ToolCensusAndReflectAnchors(t *testing.T) {
 		t.Fatal("derived zero tools from internal/mcp/server.go; registration parse broke")
 	}
 
-	// Every registered tool has a row in the generated tools table. Table rows
-	// open with "| `name` |", which trigger-table prose never does.
+	// The generated bootstrap now delegates the full reference to the manual.
+	// Keep verifying all registered tools there, without paying its table every session.
+	manual, err := os.ReadFile(filepath.Join("..", "..", "docs", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range derived {
-		if row := "| `" + name + "` |"; !strings.Contains(block, row) {
-			t.Errorf("generated block has no tools-table row for registered tool %q", name)
+		if !strings.Contains(string(manual), "`"+name+"`") {
+			t.Errorf("manual omits %s", name)
 		}
 	}
-
-	// No extra tools-table rows beyond the registered set: a removed tool must
-	// not linger in the briefing.
-	rowRe := regexp.MustCompile(`(?m)^\| ` + "`" + `([a-z_]+)` + "`" + ` \|`)
-	for _, m := range rowRe.FindAllSubmatch([]byte(block), -1) {
-		name := string(m[1])
-		// The tools table is the only table whose rows open with a backticked
-		// name; still, skip the header word if it ever matches.
-		if name == "Tool" {
-			continue
-		}
-		// Trigger-table rows open with prose ("| The ..."), so any other
-		// backticked opener here belongs to the tools table.
-		if !seen[name] {
-			t.Errorf("generated block has tools-table row for %q with no MCP registration", name)
-		}
-	}
-
 	// Reflect identity comes from the real schema JSON, not from prose memory.
 	// server.go carries RawInputSchema as a backticked JSON literal; extract
 	// and decode it here so a schema edit moves this test with it.
@@ -714,31 +664,9 @@ func TestInstructionsBlock_ToolCensusAndReflectAnchors(t *testing.T) {
 		t.Error("reflect schema must document that `agent_id` wins when both are valid")
 	}
 
-	// The block must teach that same contract: canonical agent_id, deprecated
-	// alias, at-least-one required, agent_id wins. Anchors, not full prose.
-	if row := "| `memory_reflect` | `action`, `agent_id`"; !strings.Contains(block, row) {
-		t.Errorf("reflect row does not spell `agent_id` canonical: %q", row)
+	if !strings.Contains(block, "agent_id") || !strings.Contains(block, "docs/AGENTS.md") {
+		t.Error("bootstrap must point to canonical identity and detailed contract")
 	}
-	if !strings.Contains(block, "deprecated `agent` alias") {
-		t.Error("generated block never says `agent` is a deprecated alias")
-	}
-	if !strings.Contains(block, "also accepts") {
-		t.Error("generated block must say `agent` is also accepted (canonical agent_id, deprecated alias)")
-	}
-	if !strings.Contains(block, "agent_id` wins") && !strings.Contains(block, "agent_id wins") {
-		t.Error("generated block must say `agent_id` wins when both are valid")
-	}
-	for _, want := range []string{"at least one is required at runtime", "Each supplied", "non-empty string", "not only whitespace", "when both are valid", "namespace bytes are preserved"} {
-		if !strings.Contains(block, want) {
-			t.Errorf("generated block must teach runtime identity contract: missing %q", want)
-		}
-	}
-	for _, stale := range []string{"exactly one of", "Mixing them up fails validation", "`agent`, not `agent_id`"} {
-		if strings.Contains(block, stale) {
-			t.Errorf("generated block still carries stale reflect wording %q", stale)
-		}
-	}
-
 	// The handshake briefing must use the same canonical names, never stale
 	// agent-only reflect wording.
 	instrText := string(instrSrc)
@@ -754,14 +682,10 @@ func TestInstructionsBlock_ToolCensusAndReflectAnchors(t *testing.T) {
 		}
 	}
 
-	// The alias action is the shared constant, not a hardcoded literal that
-	// can drift from the handshake (serverInstructions) and the CLI.
-	if !strings.Contains(block, "`"+memory.FeedbackAction+"`") {
-		t.Errorf("generated block does not render the shared alias action %q", memory.FeedbackAction)
+	if !strings.Contains(string(manual), "`"+memory.FeedbackAction+"`") {
+		t.Error("manual does not document the callable alias tool")
 	}
-	if strings.Contains(block, "ALIAS_TOOL") {
-		t.Error("generated block leaks the unrendered ALIAS_TOOL placeholder")
-	}
+
 }
 
 // TestInstructionsBlock_DocsAnchors pins the focused docs surface for issue

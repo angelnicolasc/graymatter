@@ -17,6 +17,7 @@ import (
 // silently ignore additional request fields and cannot safely honor cancellation.
 const InspectionContextV1 = "inspection-context-v1"
 const maxInspectionDuration = 30 * time.Second
+const maxReviewAnalyzeDuration = 90 * time.Second
 const maxInspectionCalls = 1024
 const maxClientInspectionCalls = 64
 const maxClientInspectionCancels = 16
@@ -30,6 +31,7 @@ var ErrInspectionBusy = errors.New("rpc: inspection transport busy; retry after 
 type InspectionContext struct {
 	RequestID        string
 	DeadlineUnixNano int64
+	ReviewAnalyze    bool `json:",omitempty"`
 }
 type CancelInspectionRequest struct{ Context InspectionContext }
 type CancelInspectionResponse struct{}
@@ -55,7 +57,11 @@ func inspectionDeadline(meta InspectionContext, now time.Time) (time.Time, error
 	if !deadline.After(now) {
 		return time.Time{}, context.DeadlineExceeded
 	}
-	if bound := now.Add(maxInspectionDuration); deadline.After(bound) {
+	duration := maxInspectionDuration
+	if meta.ReviewAnalyze {
+		duration = maxReviewAnalyzeDuration
+	}
+	if bound := now.Add(duration); deadline.After(bound) {
 		deadline = bound
 	}
 	return deadline, nil
@@ -93,6 +99,13 @@ func (s *Server) setInspectionLocked(id string, call inspectionCallState) {
 }
 
 func (s *Server) beginInspection(meta InspectionContext) (context.Context, context.CancelFunc, error) {
+	return s.beginInspectionOperation(meta, false)
+}
+
+func (s *Server) beginInspectionOperation(meta InspectionContext, analyze bool) (context.Context, context.CancelFunc, error) {
+	if meta.ReviewAnalyze != analyze {
+		return nil, nil, errors.New("rpc: unexpected review analysis context")
+	}
 	now := time.Now()
 	deadline, err := inspectionDeadline(meta, now)
 	if err != nil {
@@ -260,8 +273,7 @@ func rpcInspectionCall[T any](c *Client, ctx context.Context, method string, req
 		}
 		done <- c.rpc.Call(ServiceName+"."+method, req, response)
 	}()
-	select {
-	case err := <-done:
+	finished := func(err error) (T, error) {
 		if err != nil && mutation && state.Load() == 1 {
 			var serverError netrpc.ServerError
 			if !errors.As(err, &serverError) {
@@ -269,7 +281,18 @@ func rpcInspectionCall[T any](c *Client, ctx context.Context, method string, req
 			}
 		}
 		return *response, err
+	}
+	select {
+	case err := <-done:
+		return finished(err)
 	case <-ctx.Done():
+		// A complete response is authoritative even when the caller's
+		// cancellation became ready at the same time.
+		select {
+		case err := <-done:
+			return finished(err)
+		default:
+		}
 		if !state.CompareAndSwap(0, 2) && state.Load() == 1 {
 			c.cancelInspection(meta)
 			if mutation {

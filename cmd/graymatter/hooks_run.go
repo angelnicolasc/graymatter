@@ -23,6 +23,7 @@ import (
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/benchsyn"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // hooks run <event> is what Claude Code executes on every hook event. The
@@ -480,8 +481,14 @@ func hookPromptRest(prompt, prefix string) (string, bool) {
 // failure that aborts the injection.
 var hookRecallBlock = func(store cliStore, agent, query string, agentTopK, sharedTopK int) (string, error) {
 	ctx := context.Background()
-	agentFacts, agentErr := store.Recall(ctx, agent, query, agentTopK)
-	sharedFacts, sharedErr := store.RecallShared(ctx, query, sharedTopK)
+	agentFacts, agentErr := hookRecallProjection(ctx, store, agent, query, agentTopK, false)
+	sharedFacts, sharedErr := hookRecallProjection(ctx, store, agent, query, sharedTopK, true)
+	withWarning := func(block string, err error) (string, error) {
+		issueCtx, cancel := context.WithTimeout(ctx, time.Duration(userPromptHookTimeout-1)*time.Second)
+		defer cancel()
+		block, issuesErr := hookSubjectWarning(issueCtx, store, agent, block)
+		return block, errors.Join(err, issuesErr)
+	}
 
 	switch {
 	case agentErr != nil && sharedErr != nil:
@@ -491,15 +498,29 @@ var hookRecallBlock = func(store cliStore, agent, query string, agentTopK, share
 		if block == "" {
 			return "", fmt.Errorf("recall agent: %w", agentErr)
 		}
-		return block, fmt.Errorf("agent recall failed, injecting shared facts only: %w", agentErr)
+		return withWarning(block, fmt.Errorf("agent recall failed, injecting shared facts only: %w", agentErr))
 	case sharedErr != nil:
 		block := renderMemoryBlock(agent, agentFacts, nil)
 		if block == "" {
 			return "", fmt.Errorf("recall shared: %w", sharedErr)
 		}
-		return block, fmt.Errorf("shared recall failed, injecting agent facts only: %w", sharedErr)
+		return withWarning(block, fmt.Errorf("shared recall failed, injecting agent facts only: %w", sharedErr))
 	}
-	return renderMemoryBlock(agent, agentFacts, sharedFacts), nil
+	return withWarning(renderMemoryBlock(agent, agentFacts, sharedFacts), nil)
+}
+
+func hookSubjectWarning(ctx context.Context, store cliStore, agent, block string) (string, error) {
+	issues, err := readSubjectIssues(ctx, store, agent, memory.SharedAgentID)
+	if err != nil {
+		return block, fmt.Errorf("subject diagnostics: %w", err)
+	}
+	if warning := issues.Warning(); warning != "" {
+		if block == "" {
+			block = hookRecallMarker(agent)
+		}
+		block += "\n" + warning
+	}
+	return block, nil
 }
 
 // hookCheckpoint is the pre-compact runner: one deterministic checkpoint, no

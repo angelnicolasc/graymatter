@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/lineageview"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
@@ -39,9 +40,28 @@ func (m tuiModel) factPreview(f memory.Fact) string {
 	}
 	out += m.detailSection("Record", m.muted("ID: "+tuiPlain(f.ID)+"\nNamespace: "+tuiPlain(f.AgentID)))
 	if f.Pinned {
-		out += "\n" + m.muted("Pinned: yes · exempt from decay, pruning and summarisation")
+		out += "\n" + m.muted("Pinned: yes · exempt from decay and pruning")
 	}
-	out += "\n\n" + m.muted("File/tool provenance: not recorded\nWeight describes retention, not truth.")
+	out += m.lineagePreview(f.LineageProjection)
+	if len(f.Subjects) != 0 {
+		encoded, err := json.Marshal(f.Subjects)
+		if err != nil {
+			out += m.detailSection("Subjects", m.tone("Subject associations could not be rendered: "+tuiPlain(err.Error()), m.theme.Warning))
+		} else {
+			out += m.detailSection("Subjects", m.muted("Declared names and revision counts.\n"+string(encoded)))
+		}
+	}
+	if f.CitationUnavailable {
+		out += m.detailSection("Literal evidence", m.tone("Exact citation unavailable for this fact version.", m.theme.Warning))
+	} else if f.Evidence != nil {
+		encoded, err := json.Marshal(f.Evidence)
+		if err != nil {
+			out += m.detailSection("Literal evidence", m.tone("Evidence could not be rendered: "+tuiPlain(err.Error()), m.theme.Warning))
+		} else {
+			out += m.detailSection("Literal evidence", m.muted("Declared data; capture time is receipt, not verification.\n"+string(encoded)))
+		}
+	}
+	out += "\n\n" + m.muted("Weight measures retention.")
 	return out
 }
 
@@ -62,10 +82,20 @@ func (m tuiModel) receiptPreview(f memory.RecallReceipt) string {
 	out += "\n" + m.muted(fmt.Sprintf("Retention %.4f · age %.1f days", f.Weight, f.AgeDays))
 	out += m.detailSection("Receipt", m.muted("Query: "+tuiPlain(m.recallQuery)+"\nFact: "+tuiPlain(f.Provenance.FactID)+"\nWritten: "+f.Provenance.WrittenAt.Format(time.RFC3339)))
 	if len(f.Provenance.Supersedes) > 0 {
-		out += "\n" + m.muted("Replaces: "+tuiPlain(strings.Join(f.Provenance.Supersedes, ", ")))
+		out += "\n" + m.muted("Supersedes IDs (compatibility field) · "+tuiPlain(strings.Join(f.Provenance.Supersedes, ", ")))
 	}
+	out += m.lineagePreview(f.Provenance.LineageProjection)
 	out += "\n\n" + m.muted("Scores rank results; they are not probabilities.\nInspection does not update access counters.\nRanking may use your embedding provider.\nGraph enrichment is not included.")
 	return out
+}
+
+func (m tuiModel) lineagePreview(p memory.LineageProjection) string {
+	lines := lineageview.Lines(p)
+	if len(lines) == 0 {
+		return ""
+	}
+	lines = append(lines, "Namespace-scoped · v opens version inspection")
+	return m.detailSection("Version lineage", m.muted(tuiPlain(strings.Join(lines, "\n"))))
 }
 
 func (m tuiModel) checkpointPreview(cp session.Checkpoint) string {

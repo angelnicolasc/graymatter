@@ -475,31 +475,40 @@ func TestBucketlessStore_DefensiveBranches(t *testing.T) {
 	if cycles != 0 || facts != 0 {
 		t.Errorf("counters without meta bucket = (%d,%d), want zeros", cycles, facts)
 	}
-	if err := recordConsolidation(raw, 3); err == nil {
-		t.Error("recordConsolidation without meta bucket should error")
-	}
 }
 
-func TestRecordConsolidation_CorruptCounterErrors(t *testing.T) {
-	s, cleanup := openTestStore(t)
-	defer cleanup()
-	if err := s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketMeta).Put([]byte(metaKeyFactsConsolidated), []byte("not-a-number"))
+func TestConsolidationCountersPreserveHistoricalValues(t *testing.T) {
+	cfg := StoreConfig{DataDir: t.TempDir()}
+	store, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.db.Update(func(tx *bolt.Tx) error {
+		meta := tx.Bucket(bucketMeta)
+		if err := meta.Put([]byte(metaKeyConsolidations), []byte("3")); err != nil {
+			return err
+		}
+		return meta.Put([]byte(metaKeyFactsConsolidated), []byte("7"))
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err := recordConsolidation(s.db, 5)
-	if err == nil || !strings.Contains(err.Error(), "meta key") {
-		t.Errorf("err = %v, want corrupt-counter error naming the key", err)
+	ctx := context.Background()
+	if err := store.Put(ctx, "agent", "current source"); err != nil {
+		t.Fatal(err)
 	}
-	// The healthy counter must not have been bumped by the aborted tx.
-	if v := s.db.View(func(tx *bolt.Tx) error {
-		got := tx.Bucket(bucketMeta).Get([]byte(metaKeyConsolidations))
-		if got != nil {
-			t.Errorf("consolidations advanced despite abort: %s", got)
-		}
-		return nil
-	}); v != nil {
-		t.Fatal(v)
+	if err := store.Consolidate(ctx, "agent", defaultTestCfg()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if cycles, facts := reopened.ConsolidationCounters(); cycles != 3 || facts != 7 {
+		t.Fatalf("historical consolidation counters = (%d, %d), want (3, 7)", cycles, facts)
 	}
 }

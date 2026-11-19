@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
@@ -122,7 +123,7 @@ func (d *directStore) RecallWithOptions(ctx context.Context, agentID, query stri
 	}
 	opts, legacyMetadata := resolveDirectRecallOptions(opts, d.DefaultConfidenceWeight())
 	result, err := store.RecallWithOptions(ctx, agentID, query, topK, opts)
-	if legacyMetadata {
+	if legacyMetadata && result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
 		result.Retrieval = nil
 	}
 	return result, err
@@ -142,7 +143,9 @@ func (d *directStore) RecallExplainWithOptions(ctx context.Context, agentID, que
 	opts, legacyMetadata := resolveDirectRecallOptions(opts, d.DefaultConfidenceWeight())
 	result, err := store.RecallExplainWithOptions(ctx, agentID, query, topK, opts)
 	if legacyMetadata {
-		result.Retrieval = nil
+		if result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
+			result.Retrieval = nil
+		}
 		for i := range result.Receipts {
 			result.Receipts[i].Ranking = nil
 		}
@@ -163,7 +166,7 @@ func (d *directStore) RecallAllWithOptions(ctx context.Context, agentID, query s
 	}
 	opts, legacyMetadata := resolveDirectRecallOptions(opts, d.DefaultConfidenceWeight())
 	result, err := store.RecallAllWithOptions(ctx, agentID, query, topK, opts)
-	if legacyMetadata {
+	if legacyMetadata && result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
 		result.Retrieval = nil
 	}
 	return result, err
@@ -193,6 +196,51 @@ func (r *reconnectingStore) confidenceWrite(fn func(cliStore) error) error {
 		return err
 	}
 	return fn(r.snapshot())
+}
+
+func (r *reconnectingStore) PutWithOptionalIdentity(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {
+	if err := opts.Validate(); err != nil {
+		return memory.Fact{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return memory.Fact{}, err
+	}
+	var fact memory.Fact
+	err := r.mutate(func(s cliStore) error {
+		var err error
+		switch writer := s.(type) {
+		case interface {
+			PutWithOptionalIdentity(context.Context, string, string, memory.WriteOptions) (memory.Fact, error)
+		}:
+			fact, err = writer.PutWithOptionalIdentity(ctx, agentID, text, opts)
+			return err
+		case rpc.ConfidenceWriter:
+			fact, err = writer.PutWithOptionsReturningFact(ctx, agentID, text, opts)
+		default:
+			if opts.HasSubjectIntent() {
+				return memory.ErrSubjectUnsupported
+			}
+			if opts.HasEvidence() {
+				return memory.ErrCitationUnsupported
+			}
+			if opts.Confidence != nil {
+				return memory.ErrConfidenceUnsupported
+			}
+			if writer, ok := s.(returningFactStore); ok {
+				fact, err = writer.PutReturningFact(ctx, agentID, text)
+			} else {
+				return s.Remember(ctx, agentID, text)
+			}
+		}
+		if err == nil && fact.ID == "" {
+			return errors.New("write returned no committed fact identity")
+		}
+		return err
+	})
+	if errors.Is(err, memory.ErrMutationOutcomeUnknown) {
+		return memory.Fact{}, err
+	}
+	return fact, err
 }
 
 func (r *reconnectingStore) PutWithOptionsReturningFact(ctx context.Context, agentID, text string, opts memory.WriteOptions) (memory.Fact, error) {

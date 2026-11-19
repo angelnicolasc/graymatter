@@ -11,49 +11,50 @@
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
   <a href="https://glama.ai/mcp/servers/angelnicolasc/graymatter"><img src="https://glama.ai/mcp/servers/angelnicolasc/graymatter/badges/score.svg" alt="Glama MCP server score"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-core%2090%25%20%C2%B7%20cli%2081%25-brightgreen" alt="Coverage (multi-platform union): core 90%, CLI 81%"></a>
+  <a href="https://github.com/angelnicolasc/graymatter/actions/runs/44426388996/job/135238443022"><img src="https://img.shields.io/badge/coverage-core%2082.5%25%20%C2%B7%20cli%2080.8%25-brightgreen" alt="Measured cross-platform statement coverage, core 82.5% and CLI 80.8%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
+</p>
 <div align="center">
 <br />
-
-<strong>AI agents forget everything between sessions. GrayMatter gives them persistent memory, a self-building knowledge graph, and cuts context tokens by 90%.</strong>
+<strong>Persistent memory for AI agents, in one local binary.</strong>
 <br /><br />
-One binary. Drop it in. Run it. No Docker, no databases, no config files, no cloud accounts, no bullshit.
+When a release moves from Friday to Monday, your next session can pick up the new date and the decision behind it.
+<br />
+Run GrayMatter with Claude Code, Codex, Cursor, or another MCP client, or embed it in Go.
 <br /><br />
-<strong>General-purpose MCP server. Zero vendor lock-in.</strong>
-<br />
-Works with Claude Code, Cursor, Codex, OpenCode, Antigravity — and any MCP-compatible client.
-<br />
-Also a plain Go library if you don't use MCP.
-<br /><br />
-Free. Offline. No account required.
-
-<br />
+<a href="#quick-start">Try the offline demo</a> · <a href="#library-usage">Use the Go library</a>
 </div>
 
 ---
 
 ## Why
 
-Every AI agent is **stateless by default**. Each run re-injects the full conversation history — and that history grows linearly. Two prompts in and you've already burned half of your daily quota.
-
-That's not just a memory problem. That's a money and performance problem.
-
-**Mem0, Zep, Supermemory** solve this — but they're Python/TypeScript-only and require a running server. The Go ecosystem has no production-ready, embeddable, zero-dependency memory layer for agents.
-
-That gap is GrayMatter.
-
 <p align="center">
-  <img src=".github/assets/token-reduction.png" alt="Context tokens per query vs full-history injection" width="800px" style="max-width: 900px;">
+  <strong>90% fewer context tokens per query</strong> after 100 sessions compared with full history.<br>
+  <strong>8.4% lower inference cost per task</strong> with empty memory and <strong>10.4% lower</strong> with 1,000 prior facts.<br>
+  <strong>Zero retired values in the top eight</strong> after explicit revisions.
 </p>
 
 <p align="center">
-<strong>~90% reduction in context tokens</strong> — versus full-history injection.<br>
-Remembers what a sliding window forgets: facts planted 96 sessions back come back <strong>83%</strong> of the time.<br>
-Context quality <em>improves</em> over time as consolidation surfaces only what matters.<br>
-No Docker. No Redis. No API key required for storage.<br><br>
-Drop it in once. It auto-connects to <strong>Claude Code, Cursor, Codex, OpenCode, Antigravity</strong> — any MCP-compatible client picks it up automatically.
+  <a href="#token-efficiency"><img src=".github/assets/token-reduction-readme.png" width="800" alt="At 1, 10, 30, and 100 sessions, selective recall reduced context tokens per query by 0%, 12%, 71%, and 90% compared with full history."></a>
+  <br>About 670 tokens with selective recall, compared with 6,960 for the full history.
+</p>
+
+<p align="center">
+  <a href="benchmarks/agent_memory/RESULTS.md"><img src=".github/assets/graymatter-inference-by-family.png" width="800" alt="GrayMatter cost less on 94 of 113 paired tasks. Mean inference cost was lower in all eight task families at both starting memory sizes."></a>
+  <br>GrayMatter’s optional <code>core</code> profile cost less than an organized notes folder on <strong>94 of 113 paired tasks</strong>.<br>
+  Each task spanned three sessions with the same model and limits. GrayMatter solved <strong>50 tasks</strong>, compared with <strong>44</strong> for the folder.
+</p>
+
+<p align="center">
+  <a href="benchmarks/revision_currency/RESULTS.md"><img src=".github/assets/graymatter-revisions-and-citations.png" width="800" alt="Explicit revisions reduced retired appearances from 35 to zero. A separate MCP check showed that core retained the source and exact quote with the fact."></a>
+  <br>Saving corrections as independent facts surfaced old versions 35 times in 35 queries.<br>
+  With <code>core</code>, an agent can replace the current fact for a subject and keep the source’s exact words.
+</p>
+
+<p align="center">
+  <a href="#token-efficiency">Context tokens</a> · <a href="benchmarks/agent_memory/RESULTS.md">Inference cost and task completion</a> · <a href="#what-happens-when-a-fact-changes">Revisions and citations</a>
 </p>
 
 ---
@@ -88,8 +89,13 @@ produced it:
 ```bash
 graymatter kg render --out graph.html
 graymatter kg render --out graph.dot    # Graphviz, for your own layout
-graymatter doctor --graph --html        # analytics + this render in one go
+graymatter doctor --graph --html graph.html
+graymatter kg inspect --json            # edge provenance and pending reasons
 ```
+
+Status and graph doctor report complete and pending provenance. Historical
+edges with uncertain support stay available to graph navigation. The inventory
+can finish with edges still pending review.
 
 Watch it build, one frame per session:
 
@@ -133,9 +139,10 @@ they are reported or estimated. Missing data remains unavailable, and failed
 refreshes keep the last observation marked stale. No account is connected
 automatically. See the [workbench guide](docs/tui.md) and [Usage setup](docs/usage.md).
 
-`graymatter doctor --graph` extends visibility to the knowledge graph itself:
-hubs by degree, articulation points, orphans, and a declared connectivity
-ratio — printed or emitted as JSON.
+`graymatter doctor --graph` reports hubs, articulation points, orphans,
+connectivity and provenance in text or JSON. It reads the graph through an
+existing daemon or a read-only store and only writes a render when given an
+explicit `--html` path.
 
 ---
 
@@ -146,12 +153,12 @@ ratio — printed or emitted as JSON.
 | **Persistent memory** | Facts survive across sessions. Recall by meaning, not just keyword |
 | **90% token reduction** | Top-8 relevant facts instead of full-history injection |
 | **Automatic hooks** | Claude Code injects routine recall every turn; MCP remains available for writes and focused searches (`graymatter hooks install`) |
-| **Receipts, not vibes** | `recall --explain` returns why each fact ranked: per-signal ranks, fused score, provenance |
+| **Explainable recall** | `recall --explain` shows each fact’s ranking signals, fused score, and provenance |
 | **Knowledge graph** | Typed entities and co-mention edges, auto-populated from ordinary use |
 | **Self-curation** | `memory_reflect` lets the agent add, update, forget, and link its own memories |
 | **Context block** | Projects top facts into CLAUDE.md / AGENTS.md inside a token budget (`context-sync`) |
 | **Free auditor** | `doctor --audit` measures tokens, duplicates, staleness, and marker conflicts in any instruction file |
-| **Deterministic decay** | 30-day half-life; facts fade when nothing touches them. Tombstones, never deletes |
+| **Deterministic decay** | Unpinned facts decay with a default 30-day half-life. Pruning can remove live facts and tombstones |
 | **Single binary** | ~10 MB static. No Docker, no Redis, no config files, no cloud accounts |
 
 ---
@@ -172,8 +179,8 @@ Standard `doctor` does not write a probe, start a daemon, execute a binary on
 PATH, or test whether the data directory is writable. Its config checks find
 references in files; they do not prove which settings a client loaded. In JSON,
 `ok` means no check failed, while `readiness: not_evaluated` keeps readiness
-separate from the observations. The `--health`, `--graph`, `--audit`, and
-`--embeddings` modes have separate contracts; graph rendering can write HTML.
+separate from the observations. The `--health`, `--audit`, and `--embeddings`
+modes have separate contracts.
 
 `graymatter init --global` still performs that normal setup in the current
 directory. It additionally installs the managed memory instructions in Claude
@@ -335,11 +342,15 @@ returned facts actually answer the query, against a real sliding window:
 | Tokens per query | 95 | 114 | **64** |
 
 At equal fact count, relevance-selected facts cost slightly more tokens than a
-window's newest-first picks. With `MinRelevance`, GrayMatter drops below the
-window's cost while keeping full recall of old facts. Method and per-query
-detail in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+window's newest-first picks. With `MinRelevance`, GrayMatter uses 64 tokens per
+query and retains the observed 83% hit rate on old facts. CI checks the token
+and retrieval tables above against their benchmark outputs. [Retrieval methodology and per-query results](benchmarks/RESULTS.md)
 
-Every figure on this page is machine-checked against a live run in CI.
+### What happens when a fact changes?
+
+A separate keyword-retrieval benchmark made the same 35 queries against 600 facts. Storing corrections as independent facts let retired values appear **35 times** in the top eight. Recording explicit revisions brought that count to **zero**. The current value both reached the top eight and outranked every retired version in **25 of 35** queries, up from **8 of 35**.
+
+[Revision benchmark and per-group results](benchmarks/revision_currency/RESULTS.md) · [How citations are stored and retrieved](docs/citation-evidence.md)
 
 ---
 
@@ -354,10 +365,39 @@ Agent runs
     ↓
 Remember(agent, observation) ← store key facts during/after run
     ↓
-Consolidate() [async]        ← summarise + decay + prune + extract entities
+Consolidate() [async]        ← apply decay, prune, and extract entities when enabled
 ```
 
-Consolidation is the only "smart" step. Everything else is deterministic.
+Consolidation runs memory maintenance. Generative compaction is disabled
+for Anthropic and Ollama. Configured embeddings and knowledge-graph extraction
+continue to operate. Historical summaries and counters remain available
+subject to the usual retention rules. Update or restart a running legacy
+daemon before using operations that can trigger maintenance.
+
+
+### Review memory evidence
+
+Use `review analyze` to explicitly send one namespace's eligible facts to a
+configured Anthropic or Ollama provider. Review writes versioned evidence,
+candidate summaries, and conflict records to a separate journal. Active
+memory, its recall eligibility, and routine maintenance are unchanged.
+
+```bash
+graymatter review analyze project --provider ollama
+graymatter review list project
+graymatter review inspect project record-id
+graymatter review reject project summary-id --decision "Needs more evidence"
+graymatter review resolve project conflict-id --decision "The runbook governs" --reference "runbook/retention"
+graymatter review dismiss project conflict-id --decision "Separate environments" --reference "runbook/environments"
+graymatter review purge project closed-record-id
+```
+
+The daemon owns provider configuration and credentials. Use `--model` to
+override the configured model for one request. `list`, `inspect`, `status`,
+and `doctor` read an existing store without starting a writer. Inspect
+emits JSON with the preserved evidence and recorded decisions. A source can
+be current, retired, changed, or missing independently of the conflict's
+resolution. Purge releases the journal record's claim on its evidence.
 
 ### Hooks (Claude Code, opt-in)
 
@@ -369,7 +409,7 @@ and after that the hook runner supplies routine recall automatically:
 | `SessionStart` | Injects the freshest live facts plus project-wide `__shared__` conventions — and re-injects after `/compact` (your memory survives compaction) |
 | `UserPromptSubmit` | Short per-turn recall (top-3 agent + top-3 shared), suppressed when identical to the previous turn; `remember: <text>` in a prompt is an instant deterministic save, `remember shared: <text>` saves into the shared namespace every agent reads |
 | `PreCompact` | Deterministic checkpoint before context compaction |
-| `SessionEnd` | Checkpoint + detached consolidation (survives the editor closing) |
+| `SessionEnd` | Checkpoint + detached memory maintenance (survives the editor closing) |
 
 Hooks and MCP are complementary. Every non-empty hook recall begins with a
 bracketed `GrayMatter hook recall ran` marker naming the namespace it actually
@@ -434,7 +474,7 @@ graymatter forget "agent" "fact"       # retire a fact with no replacement
 graymatter hooks install         # Claude Code auto-memory (merge, never
                                  # overwrite)
 graymatter hooks doctor          # verify hooks, binary path, latency
-graymatter consolidate "agent" --json  # report a consolidation cycle
+graymatter consolidate "agent"   # one maintenance cycle
 
 # knowledge graph
 graymatter kg render --out g.html    # self-contained page (or .dot)
@@ -445,12 +485,13 @@ graymatter unpin "agent" "fact"      # restore normal decay
 graymatter tui                       # memory workbench: six views
 graymatter status                    # facts, recalls, KG state
 graymatter doctor                    # read-only setup observations; readiness not evaluated
-graymatter doctor --graph --html     # KG analytics + visual render
+graymatter doctor --graph --html graph.html
 graymatter doctor --health           # store health audit
 graymatter doctor --audit [path]     # audit any instruction file
 
 # export / serve / measure
 graymatter export --format obsidian --include-graph
+graymatter export --format json --include-lineage   # versioned audit archive
 graymatter mcp serve                 # MCP over stdio
 graymatter server                    # REST API server (127.0.0.1:8080)
 graymatter bench                     # audit published numbers (--hooks, --store)
@@ -576,11 +617,11 @@ condition under which it should be reversed.
 | [004](docs/decisions/004-local-first-single-node.md) | Local-first single node, deliberately not multi-tenant |
 | [005](docs/decisions/005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword |
 | [006](docs/decisions/006-configurable-signal-weights.md) | Signal weights are configurable — a sliding window is the special case |
-| [007](docs/decisions/007-supersede-tombstones.md) | Contradictions resolved by tombstone, never delete |
+| [007](docs/decisions/007-supersede-tombstones.md) | Corrections retire prior facts as tombstones |
 | [008](docs/decisions/008-knowledge-graph-wiring.md) | KG auto-population ships gated and measured |
 | [009](docs/decisions/009-kg-sentinel-activation.md) | `init --kg` persists activation via sentinel file |
-| [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation |
-| [011](docs/decisions/011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally |
+| [010](docs/decisions/010-pinned-facts.md) | Pinned facts are exempt from decay and pruning |
+| [011](docs/decisions/011-consolidation-propose-apply.md) | Historical propose/apply design. Generative compaction is disabled |
 | [012](docs/decisions/012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests |
 | [013](docs/decisions/013-structured-tool-results.md) | Tool results carry structuredContent twins with declared output schemas |
 
@@ -594,7 +635,12 @@ condition under which it should be reversed.
 | Vector index | chromem-go (pure Go) | Semantic embeddings, hybrid retrieval |
 | Export | Markdown files | Human-readable, git-friendly, Obsidian-compatible |
 
-Single file: `.graymatter/gray.db`. No migrations. Append-only with decay-based eviction.
+Facts are stored in `.graymatter/gray.db`. Revision and retirement remove facts
+from recall immediately and keep the old records as tombstones. Automatic
+pruning can remove unpinned facts, including tombstones, once their weight
+falls below 0.01. Explicit deletion through the Go store or REST API removes
+the fact record even when it is recent or pinned.
+See [fact retention and deletion](docs/api-stability.md#fact-retention-and-deletion).
 
 ---
 
@@ -608,11 +654,6 @@ GrayMatter degrades gracefully across four modes, always finding a way to work:
 | OpenAI | `OPENAI_API_KEY` set |
 | Voyage AI | `VOYAGE_API_KEY` set — Anthropic's recommended embeddings partner (voyage-3, 1024 dims) |
 | Keyword-only | Nothing available — TF-IDF + recency, zero deps |
-
-Set `OPENAI_BASE_URL` or `VOYAGE_BASE_URL` for a compatible embeddings
-gateway. `ANTHROPIC_BASE_URL` configures Anthropic Messages, including fact
-extraction and consolidation. See [provider endpoints](docs/integrations.md#provider-endpoints)
-for base paths, Go configuration and daemon restarts.
 
 ---
 
@@ -681,7 +722,7 @@ It is exactly one thing: **the missing stateful layer for Go agents**, packaged 
 
 ## Roadmap
 
-- [x] Ollama-backed consolidation LLM — shipped in [v0.14.0](CHANGELOG.md): propose/apply with tombstone receipts, fully local ([ADR-011](docs/decisions/011-consolidation-propose-apply.md))
+- [x] Explicit proposal and conflict review with an evidence journal ([review memory evidence](#review-memory-evidence)).
 - [ ] Cross-project memory federation (read-only) — [#12](https://github.com/angelnicolasc/graymatter/issues/12), deferred until a multi-project store demonstrates the need
 - [ ] WebSocket streaming for REST API
 - [ ] MCP 2026-07-28 stateless protocol support

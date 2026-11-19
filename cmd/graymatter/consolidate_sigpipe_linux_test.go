@@ -56,7 +56,7 @@ func TestConsolidateReportSIGPIPE(t *testing.T) {
 		if err := json.Unmarshal(output, &result); err != nil {
 			t.Fatalf("stdout is not one JSON result: %v: %q", err, output)
 		}
-		if result.SchemaVersion != 1 || result.Summary.Status != "skipped" || result.Summary.Reason != "no_facts" ||
+		if result.SchemaVersion != 1 || result.Summary.Status != "skipped" || result.Summary.Reason != "disabled" ||
 			!bytes.Equal(result.Error, []byte("null")) || !strings.HasSuffix(string(output), "\n") || bytes.Count(output, []byte{'\n'}) != 1 {
 			t.Fatalf("unexpected report %s", output)
 		}
