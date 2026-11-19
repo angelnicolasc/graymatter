@@ -633,7 +633,7 @@ func TestConfidenceIndexUpgradeAndReadOnlyFallback(t *testing.T) {
 	}
 	if err := rw.db.View(func(tx *bolt.Tx) error {
 		st, _ := idxReadState(tx, "upgrade")
-		if st.Version != 3 {
+		if st.Version != 4 {
 			t.Fatalf("index version=%d", st.Version)
 		}
 		return nil

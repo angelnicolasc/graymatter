@@ -32,7 +32,10 @@ fuses keyword relevance and recency through RRF, the entire test suite runs on
 it, and so does the benchmark — which is why the published numbers are
 reproducible by anyone with no key.
 
-### Consolidation does not follow this chain
+### Historical summariser configuration
+
+The current runtime suspends generative compaction. The historical provider
+selection below describes a separate configuration from embeddings.
 
 Summarisation is a separate setting with a separate resolution, and its rules
 differ:

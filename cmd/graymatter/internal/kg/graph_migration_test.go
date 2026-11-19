@@ -8,10 +8,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Node IDs are type-scoped since scheme v2. A store written under v1 (bare
-// lowercased labels) must be wiped on open - nodes are derivable state,
-// re-extracted from facts via the consolidation watermark - and the wipe
-// must be idempotent: a v2 store reopened loses nothing.
+// Typed extraction is scheduled when a graph predates the node ID scheme.
+// Legacy rows survive because re-extraction cannot reproduce all support.
 
 func openRawGraph(t *testing.T, dir string) (*bolt.DB, func()) {
 	t.Helper()
@@ -22,7 +20,7 @@ func openRawGraph(t *testing.T, dir string) (*bolt.DB, func()) {
 	return db, func() { _ = db.Close() }
 }
 
-func TestOpen_WipesV1GraphAndWatermark(t *testing.T) {
+func TestOpen_PreservesV1GraphAndResetsWatermark(t *testing.T) {
 	db, cleanup := openRawGraph(t, t.TempDir())
 	defer cleanup()
 
@@ -40,7 +38,7 @@ func TestOpen_WipesV1GraphAndWatermark(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := eb.Put([]byte("maria rodriguez|acme|co_mentioned"), []byte(`{}`)); err != nil {
+		if err := eb.Put([]byte("maria rodriguez|acme|co_mentioned"), []byte(`{"from":"maria rodriguez","to":"acme","relation":"co_mentioned","sources":["fact-1"]}`)); err != nil {
 			return err
 		}
 		wb, err := tx.CreateBucketIfNotExists([]byte("kg_extracted"))
@@ -57,8 +55,13 @@ func TestOpen_WipesV1GraphAndWatermark(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	nodes, _ := g.AllNodes()
-	if len(nodes) != 0 {
-		t.Fatalf("v1 nodes survived the scheme migration: %v", nodes)
+	if len(nodes) != 1 || nodes[0].ID != "maria rodriguez" {
+		t.Fatalf("legacy node was lost: %v", nodes)
+	}
+	edges, err := g.AllEdges()
+	if err != nil || len(edges) != 1 || len(edges[0].Sources) != 1 || edges[0].Sources[0] != "fact-1" ||
+		edges[0].PendingReason() == "" {
+		t.Fatalf("legacy edge or its unresolved source was lost: %+v, %v", edges, err)
 	}
 	var watermarkKeys int
 	_ = db.View(func(tx *bolt.Tx) error {

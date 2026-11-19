@@ -2,13 +2,14 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
+	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
 func TestConfidenceLegacyLifecycleRealBinaryAndMCP(t *testing.T) {
@@ -32,9 +33,9 @@ func TestConfidenceLegacyLifecycleRealBinaryAndMCP(t *testing.T) {
 		return daemonStore{Client: client}, nil
 	})
 	t.Cleanup(func() { _ = store.Close() })
-	ctx := context.Background()
 	for _, text := range []string{"cli fact", "mcp fact", "upgrade fact"} {
-		if err := initial.Remember(ctx, "lifecycle", text); err != nil {
+		// Seed through the legacy protocol before testing what the upgraded client can do.
+		if err := initial.CallService(rpc.ServiceName, "Put", &rpc.PutRequest{AgentID: "lifecycle", Text: text}, &rpc.PutResponse{}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -44,7 +45,13 @@ func TestConfidenceLegacyLifecycleRealBinaryAndMCP(t *testing.T) {
 	}
 	for _, fact := range facts {
 		fact.Confidence, fact.Weight, fact.AccessCount = "verified", 0.75, 42
-		if err := initial.UpdateFact("lifecycle", fact); err != nil {
+		if err := initial.UpdateFact("lifecycle", fact); !errors.Is(err, rpc.ErrLineageUnsupported) {
+			t.Fatalf("full-snapshot write against an old daemon: %v", err)
+		}
+		// Seed through the old wire contract. The production client's
+		// full-snapshot writer requires authoritative lineage negotiation.
+		request := rpc.UpdateFactRequest{AgentID: "lifecycle", Fact: fact}
+		if err := initial.CallService(rpc.ServiceName, "UpdateFact", &request, &rpc.UpdateFactResponse{}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,11 +82,10 @@ func TestConfidenceLegacyLifecycleRealBinaryAndMCP(t *testing.T) {
 			t.Fatalf("legacy CLI %s did not persist: %+v", action, fact)
 		}
 	}
-	// Omitted revision confidence still requests the new conservative source
-	// policy. It cannot be silently implemented by the legacy write protocol.
+	// A revision on the older daemon could schedule unsafe maintenance.
 	out := f.run(dir, "", "--dir", dir, "revise", "lifecycle", "upgrade fact", "must not be written")
-	if out.code == 0 || !strings.Contains(out.stderr, "confidence options unsupported") {
-		t.Fatalf("legacy daemon accepted conservative revision: %+v", out)
+	if out.code == 0 || !strings.Contains(out.stderr, daemon.ErrMaintenancePolicyUnsupported.Error()) {
+		t.Fatalf("legacy daemon accepted a maintenance-triggering revision: %+v", out)
 	}
 	if read("upgrade fact").IsSuperseded() {
 		t.Fatal("rejected revision retired its target")
@@ -108,8 +114,8 @@ func TestConfidenceLegacyLifecycleRealBinaryAndMCP(t *testing.T) {
 		}
 		result := mcp.requestAllowToolError(6+i, "tools/call", map[string]any{"name": tool, "arguments": args})
 		var response map[string]any
-		if err := json.Unmarshal(result, &response); err != nil || response["isError"] != true || !bytes.Contains(result, []byte("confidence options unsupported")) {
-			t.Fatalf("new semantics were downgraded: %s / %v", result, err)
+		if err := json.Unmarshal(result, &response); err != nil || response["isError"] != true || !bytes.Contains(result, []byte(daemon.ErrMaintenancePolicyUnsupported.Error())) {
+			t.Fatalf("legacy MCP daemon accepted a maintenance-triggering write: %s / %v", result, err)
 		}
 	}
 	mcp.close()

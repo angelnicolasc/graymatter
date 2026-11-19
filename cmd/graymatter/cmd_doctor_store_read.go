@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -51,10 +51,14 @@ type doctorDaemonReader interface {
 	Close() error
 }
 
-var doctorOpenReadOnlyStore = func(dir string) (doctorStoreReader, error) {
+func openDiagnosticMemory(dir string) (*memory.Store, error) {
 	return memory.Open(memory.StoreConfig{
 		DataDir: dir, ReadOnly: true, VectorBackend: doctorReadOnlyVectors{},
 	})
+}
+
+var doctorOpenReadOnlyStore = func(dir string) (doctorStoreReader, error) {
+	return openDiagnosticMemory(dir)
 }
 
 var doctorConnectNoSpawn = func(dir string) (doctorDaemonReader, error) {
@@ -132,12 +136,20 @@ func doctorDaemonStore(dc doctorDaemonReader, dir string) (c checkResult) {
 		return doctorIncompleteStore(fmt.Errorf("list agents: %w", err))
 	}
 	facts := 0
+	evidenceFacts, evidenceKnown := 0, true
 	for _, a := range agents {
 		st, err := dc.Stats(a)
 		if err != nil {
 			return doctorIncompleteStore(fmt.Errorf("stats for %q: %w", a, err))
 		}
 		facts += st.FactCount
+		if st.LiveEvidenceCount == nil {
+			evidenceKnown = false
+		} else if *st.LiveEvidenceCount < 0 || *st.LiveEvidenceCount > st.FactCount {
+			return doctorIncompleteStore(fmt.Errorf("invalid literal evidence count for %q", a))
+		} else {
+			evidenceFacts += *st.LiveEvidenceCount
+		}
 	}
 	pending, err := dc.PendingVectorCount()
 	if err != nil {
@@ -151,13 +163,16 @@ func doctorDaemonStore(dc doctorDaemonReader, dir string) (c checkResult) {
 		return doctorIncompleteStore(errors.New("store overview returned no result"))
 	}
 	c.Status = "ok"
-	c.Detail = fmt.Sprintf("served by daemon — observed %d fact(s) across %d agent(s) · consolidations %d (facts consolidated %d)",
-		facts, len(agents), overview.Consolidations, overview.FactsConsumed)
+	c.Detail = fmt.Sprintf("served by daemon — observed %d fact(s) across %d agent(s) · historical generated cycles %d (facts consumed %d) · %s",
+		facts, len(agents), overview.Consolidations, overview.FactsConsumed, maintenanceModeLabel(overview.MaintenanceMode))
+	c.Detail += " · review journal " + reviewOverviewText(overview.Review)
+	c.Detail += doctorCitationSummary(evidenceFacts, evidenceKnown)
 	if pending > 0 {
 		c.Status = "warn"
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
+	addDoctorSubjectIssues(&c, dc)
 	return flagIfUnused(c, dir, facts)
 }
 
@@ -198,6 +213,7 @@ func doctorDirectStore(dir string) (c checkResult) {
 		return c
 	}
 	facts := 0
+	evidenceFacts, evidenceKnown := 0, true
 	perAgent := make(map[string]int, len(agents))
 	for _, a := range agents {
 		st, err := store.Stats(a)
@@ -207,6 +223,14 @@ func doctorDirectStore(dir string) (c checkResult) {
 		}
 		facts += st.FactCount
 		perAgent[a] = st.FactCount
+		if st.LiveEvidenceCount == nil {
+			evidenceKnown = false
+		} else if *st.LiveEvidenceCount < 0 || *st.LiveEvidenceCount > st.FactCount {
+			c.Status, c.Detail = "fail", fmt.Sprintf("invalid literal evidence count for %q", a)
+			return c
+		} else {
+			evidenceFacts += *st.LiveEvidenceCount
+		}
 	}
 	if err := doctorValidateFactCounts(store.DB(), perAgent); err != nil {
 		c.Status, c.Detail = "fail", fmt.Sprintf("store facts could not be counted reliably: %v", err)
@@ -218,13 +242,69 @@ func doctorDirectStore(dir string) (c checkResult) {
 		return c
 	}
 	c.Status = "ok"
-	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read) · consolidations %d (facts consolidated %d)", facts, len(agents), cycles, consumed)
+	c.Detail = fmt.Sprintf("no daemon running — %d fact(s) across %d agent(s) (direct read) · historical generated cycles %d (facts consumed %d)", facts, len(agents), cycles, consumed)
+	c.Detail += doctorCitationSummary(evidenceFacts, evidenceKnown)
+	review, err := memory.ReadReviewOverview(context.Background(), store.DB())
+	if err != nil {
+		c.Status = "warn"
+		c.Detail += fmt.Sprintf(" · review journal unavailable (%v)", err)
+	} else {
+		c.Detail += " · review journal " + reviewOverviewText(&review)
+	}
 	if pending > 0 {
 		c.Status = "warn"
 		c.Detail += fmt.Sprintf(", %d pending vector write(s)", pending)
 		c.Hint = "pending vectors in a quiescent system mean the embedding backend is failing — check your embedding configuration (Ollama URL / API keys)"
 	}
+	addDoctorSubjectIssues(&c, store)
 	return flagIfUnused(c, dir, facts)
+}
+
+func addDoctorSubjectIssues(check *checkResult, store any) {
+	reader, ok := store.(interface {
+		SubjectIssuesByNamespace(context.Context) (map[string]memory.SubjectIssues, error)
+	})
+	if !ok {
+		return
+	}
+	byNamespace, err := reader.SubjectIssuesByNamespace(context.Background())
+	if err != nil {
+		check.Status = "warn"
+		check.Detail += fmt.Sprintf(" · subject diagnostics unavailable (%q)", err.Error())
+		return
+	}
+	var namespaces []string
+	for namespace := range byNamespace {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	var issues memory.SubjectIssues
+	var projects []string
+	for _, namespace := range namespaces {
+		report := byNamespace[namespace]
+		if report.Total == 0 {
+			continue
+		}
+		issues.Total += report.Total
+		issues.Subjects = append(issues.Subjects, report.Subjects[:min(len(report.Subjects), 3-len(issues.Subjects))]...)
+		projects = append(projects, fmt.Sprintf("%q (%d)", namespace, report.Total))
+	}
+	if issues.Total == 0 {
+		return
+	}
+	check.Status = "warn"
+	check.Detail += " · " + issues.Warning() + " Projects: " + strings.Join(projects, ", ")
+	if check.Hint != "" {
+		check.Hint += " "
+	}
+	check.Hint += "Use core memory_search for the subject diagnostic. Recover with memory_add, the same subject, and an explicit replaces ID. See docs/subject-memory.md."
+}
+
+func doctorCitationSummary(count int, known bool) string {
+	if !known {
+		return " · literal evidence count unavailable from this store"
+	}
+	return fmt.Sprintf(" · %d live fact(s) with literal evidence", count)
 }
 
 // Store.Stats uses List, which intentionally skips malformed fact records.
@@ -317,87 +397,51 @@ func doctorReadCounters(db *bolt.DB) (pending, cycles, consumed int, err error) 
 	return pending, cycles, consumed, err
 }
 
-// doctorGraphCounts preserves the distinction between absent graph buckets,
+// doctorGraphState preserves the distinction between absent graph buckets,
 // failed observations and a valid graph with zero nodes.
-func doctorGraphCounts(dir string) (nodes, edges int, err error) {
+func doctorGraphState(dir string) (state daemon.KGStateResponse, err error) {
 	if err := doctorDBLeaf(dir); err != nil {
-		return 0, 0, err
+		return state, err
 	}
 	if dc, err := doctorConnectNoSpawn(dir); err == nil {
 		state, callErr := dc.KGState()
 		closeErr := dc.Close()
 		if callErr != nil {
-			return 0, 0, fmt.Errorf("%w: graph state: %v", errDoctorIncomplete, callErr)
+			return daemon.KGStateResponse{}, fmt.Errorf("%w: graph state: %v", errDoctorIncomplete, callErr)
 		}
 		if closeErr != nil {
-			return 0, 0, fmt.Errorf("%w: close connection: %v", errDoctorIncomplete, closeErr)
+			return daemon.KGStateResponse{}, fmt.Errorf("%w: close connection: %v", errDoctorIncomplete, closeErr)
 		}
 		if state == nil {
-			return 0, 0, fmt.Errorf("%w: graph state returned no result", errDoctorIncomplete)
+			return daemon.KGStateResponse{}, fmt.Errorf("%w: graph state returned no result", errDoctorIncomplete)
 		}
-		return state.Nodes, state.Edges, nil
+		return *state, nil
 	}
 	store, err := doctorOpenReadOnlyStore(dir)
 	if err != nil {
-		return 0, 0, err
+		return state, err
 	}
-	nodes, edges, graphErr := doctorCountGraphStrict(store.DB())
-	if errors.Is(graphErr, kg.ErrNoGraph) {
-		graphErr = nil
-	}
-	closeErr := store.Close()
-	if graphErr != nil {
-		if closeErr != nil {
-			return 0, 0, errors.Join(graphErr, fmt.Errorf("close read-only graph store: %w", closeErr))
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close read-only graph store: %w", closeErr))
 		}
-		return 0, 0, graphErr
+	}()
+	if store.DB() == nil {
+		return state, errors.New("store has no database handle")
 	}
-	if closeErr != nil {
-		return 0, 0, fmt.Errorf("close read-only graph store: %w", closeErr)
+	graph, err := kg.OpenRead(store.DB())
+	if errors.Is(err, kg.ErrNoGraph) {
+		return state, nil
 	}
-	return nodes, edges, nil
-}
-
-// The public graph listing methods intentionally skip malformed records. A
-// setup diagnostic cannot report those truncated counts as complete. Count
-// and decode both buckets in one read transaction instead.
-func doctorCountGraphStrict(db *bolt.DB) (nodes, edges int, err error) {
-	if db == nil {
-		return 0, 0, errors.New("store has no database handle")
+	if err != nil {
+		return state, err
 	}
-	err = db.View(func(tx *bolt.Tx) error {
-		nodeBucket := tx.Bucket([]byte("kg_nodes"))
-		edgeBucket := tx.Bucket([]byte("kg_edges"))
-		if nodeBucket == nil && edgeBucket == nil {
-			return kg.ErrNoGraph
-		}
-		if nodeBucket == nil || edgeBucket == nil {
-			return errors.New("graph buckets are incomplete")
-		}
-		if err := nodeBucket.ForEach(func(key, value []byte) error {
-			if value == nil {
-				return fmt.Errorf("nested bucket in graph nodes at %q", key)
-			}
-			var node kg.Node
-			if err := json.Unmarshal(value, &node); err != nil {
-				return fmt.Errorf("decode graph node %q: %w", key, err)
-			}
-			nodes++
-			return nil
-		}); err != nil {
-			return err
-		}
-		return edgeBucket.ForEach(func(key, value []byte) error {
-			if value == nil {
-				return fmt.Errorf("nested bucket in graph edges at %q", key)
-			}
-			var edge kg.Edge
-			if err := json.Unmarshal(value, &edge); err != nil {
-				return fmt.Errorf("decode graph edge %q: %w", key, err)
-			}
-			edges++
-			return nil
-		})
-	})
-	return nodes, edges, err
+	inspection, err := daemon.ReadKGInspection(graph)
+	if err != nil {
+		return state, err
+	}
+	state.Nodes = len(inspection.Nodes)
+	state.Edges = len(inspection.Edges)
+	state.Provenance = inspection.Provenance
+	return state, nil
 }

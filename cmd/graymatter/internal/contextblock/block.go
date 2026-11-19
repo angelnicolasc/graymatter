@@ -65,13 +65,13 @@ const heading = "## Memory context (GrayMatter)"
 
 // Stats reports what a selection did, for command output and tests.
 type Stats struct {
-	Considered int // live, non-empty facts ranked before budgeting
+	Considered int // injectable facts ranked before budgeting
 	Selected   int // facts that fit the budget
 	TokensUsed int // approx tokens of the rendered body
 	Skipped    int // ranked but left out: budget exhausted or oversized
 }
 
-// Selection ranks live facts by weight (descending), breaks ties oldest-first
+// Select ranks injectable facts by weight (descending), breaks ties oldest-first
 // then by ID — the same total order the retrieval contract documents — and
 // keeps the prefix of that ranking that fits the token budget. A fact larger
 // than what remains is skipped, and smaller ones behind it may still fit:
@@ -83,7 +83,7 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 	}
 	cands := make([]cand, 0, len(facts))
 	for _, f := range facts {
-		if f.IsSuperseded() || strings.TrimSpace(f.Text) == "" {
+		if !f.Injectable() {
 			continue
 		}
 		line := bullet(f.Text)
@@ -109,7 +109,9 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 	var lines []string
 	for _, c := range cands {
 		trial := append(append([]string{}, lines...), bullet(c.f.Text))
-		if tokens.Approx(renderedBody(trial)) <= budgetTokens {
+		body := renderedBody(trial)
+		// Compare ceil(bytes/3) to the budget without multiplying a caller's budget.
+		if tokens.Approx(body) <= budgetTokens && 1+(len(body)-1)/3 <= budgetTokens {
 			chosen = append(chosen, c.f)
 			lines = trial
 		} else {
@@ -128,7 +130,7 @@ func Select(facts []memory.Fact, budgetTokens int) ([]memory.Fact, Stats) {
 
 // renderedBody builds the would-be body for budget measurement.
 func renderedBody(lines []string) string {
-	return heading + "\n" + strings.Join(lines, "\n")
+	return heading + "\n" + strings.Join(lines, "\n") + "\n"
 }
 
 func bullet(text string) string { return "- " + sanitize(text) }

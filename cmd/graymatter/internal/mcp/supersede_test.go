@@ -31,44 +31,22 @@ type reflectInterleavingBackend struct {
 	interloperID  string
 }
 
-func (b *reflectInterleavingBackend) Remember(ctx context.Context, agentID, text string) error {
-	if err := b.Backend.Remember(ctx, agentID, text); err != nil {
-		return err
-	}
-	if !b.armed {
-		return nil
-	}
-	b.replacementID = b.newestID(agentID, text)
-	return b.interleave(ctx, agentID)
-}
-
-// Keep this optional so the same test compiles against the pre-fix Backend:
-// that handler calls Remember above, while the fixed handler takes this path.
-func (b *reflectInterleavingBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
-	writer, ok := b.Backend.(interface {
-		PutReturningFact(context.Context, string, string) (memory.Fact, error)
-	})
+func (b *reflectInterleavingBackend) ReviseFactsWithOptions(ctx context.Context, agentID, text string, opts memory.WriteOptions, victims ...memory.Fact) (memory.Fact, error) {
+	reviser, ok := b.Backend.(confidenceReviser)
 	if !ok {
-		return memory.Fact{}, errors.New("backend does not expose PutReturningFact")
+		return memory.Fact{}, errors.New("backend does not expose atomic revision")
 	}
-	fact, err := writer.PutReturningFact(ctx, agentID, text)
-	if err != nil {
-		return memory.Fact{}, err
+	fact, err := reviser.ReviseFactsWithOptions(ctx, agentID, text, opts, victims...)
+	if err != nil || !b.armed {
+		return fact, err
 	}
-	if b.armed {
-		b.replacementID = fact.ID
-		err = b.interleave(ctx, agentID)
-	}
-	return fact, err
-}
-
-func (b *reflectInterleavingBackend) interleave(ctx context.Context, agentID string) error {
 	b.armed = false
+	b.replacementID = fact.ID
 	if err := b.Backend.Remember(ctx, agentID, interleavedFact); err != nil {
-		return err
+		return fact, err
 	}
 	b.interloperID = b.newestID(agentID, interleavedFact)
-	return nil
+	return fact, nil
 }
 
 func (b *reflectInterleavingBackend) newestID(agentID, text string) string {
@@ -125,6 +103,35 @@ func newDaemonReflectBackend(t *testing.T) Backend {
 		}
 	})
 	return client
+}
+
+type legacyReflectRevisionBackend struct {
+	Backend
+	puts int
+}
+
+func (b *legacyReflectRevisionBackend) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	b.puts++
+	return b.Backend.(*DirectBackend).PutReturningFact(ctx, agentID, text)
+}
+
+func TestMemoryReflectRejectsNonAtomicRevisionFallback(t *testing.T) {
+	s, _ := newTestServer(t)
+	const agent = "revision-guard"
+	mustAdd(t, s, agent, staleFact)
+	backend := &legacyReflectRevisionBackend{Backend: s.backend}
+	s = New(backend, "test")
+
+	res, err := s.handleMemoryReflect(context.Background(), reflectReq(map[string]any{
+		"action": "update", "agent_id": agent, "target": staleFact, "text": freshFact,
+	}))
+	if err != nil || !res.IsError || !strings.Contains(resultText(t, res), "atomic revision") {
+		t.Fatalf("expected atomic revision refusal: %v / %s", err, resultText(t, res))
+	}
+	facts, err := backend.List(agent)
+	if err != nil || backend.puts != 0 || len(facts) != 1 || facts[0].Text != staleFact || facts[0].IsSuperseded() {
+		t.Fatalf("legacy fallback changed facts: puts=%d facts=%+v err=%v", backend.puts, facts, err)
+	}
 }
 
 func TestMemoryReflect_UpdateKeepsItsReplacementIdentity(t *testing.T) {
@@ -264,10 +271,8 @@ func TestMemoryReflect_ForgetRemovesFactFromSearch(t *testing.T) {
 	}
 }
 
-// TestMemoryReflect_SupersededFactSurvivesInStore holds the append-only
-// promise at the tool boundary: suppressed means invisible to retrieval, not
-// erased. An audit still has to be able to see what the agent retired and
-// what replaced it.
+// TestMemoryReflect_SupersededFactSurvivesInStore verifies that update
+// leaves a tombstone pointing to the replacement.
 func TestMemoryReflect_SupersededFactSurvivesInStore(t *testing.T) {
 	s, mem := newTestServer(t)
 	ctx := context.Background()
@@ -298,7 +303,7 @@ func TestMemoryReflect_SupersededFactSurvivesInStore(t *testing.T) {
 		}
 	}
 	if tombstoned == nil {
-		t.Fatal("the superseded fact was deleted; storage is documented as append-only")
+		t.Fatal("update should retain the superseded fact as a tombstone")
 	}
 	if !tombstoned.IsSuperseded() {
 		t.Error("the superseded fact carries no tombstone, so recall has nothing to filter on")

@@ -175,6 +175,16 @@ func TestHostService_CoreSurface(t *testing.T) {
 	if kgState.Edges < 1 {
 		t.Errorf("KGState.Edges = %d, want >= 1 from explicit link", kgState.Edges)
 	}
+	if p := kgState.Provenance; p == nil || p.Examined != kgState.Edges || p.Complete != kgState.Edges || p.Pending != 0 {
+		t.Fatalf("KGState provenance for manual links = %+v", p)
+	}
+	inspection, err := c.KGInspect()
+	if err != nil {
+		t.Fatalf("KGInspect: %v", err)
+	}
+	if p := inspection.Provenance; p == nil || p.Examined != len(inspection.Edges) || p.Complete != kgState.Edges {
+		t.Fatalf("KGInspect provenance = %+v, edges=%d", p, len(inspection.Edges))
+	}
 
 	// --- token ledger ---
 	if err := c.TokenRecord("agent-a", "claude-sonnet-4-6", 100, 50, 10, 5); err != nil {

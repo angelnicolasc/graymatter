@@ -1,27 +1,23 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 )
 
-// consolidateCmd runs one consolidation cycle for an agent. It is a normal
-// CLI command (usable directly) and the entry point the session-end hook
-// spawns detached: consolidation may proxy an LLM round-trip, which is why it
-// runs outside the hook's time budget rather than inside it.
+// consolidateCmd runs one maintenance cycle for an agent. The session-end
+// hook runs the same command detached to keep maintenance out of its budget.
 func consolidateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "consolidate <agent-id>",
-		Short: "Run one memory consolidation cycle for an agent",
-		Long: `Consolidates the agent's memories: summarisation (when an LLM is
-configured — Anthropic key or Ollama), decay application, and pruning, with
-superseded originals kept as tombstone receipts.
+		Short: "Run memory maintenance for an agent",
+		Long: `Applies decay and pruning, and extracts knowledge-graph entities when
+auto-population is enabled. Generative compaction is disabled, including
+when Anthropic or Ollama is configured.
 
-Runs through the store daemon, so it applies the daemon's consolidation
-policy and is safe alongside the TUI, MCP servers, and hooks. With no LLM
-configured it applies decay and pruning only.`,
+Uses the store owner's maintenance policy. The daemon coordinates access
+with the TUI, MCP servers, and hooks.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
@@ -31,11 +27,11 @@ configured it applies decay and pruning only.`,
 			}
 			defer func() { _ = store.Close() }()
 
-			if err := store.Consolidate(context.Background(), agentID); err != nil {
+			if err := store.Consolidate(cmd.Context(), agentID); err != nil {
 				return err
 			}
 			if !quiet {
-				fmt.Printf("Consolidation complete for %q.\n", agentID)
+				fmt.Fprintf(cmd.OutOrStdout(), "Maintenance complete for %q. Generative compaction is disabled.\n", agentID)
 			}
 			return nil
 		},

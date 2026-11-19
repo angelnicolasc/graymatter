@@ -93,6 +93,7 @@ func NewWithConfig(cfg Config) (*Memory, error) {
 	})
 
 	store, err := memory.Open(memory.StoreConfig{
+		MaxQuoteBytes:           cfg.MaxQuoteBytes,
 		DataDir:                 cfg.DataDir,
 		Embedder:                embedder,
 		DecayHalfLife:           cfg.DecayHalfLife,
@@ -256,12 +257,11 @@ func (m *Memory) Recall(ctx context.Context, agentID, query string) ([]string, e
 	return facts, nil
 }
 
-// Consolidate summarises and compacts memories for agentID.
-// It calls the configured LLM to produce summary facts, applies the
-// exponential decay curve, and prunes dead facts.
+// Consolidate runs decay, pruning, and configured knowledge-graph maintenance
+// for agentID. Automatic generative compaction is disabled.
 //
-// Consolidate is automatically triggered async after Remember when
-// Config.AsyncConsolidate is true. Call it manually for synchronous control.
+// Remember schedules this maintenance when Config.AsyncConsolidate is true.
+// Call Consolidate directly to run maintenance synchronously.
 func (m *Memory) Consolidate(ctx context.Context, agentID string) error {
 	if m.store == nil {
 		return nil

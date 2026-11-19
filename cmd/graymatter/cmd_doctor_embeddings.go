@@ -10,7 +10,7 @@ import (
 )
 
 // doctor --embeddings audits the vector channel as the store itself observed
-// it: how many live facts carry a vector, how many writes degraded to
+// it: how many eligible live facts carry a vector, how many writes degraded to
 // keyword-only because the embedder failed, what the last failure said, and
 // how much of the retry backlog remains. It reads only store bytes, so the
 // same store produces byte-identical output on every run — the same contract
@@ -25,14 +25,15 @@ type embeddingsFinding struct {
 }
 
 type embeddingsReport struct {
-	EmbedDims      int                 `json:"embed_dims"`
-	LiveFacts      int                 `json:"live_facts"`
-	FactsWithVec   int                 `json:"facts_with_vector"`
-	DegradedFacts  int                 `json:"degraded_facts"`
-	LastDegradErr  string              `json:"last_degrade_error,omitempty"`
-	PendingVectors int                 `json:"pending_vectors"`
-	Findings       []embeddingsFinding `json:"findings"`
-	Verdict        string              `json:"verdict"`
+	EmbedDims            int                 `json:"embed_dims"`
+	LiveFacts            int                 `json:"live_facts"` // live, non-blank content facts
+	FactsWithVec         int                 `json:"facts_with_vector"`
+	DegradedFacts        int                 `json:"degraded_facts"`
+	LastDegradErr        string              `json:"last_degrade_error,omitempty"`
+	PendingVectors       int                 `json:"pending_vectors"`
+	VectorSearchDegraded bool                `json:"vector_search_degraded,omitempty"`
+	Findings             []embeddingsFinding `json:"findings"`
+	Verdict              string              `json:"verdict"`
 }
 
 func runDoctorEmbeddings(cmd *cobra.Command) error {
@@ -65,6 +66,7 @@ func buildEmbeddingsReport(store *memory.Store) embeddingsReport {
 		rep.DegradedFacts = h.DegradedFacts
 		rep.LastDegradErr = h.LastDegradError
 		rep.PendingVectors = h.PendingVectors
+		rep.VectorSearchDegraded = h.VectorSearchDegraded
 	}
 	withVec, total, err := store.CountEmbeddings()
 	if err == nil {
@@ -90,22 +92,22 @@ func ruleVectorCoverage(rep embeddingsReport) embeddingsFinding {
 	switch {
 	case rep.LiveFacts == 0:
 		f.Status = "info"
-		f.Detail = "no live facts stored yet - nothing to index"
+		f.Detail = "no eligible live facts stored yet"
 	case rep.FactsWithVec == rep.LiveFacts:
 		f.Status = "ok"
-		f.Detail = fmt.Sprintf("every live fact carries a vector (%d/%d, dims %d)", rep.FactsWithVec, rep.LiveFacts, rep.EmbedDims)
+		f.Detail = fmt.Sprintf("every eligible live fact carries a vector (%d/%d, dims %d)", rep.FactsWithVec, rep.LiveFacts, rep.EmbedDims)
 	case rep.FactsWithVec > 0:
 		f.Status = "info"
-		f.Detail = fmt.Sprintf("mixed store: %d of %d live facts carry a vector", rep.FactsWithVec, rep.LiveFacts)
+		f.Detail = fmt.Sprintf("mixed store: %d of %d eligible live facts carry a vector", rep.FactsWithVec, rep.LiveFacts)
 		f.Hint = "facts written while no provider was configured stay keyword-only; new writes pick up the current provider automatically"
 	default:
 		f.Status = "info"
 		if rep.DegradedFacts == 0 {
-			f.Detail = fmt.Sprintf("keyword-only memory: %d live facts, none indexed, no recorded failures", rep.LiveFacts)
+			f.Detail = fmt.Sprintf("keyword-only memory: %d eligible live facts, none indexed, no recorded failures", rep.LiveFacts)
 			f.Hint = "keyword-only is a supported configuration (ADR-005); for vectors, make Ollama reachable or set OPENAI_API_KEY / VOYAGE_API_KEY"
 		} else {
 			f.Status = "warn"
-			f.Detail = fmt.Sprintf("%d live facts, none indexed, %d write(s) degraded", rep.LiveFacts, rep.DegradedFacts)
+			f.Detail = fmt.Sprintf("%d eligible live facts, none indexed, %d write(s) degraded", rep.LiveFacts, rep.DegradedFacts)
 		}
 	}
 	return f
@@ -130,19 +132,25 @@ func ruleEmbedDegradation(rep embeddingsReport) embeddingsFinding {
 func rulePendingVectors(rep embeddingsReport) embeddingsFinding {
 	f := embeddingsFinding{Rule: "pending-vectors"}
 	if rep.PendingVectors == 0 {
+		if rep.VectorSearchDegraded {
+			f.Status = "warn"
+			f.Detail = "vector index unavailable. Recall uses keyword and recency ranking"
+			f.Hint = "open the store writable to recover the native index from canonical facts"
+			return f
+		}
 		f.Status = "ok"
 		f.Detail = "vector retry queue empty"
 		return f
 	}
 	f.Status = "warn"
-	f.Detail = fmt.Sprintf("%d pending vector write(s)", rep.PendingVectors)
+	f.Detail = fmt.Sprintf("%d pending vector write(s). Affected namespaces use keyword and recency ranking", rep.PendingVectors)
 	f.Hint = "a queue that never drains means the embedding backend keeps failing - check your embedding configuration"
 	return f
 }
 
 func renderEmbeddings(out interface{ Write([]byte) (int, error) }, rep embeddingsReport) {
 	fmt.Fprintf(out, "Embedding channel audit\n\n")
-	fmt.Fprintf(out, "  dims %d   live facts %d   with vector %d   degraded %d   pending %d\n\n",
+	fmt.Fprintf(out, "  dims %d   eligible live facts %d   with vector %d   degraded %d   pending %d\n\n",
 		rep.EmbedDims, rep.LiveFacts, rep.FactsWithVec, rep.DegradedFacts, rep.PendingVectors)
 	for _, f := range rep.Findings {
 		fmt.Fprintf(out, "  [%s] %-17s %s\n", f.Status, f.Rule, f.Detail)

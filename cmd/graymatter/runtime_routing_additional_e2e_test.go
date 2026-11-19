@@ -17,6 +17,7 @@ import (
 	"time"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 )
 
 func TestRuntimeHTTPNoAuthLoopbackUsesSelectedStore(t *testing.T) {
@@ -123,7 +124,7 @@ func TestRuntimeHTTPColdPrepareReconnectAndExplicitAgentTools(t *testing.T) {
 	issue81AssertOnlyMarker(t, store)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
-	cmd := exec.CommandContext(ctx, f.bin, "--no-daemon", "mcp", "serve", "--no-create", "--http", addr)
+	cmd := exec.CommandContext(ctx, f.bin, "--no-daemon", "mcp", "serve", "--tools", "full", "--no-create", "--http", addr)
 	cmd.Dir, cmd.Env = service, issue81Env(f.env, env)
 	var stdout, stderr issue81LockedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -659,32 +660,22 @@ func TestRuntimeSessionEndDetachedChildUsesExplicitStore(t *testing.T) {
 		_ = mem.Close()
 		t.Fatal(err)
 	}
-	advanced := mem.Advanced()
-	facts, err := advanced.List(agent)
-	if err != nil {
-		_ = mem.Close()
-		t.Fatal(err)
-	}
-	var found bool
-	for _, fact := range facts {
-		if fact.Text == decayedFact {
-			fact.Weight = 0.005
-			if err := advanced.UpdateFact(agent, fact); err != nil {
-				_ = mem.Close()
-				t.Fatal(err)
-			}
-			found = true
-		}
-	}
+	t.Cleanup(func() { _ = mem.Close() })
+	markerID := ageDetachedPruneFact(t, mem.Advanced(), agent, decayedFact)
 	if err := mem.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Fatal("decay fixture fact was not stored")
+
+	// Start the daemon without touching the fact and verify that the
+	// selected store contains the marker before running the hook.
+	f.mustRun(process, "", "--dir", store, "checkpoint", "list", agent)
+	client, err := daemon.ConnectNoSpawn(store)
+	if err != nil {
+		t.Fatal(err)
 	}
-	before := f.run(process, "", "--dir", store, "recall", agent, "ancient route-specific", "--top-k", "8", "--quiet")
-	if before.code != 0 || !strings.Contains(before.stdout, decayedFact) {
-		t.Fatalf("prune fixture fact not visible before SessionEnd: %+v", before)
+	defer func() { _ = client.Close() }()
+	if !detachedPruneFactExists(t, client, agent, markerID) {
+		t.Fatal("prune fixture fact missing before SessionEnd")
 	}
 	payload, err := json.Marshal(map[string]string{"cwd": subdir, "session_id": "detached-routing-session"})
 	if err != nil {
@@ -697,8 +688,7 @@ func TestRuntimeSessionEndDetachedChildUsesExplicitStore(t *testing.T) {
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		recall := f.run(process, "", "--dir", store, "recall", agent, "ancient route-specific", "--top-k", "8", "--quiet")
-		if recall.code == 0 && !strings.Contains(recall.stdout, decayedFact) {
+		if !detachedPruneFactExists(t, client, agent, markerID) {
 			for _, wrong := range []string{filepath.Join(project, ".graymatter"), filepath.Join(process, ".graymatter")} {
 				if _, err := os.Lstat(wrong); !os.IsNotExist(err) {
 					t.Fatalf("detached route created wrong store %s: %v", wrong, err)

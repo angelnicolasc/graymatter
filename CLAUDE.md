@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+MCP discovery defaults to `full` with all seven tools and the complete briefing. Use `graymatter mcp serve --tools core` for the concise catalog and briefing. All seven tools remain callable in `core`. In `core`, one `memory_search` covers project and shared memory and points to pending work; `memory_add` accepts an atomic `facts` array of objects. New batch fields require `core`. See `docs/AGENTS.md` for profiles, response formats and advanced parameters.
+
 > Read this first if someone pointed you at GrayMatter. Three situations, three
 > different answers.
 

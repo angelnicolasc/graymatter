@@ -68,6 +68,10 @@ mem, err := graymatter.NewWithConfig(graymatter.Config{
 })
 ```
 
+`Consolidate` and the background work enabled by `AsyncConsolidate` run
+maintenance. They apply decay and pruning and run configured graph
+extraction. Generative compaction is disabled for both Anthropic and Ollama.
+
 ## Metrics and hooks
 
 Library users get `OnRecall`, `OnPut`, and `OnVectorIndexError` hooks plus a

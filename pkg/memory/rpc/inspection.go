@@ -13,6 +13,9 @@ const InspectionV1 = "inspection-v1"
 const CurationV1 = "curation-v1"
 const InspectionHealthV1 = "inspection-health-v1"
 
+// AtomicRevisionV1 guarantees replacement and source retirement commit together.
+const AtomicRevisionV1 = "atomic-revision-v1"
+
 type inspectionCapabilityProvider interface{ InspectionCapabilities() []string }
 type healthInspector interface {
 	InspectHealth(context.Context) (memory.InspectionHealth, error)
@@ -42,28 +45,41 @@ type RecallPreviewRequest struct {
 	TopK           int
 }
 
+func (s *Server) supportsAtomicRevision() bool {
+	backend, ok := s.backend.(interface{ AtomicRevisionSupported() bool })
+	return ok && backend.AtomicRevisionSupported()
+}
+
 func (s *Server) inspectionCapabilities() []string {
-	if p, ok := s.backend.(inspectionCapabilityProvider); ok {
-		caps := append([]string(nil), p.InspectionCapabilities()...)
-		if len(caps) > 0 {
-			caps = append(caps, InspectionContextV1)
-		}
-		return caps
-	}
 	var caps []string
-	if _, ok := s.backend.(memory.Inspector); ok {
-		caps = append(caps, InspectionV1)
+	if p, ok := s.backend.(inspectionCapabilityProvider); ok {
+		caps = append(caps, p.InspectionCapabilities()...)
+	} else {
+		if _, ok := s.backend.(memory.Inspector); ok {
+			caps = append(caps, InspectionV1)
+		}
+		if _, ok := s.backend.(memory.FactCurator); ok {
+			caps = append(caps, CurationV1)
+		}
+		if _, ok := s.backend.(healthInspector); ok {
+			caps = append(caps, InspectionHealthV1)
+		}
 	}
-	if _, ok := s.backend.(memory.FactCurator); ok {
-		caps = append(caps, CurationV1)
-	}
-	if _, ok := s.backend.(healthInspector); ok {
-		caps = append(caps, InspectionHealthV1)
+	if s.supportsAtomicRevision() {
+		caps = append(caps, AtomicRevisionV1)
 	}
 	if len(caps) > 0 {
 		caps = append(caps, InspectionContextV1)
 	}
 	return caps
+}
+
+func (c *Client) requireAtomicRevision(ctx context.Context) error {
+	err := c.requireInspection(ctx, AtomicRevisionV1)
+	if errors.Is(err, memory.ErrInspectionUnsupported) {
+		return unsupported(AtomicRevisionV1)
+	}
+	return err
 }
 
 func (c *Client) requireInspection(ctx context.Context, capability string) error {
@@ -154,6 +170,9 @@ func (s *Server) CurateFact(req *CurateFactRequest, resp *CurateFactResponse) er
 	if !ok {
 		return memory.ErrInspectionUnsupported
 	}
+	if req.Action == "revise" && !s.supportsAtomicRevision() {
+		return unsupported(AtomicRevisionV1)
+	}
 	ctx, finish, err := s.beginInspection(req.Context)
 	if err != nil {
 		return err
@@ -167,6 +186,10 @@ func (s *Server) CurateFact(req *CurateFactRequest, resp *CurateFactResponse) er
 	// Preserve a committed identity if an adapter reports a later failure.
 	if err != nil {
 		resp.Error = err.Error()
+		if req.Action == "revise" {
+			resp.ErrorCode = revisionErrorCode(err)
+			return nil
+		}
 		switch {
 		case errors.Is(err, memory.ErrFactChanged):
 			resp.ErrorCode = "fact_changed"
@@ -250,15 +273,26 @@ func (c *Client) CurateFact(ctx context.Context, agent, id, action, text string,
 	if err := c.requireInspection(ctx, CurationV1); err != nil {
 		return memory.Fact{}, err
 	}
+	if action == "revise" {
+		if err := c.requireAtomicRevision(ctx); err != nil {
+			return memory.Fact{}, err
+		}
+		if err := c.requireLineage(ctx); err != nil {
+			return memory.Fact{}, err
+		}
+	}
 	meta, err := newInspectionContext(ctx)
 	if err != nil {
 		return memory.Fact{}, err
 	}
 	resp, err := rpcInspectionCall[CurateFactResponse](c, ctx, "CurateFact", &CurateFactRequest{Context: meta, AgentID: agent, FactID: id, Action: action, Text: text, Expected: expected}, &meta, true)
 	if err != nil {
-		return resp.Fact, inspectionError(err)
+		return resp.Fact, inspectionError(mapCapabilityError(err))
 	}
 	if resp.Error != "" {
+		if action == "revise" {
+			return resp.Fact, revisionError(resp.ErrorCode, resp.Error)
+		}
 		if resp.ErrorCode == "canceled" {
 			return resp.Fact, fmt.Errorf("%w: %s", memory.ErrMutationOutcomeUnknown, resp.Error)
 		}

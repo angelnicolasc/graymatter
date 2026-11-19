@@ -50,8 +50,8 @@ inject the top-8 relevant facts, forget the rest.
     explicit token budget.
   </Card>
   <Card title="Deterministic decay">
-    30-day half-life. Facts fade when nothing touches them. Tombstones, never
-    deletes.
+    Unpinned facts decay with a default 30-day half-life. Pruning can remove
+    both live facts and tombstones.
   </Card>
   <Card title="Single binary">
     ~10 MB static. No Docker, no Redis, no config files, no cloud accounts.

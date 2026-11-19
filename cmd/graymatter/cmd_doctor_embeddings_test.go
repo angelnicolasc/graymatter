@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +93,78 @@ func TestEmbeddingsReportHealthyIsOk(t *testing.T) {
 	cov := finding2(t, rep, "vector-coverage")
 	if cov.Status != "ok" {
 		t.Errorf("coverage status = %q, want ok", cov.Status)
+	}
+}
+
+func TestEmbeddingsReportUnavailableIndexWarnsWithEmptyQueue(t *testing.T) {
+	finding := rulePendingVectors(embeddingsReport{VectorSearchDegraded: true})
+	if finding.Status != "warn" || finding.Detail == "vector retry queue empty" {
+		t.Fatalf("unavailable vector index reported as healthy: %+v", finding)
+	}
+}
+
+func TestDoctorEmbeddings_AliasDoesNotLowerCoverage(t *testing.T) {
+	dir := t.TempDir()
+	oldDataDir, oldJSON := dataDir, jsonOut
+	dataDir, jsonOut = dir, true
+	t.Cleanup(func() { dataDir, jsonOut = oldDataDir, oldJSON })
+	ctx := context.Background()
+	const agent = "embedding-coverage"
+
+	write := func(provider embedding.Provider, seed func(*memory.Store)) {
+		t.Helper()
+		store, err := memory.Open(memory.StoreConfig{DataDir: dir, Embedder: provider})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := store.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		seed(store)
+	}
+	report := func() embeddingsReport {
+		t.Helper()
+		cmd := doctorCmd()
+		cmd.SetArgs([]string{"--embeddings"})
+		var output bytes.Buffer
+		cmd.SetOut(&output)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		var rep embeddingsReport
+		if err := json.Unmarshal(output.Bytes(), &rep); err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+
+	write(staticCLIEmbedder{}, func(store *memory.Store) {
+		if err := store.Put(ctx, agent, "embedded content"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.PutAlias(ctx, agent, "broker", []string{"event bus"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	rep := report()
+	coverage := finding2(t, rep, "vector-coverage")
+	if rep.LiveFacts != 1 || rep.FactsWithVec != 1 || coverage.Status != "ok" {
+		t.Fatalf("vector coverage after adding alias = %d/%d, %+v", rep.FactsWithVec, rep.LiveFacts, coverage)
+	}
+
+	write(embedding.NewKeyword(), func(store *memory.Store) {
+		for _, text := range []string{"keyword-only content", " \u2003 "} {
+			if err := store.Put(ctx, agent, text); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	rep = report()
+	coverage = finding2(t, rep, "vector-coverage")
+	if rep.LiveFacts != 2 || rep.FactsWithVec != 1 || coverage.Status != "info" || !strings.Contains(coverage.Detail, "mixed store") {
+		t.Fatalf("vector coverage after keyword-only write = %d/%d, %+v", rep.FactsWithVec, rep.LiveFacts, coverage)
 	}
 }
 

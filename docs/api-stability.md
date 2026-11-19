@@ -21,7 +21,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `NewWithConfig(cfg Config) (*Memory, error)` | |
 | `(*Memory).Remember(ctx context.Context, agentID, text string) error` | |
 | `(*Memory).Recall(ctx context.Context, agentID, query string) ([]string, error)` | |
-| `(*Memory).Consolidate(ctx context.Context, agentID string) error` | |
+| `(*Memory).Consolidate(ctx context.Context, agentID string) error` | Runs decay, pruning and configured graph extraction. Generative compaction is disabled. |
 | `(*Memory).RememberShared(ctx context.Context, text string) error` | |
 | `(*Memory).RecallShared(ctx context.Context, query string) ([]string, error)` | |
 | `(*Memory).RecallAll(ctx context.Context, agentID, query string) ([]string, error)` | |
@@ -42,12 +42,12 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).Put(ctx, agentID, text string) error` | |
 | `(*Store).PutReturningFact(ctx, agentID, text string) (Fact, error)` | Added after v0.18.0. Concrete `Store` capability, intentionally not part of `AdvancedStore`; returns the exact fact committed so callers can persist its identity without a post-write lookup |
 | `(*Store).PutWithOptionsReturningFact(ctx, agentID, text, WriteOptions) (Fact, error)` | Added in v0.20.0. Text, confidence, canonical ID and index maintenance commit in the same fact transaction |
-| `(*Store).ReviseWithOptions`, `ReviseFactsWithOptions` | Added in v0.20.0. Conservative omitted confidence, exact replacement identity; return a known committed replacement alongside a later retirement error |
+| `(*Store).ReviseWithOptions`, `ReviseFactsWithOptions` | Added in v0.20.0. Conservative omitted confidence and exact replacement identity. Replacement and selected source retirements commit atomically. |
 | `(*Store).RecallWithOptions`, `RecallExplainWithOptions`, `RecallSharedWithOptions`, `RecallAllWithOptions`, `BatchRecallWithOptions` | Added in v0.20.0. Per-call options; nonpositive `topK` uses 8. Existing raw Store recall signatures keep their legacy zero-count behavior |
 | `(*Store).DefaultConfidenceWeight() float64` | Optional adapter capability added in v0.20.0; advertises the configured default so request routing and negotiated RPC retain the same effective policy |
 | `WriteOptions`, `RecallOptions`, `RecallResult`, `RecallExplainResult`, `RetrievalMetadata`, `ConfidenceRanking` | Added in v0.20.0. Optional pointer fields distinguish omission from explicit labels/zero; additive result metadata is omitted for legacy calls |
 | `EligibleVectorStore`, `ExhaustiveVectorStore` | Optional capabilities added in v0.20.0; `VectorStore` and `AdvancedStore` require no new methods |
-| `(*Store).Delete(agentID, factID string) error` | |
+| `(*Store).Delete(agentID, factID string) error` | Explicitly removes the fact row by namespace and ID, including pinned or retired rows |
 | `(*Store).List(agentID string) ([]Fact, error)` | |
 | `(*Store).ListAgents() ([]string, error)` | |
 | `(*Store).Stats(agentID string) (MemoryStats, error)` | |
@@ -58,7 +58,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Store).RecallExplain(ctx, agentID, query string, topK int) ([]RecallReceipt, error)` | Added in v0.17.0. The same ranking as `Recall` — identical order, dedup and access-metadata side effects — with one receipt per returned fact instead of bare text. KG neighbour enrichment is text-only and has no receipts, so it is not part of the explain result |
 | `RecallReceipt` struct (`text`, `weight`, `age_days`, `ranks`, `provenance`, `kg_links`) | Added in v0.17.0. JSON tags are the wire contract for `graymatter recall --explain --json` and the MCP `explained` payload |
 | `RecallRanks` struct (`vector_rank`, `keyword_rank`, `recency_rank`, `fused_score`, `k`) | Added in v0.17.0. A rank of 0 means the signal did not rank the fact; the fused score reproduces from the ranks and `k` using the documented RRF arithmetic |
-| `RecallProvenance` struct (`fact_id`, `written_at`, `superseded_by`, `confidence`, `pinned`) | Added in v0.17.0 |
+| `RecallProvenance` struct (`fact_id`, `written_at`, `superseded_by`, `confidence`, `pinned`) | Added in v0.17.0. Includes the optional lineage projection described below. |
 | `(*Store).PutShared(ctx, text string) error` | |
 | `(*Store).MaybeConsolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
 | `(*Store).Consolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
@@ -72,7 +72,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `StoreConfig` struct — all fields present in v0.1.0 | New fields may be added; `SignalWeights` and `MinRelevance` added in v0.10.0 |
 | `SignalWeights` struct | Added in v0.10.0 |
 | `DefaultSignalWeights() SignalWeights` | Added in v0.10.0 |
-| `ErrConsolidateLLMUnsupported` | Added in v0.10.0. Deprecated in v0.14.0: never returned anymore (Ollama consolidation is implemented); kept so `errors.Is` callers keep compiling |
+| `ErrConsolidateLLMUnsupported` | Added in v0.10.0. Deprecated in v0.14.0: retained for matching historical errors; kept so `errors.Is` callers keep compiling |
 | `SharedAgentID` constant | |
 | `ConsolidateConfig` interface | **v0.14.0:** gained `GetOllamaURL()` and `GetOllamaConsolidateModel()`. This is a signature-level change to a stable identifier, taken with the deviation documented in the 0.14.0 changelog compatibility notes instead of a prior-minor deprecation cycle. Callers using `graymatter.Config` are unaffected; hand-rolled implementers add two getters |
 | `GraphAccessor` interface | |
@@ -80,7 +80,26 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `TypedEntityExtractor` interface, `EntityRef`, `EntityLink` | Added in v0.12.0 — optional extractor capability preserving label + type and producing co-mention links; consolidation uses it when implemented, legacy ID-only path otherwise |
 | `EdgeWriter` interface | Added in v0.12.0 — optional graph capability used by consolidation to persist co-mention edges |
 | `AdvancedStore.SetKG(...)` | Exposed in v0.12.0 (mirrors `(*Store).SetKG`) |
-| `(*Store).ConsolidationCounters()`, `ReadConsolidationCounters(db)` | Added in v0.14.0 — lifetime consolidation totals from the meta bucket, surfaced by `status` and `doctor` |
+| `(*Store).ConsolidationCounters()`, `ReadConsolidationCounters(db)` | Added in v0.14.0 — historical generative cycle and source-consumption totals from the meta bucket, surfaced by `status` and `doctor`. Maintenance cycles leave both counters unchanged. |
+
+### Fact retention and deletion
+
+Revision and retirement exclude the old fact from recall immediately.
+Inspection and export can show the retired record while its tombstone remains
+in the store. Recall provenance derives revision and consolidation lineage
+from surviving tombstone rows. A source's receipt can disappear after that
+row is pruned or explicitly deleted.
+
+Unpinned facts decay with a default 30-day half-life. Maintenance can prune
+live facts and tombstones with weight below 0.01. A pin protects against
+automatic decay, pruning and summarisation.
+
+`Store.Delete(agentID, factID)` removes the canonical row directly, regardless
+of weight, age or pin status. The REST endpoint `DELETE /forget/{id}?agent=<id>`
+performs that deletion by ID. `DELETE /forget` also accepts an exact ID in the
+request body. Query-based deletion on that endpoint requires confirmation.
+MCP `memory_reflect` with `forget` and the CLI `graymatter forget` command
+retire the fact as a tombstone.
 
 ### Recall result ordering
 
@@ -102,6 +121,30 @@ This is a guarantee callers may rely on within each namespace. It applies to
 breaks ties by agent-list position, shared-list position, then text. Batch merge
 orders by best input rank, number of query hits, then first appearance.
 
+Recall and Explain record activity for live aliases that add a token to the
+query. Combined namespace recalls and batches deduplicate alias activity by
+namespace and fact ID across the operation. The alias record can be updated
+even when the query returns no ranked facts. Frontends use the daemon's
+scoped batch capability when available and send scalar recalls to older
+daemons. The daemon treats each scalar recall as a separate operation.
+Preview and read-only stores leave alias activity unchanged.
+
+For a live alias, maintenance and recorded activation follow its stored source.
+
+| Stored `AliasSource` | Decay and pruning while live and unpinned | On recorded activation |
+| --- | --- | --- |
+| Empty (authored, including older records) | Exempt | Records access without resetting weight |
+| `usage` | Ordinary decay and pruning | Resets weight to `1` while unpinned and records access |
+| Any other value | Ordinary decay and pruning | Records access without resetting weight |
+
+Recorded access increments the count and advances the timestamp monotonically.
+A pin protects the record from decay and pruning and preserves its weight
+during activation. Retired aliases stop expanding queries and follow ordinary
+decay and pruning unless pinned. A retained pin leaves the alias retired.
+Maintenance checks the current record before pruning, so a completed renewal
+can protect a usage alias that was below the pruning threshold earlier in the
+cycle.
+
 **Exception, v0.12.0:** when a knowledge graph is wired via `SetKG` (directly,
 via `AdvancedStore.SetKG`, or by enabling the daemon's `--kg` /
 `GRAYMATTER_KG=1`), `Recall` may append **at most three** neighbour labels
@@ -114,6 +157,108 @@ An explicit `min_confidence`, including `unverified`, suppresses this text-only
 enrichment because graph labels have no confidence receipts. Retrieval metadata
 reports `kg: "suppressed_min_confidence"`; without a filter it describes hints
 as `"hints_without_confidence_receipts"`. Explain never adds that hint tail.
+
+### Knowledge graph provenance
+
+The edge's `sources` array is the compatible, capped projection of its fact
+IDs. Versioned provenance separately records manual support, whether the
+source list is complete or truncated, and exact support receipts identified
+by namespace, fact ID and revision digest. An unversioned edge remains
+unknown even when it has a short or empty source list. A new source can add
+evidence without establishing completeness for an existing unknown edge.
+
+Graph maintenance removes an edge only when its complete provenance proves
+that it has no remaining support. Pending edges continue participating in
+navigation. The inventory progress describes what has been examined. Its
+completion can coexist with pending edges and their reasons. The CLI and
+daemon maintain an existing graph even when auto-population is off.
+
+`status --json` exposes the summary under `kg.provenance`.
+`doctor --graph --json` exposes the same summary under `provenance`.
+`kg inspect --json` includes the edge snapshot and pending reason for each
+edge. An older daemon can return graph data with the provenance summary
+unavailable.
+
+`kg reconcile evidence.json` applies an explicit proof for one edge. Set
+`expected` to the inspected edge object, `manual_support` to the verified
+boolean, and `supports` to the full set of verified sources. Each entry has
+`namespace`, `fact_id`, `kind`, and `text_sha256`, the lower-case SHA-256
+digest of the exact UTF-8 fact text. The stored kind for ordinary facts is the
+empty string. Supply an empty array for an edge proven to have only manual
+support. The operation checks the edge snapshot and current source content in
+the graph transaction. Stale proofs and truncated edges remain pending.
+
+
+
+### Review journal
+
+`(*Store).ReviewAnalyze` explicitly submits one namespace's eligible facts to
+the configured provider. `ReviewList` returns summary rows and `ReviewInspect`
+returns the preserved evidence and recorded decisions. `ReviewApply`
+records reject, resolve, dismiss, or purge actions. The cancellable
+`review-journal-v1` RPC capability covers the same operations. Analysis uses
+a 90-second RPC limit or an earlier caller deadline. The other review calls
+keep the ordinary inspection deadline. Credentials stay in the store owner.
+
+The journal allows up to 12 sources of at most 16 KiB UTF-8 each. The encoded
+request and provider response are each limited to 64 KiB. A response can
+declare up to 12 findings, with conflict notes of at most 2 KiB. One journal
+record is limited to 128 KiB. Each namespace has a 256-record limit and an
+8 MiB logical payload limit, including retained history and snapshots.
+Rejecting or resolving a record retains its payload. An explicit purge of a
+closed record releases its evidence ownership. Unshared snapshots become
+eligible for collection after a 30-day grace period.
+
+Snapshots identify exact text, kind, and declared confidence in the
+versioned content hash. A source's current, retired, changed, or missing
+state is independent of an explicit resolution or dismissal. Journal
+inspection and status/doctor projections use read transactions.
+
+Ordinary and batch recall can include bounded `conflict_notices` metadata
+in option-aware Go results and MCP structured output. Explain attaches a
+notice to the first affected receipt in its result. A notice contains the
+conflict ID, affected returned source IDs, and source state. Provider notes
+remain in the journal. Legacy string-only Go methods retain their fact
+text shape. The same evidence never gains active-memory eligibility from a
+journal operation.
+
+### Memory version lineage
+
+`Fact` and `RecallProvenance` can carry `content_hash`, `historical_hash`,
+`replaces`, `derived_from`, `legacy_sources`, and `lineage_status`. Each
+version reference identifies a fact ID and content hash in the same namespace.
+The hash covers exact text, kind, and declared confidence. Status can be
+`versioned`, `content_changed`, `legacy_incomplete`, `missing`, or `cycle`.
+`content_changed` reports the current hash and the historical hash separately.
+Ambiguous legacy source IDs remain under `legacy_sources`, with a hash only
+when exact source bytes have been retained. `supersedes` remains the ID list
+for older receipt clients.
+
+`(*Store).InspectLineage(ctx, namespace, factID, contentHash)` reads one
+version. An omitted hash selects the canonical row or its last known lineage
+head. Use the exact hash for pruned source-only evidence and to inspect a
+historical version of changed content. Read-only inspection
+keeps access counters and recall eligibility unchanged.
+
+`graymatter recall --explain` and MCP `memory_search` with `explain: true`
+show these fields in both text and structured receipts. REST `GET /facts`
+includes the namespace-scoped projection. Authenticated
+`GET /lineage?agent=<namespace>&fact_id=<id>&content_hash=<hash>` inspects an
+exact version. The hash is optional, and an unavailable requested version
+returns HTTP 404. Successful REST `DELETE /forget` responses retain
+`status` and `deleted_id` and add `deletion_scope` and `lineage_retention`.
+Deletion removes the fact record. Evidence ownership by lineage or review
+continues to govern snapshot retention.
+
+`graymatter export --format json --include-lineage` writes
+`memory-lineage.json`, a versioned audit archive of fact rows, retained
+snapshots, and relationships. `--agent` scopes the archive to one namespace.
+Large archives can use `--no-daemon` after the daemon has released the store.
+Plain JSON (`memories.json`), Markdown, and Obsidian export fact projections.
+For full database recovery, `(*Store).Backup` writes a consistent bbolt
+image, and `RestoreLineageBackup` validates the image before installing it
+at an unused destination. The bbolt image includes the evidence ownership
+needed to preserve the retained version graph.
 
 <a id="confidence-options-unreleased"></a>
 
@@ -128,11 +273,13 @@ are rejected before effects.
 
 An omitted add label retains the legacy empty representation. An omitted revise
 label becomes `min(inferred, lowest effective confidence of the validated live
-targets)`; an explicit label overrides it. Summaries use the same conservative
-minimum over valid consumed IDs, and LLM-extracted facts are unverified. The
-replacement fact's write is atomic; subsequent retirements remain separate
-phases and their failures are reported. A revision never inherits a pin.
-Narrow lifecycle mutations preserve unrelated confidence metadata.
+targets)`. An explicit label overrides it. LLM-extracted facts are unverified.
+Generative compaction is disabled. A revision commits the replacement and
+selected source retirements in one transaction. Changed sources, write
+failures, and cancellation before commit roll back the entire revision. A
+successful result identifies the committed replacement, even when cancellation
+follows the commit. The replacement starts unpinned. Narrow lifecycle mutations
+preserve unrelated confidence metadata.
 
 `RecallOptions.MinConfidence` filters before document frequencies, signal ranks,
 recency, fusion, `MinRelevance`, deduplication and top-k. An optional finite
@@ -165,25 +312,52 @@ write capability provides `PutSharedWithOptionsReturningFact` and preserves
 `RememberShared`'s policy of scheduling no automatic consolidation. A generic
 write with `agent_id = "__shared__"` retains the ordinary `Remember` consolidation
 policy. Existing RPC methods retain zero confidence preference.
-A new client can use an old daemon for an effectively legacy request, but new
-options or an active positive default require a supporting capability; otherwise
-the request returns an update/restart error before effects. Reconnection
-renegotiates capabilities. Writes with uncertain commit results are not replayed.
+Compatible reads and lifecycle operations can use an older daemon. Typed RPC
+requests that can trigger maintenance, including ordinary writes and explicit
+consolidation, require the daemon to advertise `maintenance-only-v1`. New
+confidence options or an active positive default also require the applicable
+confidence capability. Unsupported operations return an update/restart error
+before dispatch. Reconnection renegotiates capabilities. An uncertain write is
+never replayed.
 Pin, unpin and forget remain available against an older daemon: after negotiating
 the absence of `confidence-lifecycle-v1`, the client reads each target's current
 metadata and uses the historical `UpdateFact` endpoint once. This compatibility
 path retains the old daemon's read-modify-write concurrency limitations; upgraded
 daemons use transactional field patches. An error after sending a mutation never
-switches endpoints or replays that mutation. Revision requires
-`confidence-write-v1` even when the label is omitted, because conservative
-confidence derivation and transactional source validation are new semantics.
-The REST API retains its legacy endpoints and zero preference; authenticated
+switches endpoints or replays that mutation. Typed revision clients require
+`atomic-revision-v1` and `inspection-context-v1` before dispatch. The store
+daemon can serve older wire requests using the same atomic revision path.
+An acknowledged precommit cancellation reports rollback. A lost response
+after dispatch reports an unknown outcome and requires inspection before
+another attempt. Custom RPC backends advertise atomic revision only when
+their implementation provides the same transaction guarantee.
+The REST API retains its legacy endpoints and zero preference. Authenticated
 MCP over HTTP includes the new options.
 
 Filtered vector retrieval requires the native eligible-ID capability or an
 optional custom capability that proves exhaustion. `VectorStore.Query` promises
 only at-most-n results; a short list cannot prove completeness. Progressive
 queries reuse one embedding and reject incomplete/no-progress prefixes.
+
+A revision's durable vector work may finish after its canonical transaction.
+While its namespace has pending vector work, recall uses canonical keyword
+and recency ranking and skips the external vector query. Option-bearing
+receipts can report `retrieval.vector_fallback` as `pending_vector_index`,
+`vector_index_changed`, or `vector_index_unavailable`. Doctor and inspection
+health expose `vector_search_degraded` while the durable queue is nonempty.
+After reconciliation, a backend that cannot prove complete eligible results
+can use the vectors stored on the canonical facts for revised namespaces.
+
+A native index can lose a file even after acknowledging delivery. Reopening
+checks canonical live embeddings in revised namespaces and queues any
+missing entries. If the native index is unreadable and the store has
+revision history or pending writes, writable recovery queues the live
+canonical embeddings before quarantining and rebuilding the derived index.
+Read-only opens and repairs that cannot proceed serve canonical recall in
+degraded mode. When a damaged index needs quarantine, open the store using
+its resolved absolute directory path. A symlink in that path or a Windows
+short-name alias can prevent quarantine. Recovery leaves a redirected index
+directory in place. A subsequent writable open can resume recovery.
 Keyword-only search remains supported without a vector capability.
 Concurrent confidence updates cannot mix eligibility with different receipt
 metadata. Once a query embedding exists, an overlapping alias edit that changes
@@ -220,6 +394,13 @@ now returns 8 facts. Pass `?k=5` for the old count.
 ---
 
 ## MCP wire contract (stable within the v0.x series)
+
+Catalog discovery defaults to `full`, which lists all seven tools and uses
+the complete briefing. Explicit `--tools core` selects five visible tools and
+a compact briefing. The two tools hidden from `core` discovery remain
+callable. Use `full` for clients that depend on the complete discovery schema
+and legacy response formats.
+See [catalog profiles](AGENTS.md#mcp-catalog-profiles).
 
 The Go package that implements the MCP server, `cmd/graymatter/internal/mcp`,
 is internal and carries no Go-level guarantee (see [Internal / unstable
@@ -311,6 +492,17 @@ the same policy and identifies final scores. Legacy calls omit the new metadata.
 Batch applies one global policy to all input queries and its merged view.
 
 ### Checkpoint resume absence and default
+
+MCP `checkpoint_resume` in `full` returns the latest record in the agent
+namespace, including historical PreCompact and SessionEnd markers. In
+`core`, latest resume skips markers that carry only hook provenance. These entries remain visible when listing checkpoints or loading
+by ID. A namespace with only these markers has the same resume result as one
+with no checkpoints.
+
+The `graymatter run --resume latest` harness restores saved conversation
+messages. State saved through MCP remains available to checkpoint readers and
+is separate from harness message history. The harness starts a new run on typed
+absence and returns other recovery failures before using memory or the model.
 
 Errors return text-only `isError: true` results without `structuredContent`;
 their wording may change. `checkpoint_resume` with no checkpoint returns such

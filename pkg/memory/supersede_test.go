@@ -139,10 +139,8 @@ func TestRecall_SupersededExcludedRegardlessOfWeight(t *testing.T) {
 	}
 }
 
-// TestList_RetainsSupersededFact holds the append-only promise the README
-// makes about storage. A contradiction is not a deletion: the tombstoned fact
-// is still in the store, still visible to List, export and the TUI. Only
-// retrieval skips it, and only pruning by decay ever removes it.
+// TestList_RetainsSupersededFact verifies that retirement leaves a tombstone
+// visible to List while Recall excludes the retired fact.
 func TestList_RetainsSupersededFact(t *testing.T) {
 	s, cleanup := openTestStore(t)
 	defer cleanup()

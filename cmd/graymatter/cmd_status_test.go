@@ -70,6 +70,8 @@ func TestStatus_HumanSections(t *testing.T) {
 	out := runStatusCmd(t)
 	for _, want := range []string{
 		"GrayMatter status",
+		"generative compaction disabled",
+		"historical facts consumed",
 		"2 agents",
 		"1 superseded",
 		"planner 0",
@@ -98,9 +100,10 @@ func TestStatus_JSONShape(t *testing.T) {
 	var payload struct {
 		Mode  string `json:"mode"`
 		Store *struct {
-			TotalAgents     int `json:"total_agents"`
-			TotalLiveFacts  int `json:"total_live_facts"`
-			TotalTombstones int `json:"total_tombstones"`
+			MaintenanceMode string `json:"maintenance_mode"`
+			TotalAgents     int    `json:"total_agents"`
+			TotalLiveFacts  int    `json:"total_live_facts"`
+			TotalTombstones int    `json:"total_tombstones"`
 			Agents          []struct {
 				Agent   string `json:"agent"`
 				Recalls int    `json:"recalls"`
@@ -117,6 +120,9 @@ func TestStatus_JSONShape(t *testing.T) {
 	if payload.Store == nil || payload.Store.TotalAgents != 2 || payload.Store.TotalLiveFacts != 1 {
 		t.Errorf("unexpected store overview: %+v", payload.Store)
 	}
+	if payload.Store == nil || payload.Store.MaintenanceMode != daemon.MaintenanceOnly {
+		t.Errorf("maintenance mode missing from store overview: %+v", payload.Store)
+	}
 	if payload.Store == nil || payload.Store.TotalTombstones != 1 {
 		t.Errorf("tombstone total wrong: %+v", payload.Store)
 	}
@@ -132,7 +138,7 @@ func TestStatus_EmptyStoreGuides(t *testing.T) {
 	t.Cleanup(func() { dataDir = oldDir })
 
 	out := runStatusCmd(t)
-	if !strings.Contains(out, "empty") || !strings.Contains(out, "graymatter init") {
+	if !strings.Contains(out, "empty") || !strings.Contains(out, "graymatter init") || !strings.Contains(out, "generative compaction disabled") {
 		t.Errorf("empty store should guide toward init:\n%s", out)
 	}
 }
@@ -261,10 +267,10 @@ func TestStatus_CacheReadPercentage(t *testing.T) {
 		},
 		KG: &daemon.KGStateResponse{},
 		Tokens: harness.TokenUsageSummary{
-			Loaded:   true,
-			Requests: 10,
-			Input:    1_000,
-			Output:   500,
+			Loaded:    true,
+			Requests:  10,
+			Input:     1_000,
+			Output:    500,
 			CacheRead: 9_000,
 		},
 		Facts: map[string][]memory.Fact{
@@ -279,5 +285,33 @@ func TestStatus_CacheReadPercentage(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "cache-read 90%") {
 		t.Errorf("cache-read line wrong, want 90%% (CacheRead/(Input+CacheRead)):\n%s", got)
+	}
+}
+
+func TestStatus_LegacyDaemonModeIsUnknown(t *testing.T) {
+	legacy := &daemon.StoreOverviewResponse{Consolidations: 2, FactsConsumed: 5}
+	var out bytes.Buffer
+	if err := renderStatus(&out, statusView{Mode: "via daemon", Overview: legacy}); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "unknown") || strings.Contains(got, "compaction disabled") {
+		t.Errorf("legacy human status = %q", got)
+	}
+	out.Reset()
+	if err := encodeStatusJSON(&out, "via daemon", legacy, nil, harness.TokenUsageSummary{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Store struct {
+			MaintenanceMode string `json:"maintenance_mode"`
+		} `json:"store"`
+		Consolidations int `json:"consolidations"`
+		FactsConsumed  int `json:"facts_consumed"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Store.MaintenanceMode != "unknown" || got.Consolidations != 2 || got.FactsConsumed != 5 {
+		t.Errorf("legacy JSON status = %s", out.Bytes())
 	}
 }

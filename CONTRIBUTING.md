@@ -31,14 +31,11 @@ or refuses outright when `GOTOOLCHAIN=local` — which is what container images
 set. The shipped binary is built without CGO; that constraint is about the
 release artifact, not about your machine. See the note on `-race` below.
 
-`cmd/graymatter/go.mod` additionally declares `toolchain go1.26.9`. That line is
-inert inside the workspace (go.work governs toolchain selection there), but it
-means someone running `go install github.com/angelnicolasc/graymatter/cmd/graymatter@latest`
-on an older Go gets a binary linked against a patched standard library rather
-than whatever their toolchain happens to ship. When you bump it, bump the
-`go-version` in CI, release and Maintenance smoke to match. CI runs `govulncheck` as a blocking
-gate on both modules, so a regression here fails the build rather than a report
-nobody reads.
+`cmd/graymatter/go.mod` recommends `toolchain go1.26.11` for standalone
+builds of the CLI checkout. Workspace builds use `go.work` for toolchain
+selection. For a versioned installation, set `GOTOOLCHAIN=go1.26.11` to build
+with that patch. Keep the Go versions used by CI, release and maintenance
+workflows aligned with the CLI pin. CI runs `govulncheck` on both modules.
 
 ```bash
 git clone https://github.com/angelnicolasc/graymatter

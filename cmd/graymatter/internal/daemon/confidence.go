@@ -118,7 +118,7 @@ func (b rememberBackend) RecallWithOptions(ctx context.Context, agentID, query s
 	}
 	opts, legacyMetadata := resolveBackendRecallOptions(opts, b.DefaultConfidenceWeight())
 	result, err := store.RecallWithOptions(ctx, agentID, query, topK, opts)
-	if legacyMetadata {
+	if legacyMetadata && result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
 		result.Retrieval = nil
 	}
 	return result, err
@@ -138,7 +138,9 @@ func (b rememberBackend) RecallExplainWithOptions(ctx context.Context, agentID, 
 	opts, legacyMetadata := resolveBackendRecallOptions(opts, b.DefaultConfidenceWeight())
 	result, err := store.RecallExplainWithOptions(ctx, agentID, query, topK, opts)
 	if legacyMetadata {
-		result.Retrieval = nil
+		if result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
+			result.Retrieval = nil
+		}
 		for i := range result.Receipts {
 			result.Receipts[i].Ranking = nil
 		}
@@ -159,7 +161,7 @@ func (b rememberBackend) RecallAllWithOptions(ctx context.Context, agentID, quer
 	}
 	opts, legacyMetadata := resolveBackendRecallOptions(opts, b.DefaultConfidenceWeight())
 	result, err := store.RecallAllWithOptions(ctx, agentID, query, topK, opts)
-	if legacyMetadata {
+	if legacyMetadata && result.Retrieval != nil && result.Retrieval.VectorFallback == "" {
 		result.Retrieval = nil
 	}
 	return result, err

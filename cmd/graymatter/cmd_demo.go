@@ -93,8 +93,7 @@ This is a scratch store. Your own agents start with: graymatter init`,
 				return fmt.Errorf("seed usage demonstration: %w", err)
 			}
 
-			// The demo configuration disables remote summarisation, including
-			// providers configured in the caller's environment.
+			// Run the same maintenance cycle used by normal stores.
 			ctx := cmd.Context()
 			for _, agent := range demoAgents() {
 				for cycle := 0; cycle < 2; cycle++ {
@@ -241,8 +240,8 @@ func demoAgents() []demoAgent {
 }
 
 // seedDemoCorpus plants the corpus into an empty store and is a no-op for
-// agents that already have facts (the store is append-only, so re-running on
-// a seeded demo must not duplicate everything).
+// agents that already have facts, so re-running the demo leaves the corpus
+// free of duplicates.
 func seedDemoCorpus(store cliStore) (int, error) {
 	existing, err := store.ListAgents()
 	if err != nil {

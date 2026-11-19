@@ -3,10 +3,10 @@ package graymatter
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,57 +99,72 @@ func TestMemoryRememberExtractedConfidenceFollowsProvenance(t *testing.T) {
 	}
 }
 
-func TestMemoryRememberWithOptionsConsolidatesAfterMetadataCommit(t *testing.T) {
-	reported := make(chan error, 2)
-	requests := make(chan struct{}, 1)
+func TestMemoryRememberWithOptionsSchedulesSafeMaintenanceAfterCommit(t *testing.T) {
+	var requests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests <- struct{}{}
+		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, confidenceAnthropicMessage(""))
+		fmt.Fprint(w, confidenceAnthropicMessage("This text must never be published."))
 	}))
 	defer srv.Close()
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
-	m, err := NewWithConfig(Config{DataDir: t.TempDir(), EmbeddingMode: EmbeddingKeyword,
-		AsyncConsolidate: true, ConsolidateThreshold: 2, ConsolidateLLM: "anthropic", AnthropicAPIKey: "test-key", ConsolidateModel: "claude-test",
-		OnConsolidateError: func(_ string, err error) { reported <- err },
-	})
+	cfg := Config{
+		DataDir: t.TempDir(), EmbeddingMode: EmbeddingKeyword, AsyncConsolidate: true,
+		ConsolidateThreshold: 2, ConsolidateLLM: "anthropic", AnthropicAPIKey: "test-key", ConsolidateModel: "claude-test",
+	}
+	m, err := NewWithConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer m.Close()
+	ctx := context.Background()
 	for _, text := range []string{"source one", "source two"} {
-		if err := m.Advanced().Put(context.Background(), "a", text); err != nil {
+		if err := m.Advanced().Put(ctx, "a", text); err != nil {
 			t.Fatal(err)
 		}
 	}
+	sources, err := m.Advanced().List("a")
+	if err != nil || len(sources) != 2 {
+		t.Fatalf("list sources: %+v %v", sources, err)
+	}
+	stale := sources[0]
+	stale.AccessedAt = time.Now().Add(-31 * 24 * time.Hour)
+	if err := m.Advanced().UpdateFact("a", stale); err != nil {
+		t.Fatal(err)
+	}
+
 	label := "unverified"
-	f, err := m.RememberWithOptions(context.Background(), "a", "final atomic label", memory.WriteOptions{Confidence: &label})
+	f, err := m.RememberWithOptions(ctx, "a", "final atomic label", memory.WriteOptions{Confidence: &label})
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-reported:
-		if !errors.Is(err, memory.ErrInvalidProposal) {
-			t.Fatalf("unexpected consolidation error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("new high-level write failed to trigger consolidation")
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case <-requests:
-	default:
-		t.Fatal("consolidation never reached configured model")
+	reopened, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	facts, _ := m.Advanced().List("a")
+	defer reopened.Close()
+	facts, err := reopened.Advanced().List("a")
+	if err != nil || len(facts) != 3 {
+		t.Fatalf("maintenance must preserve all three facts: %+v %v", facts, err)
+	}
+	var maintained, committed bool
 	for _, stored := range facts {
+		if stored.IsSuperseded() {
+			t.Fatalf("maintenance retired %s", stored.ID)
+		}
+		if stored.ID == stale.ID {
+			maintained = stored.Weight > 0 && stored.Weight < stale.Weight
+		}
 		if stored.ID == f.ID {
-			if stored.Confidence != label {
-				t.Fatalf("consolidation restored transient confidence: %+v", stored)
-			}
-			return
+			committed = stored.Confidence == label
 		}
 	}
-	t.Fatal("committed confidence write disappeared")
+	if !maintained || !committed || requests.Load() != 0 {
+		t.Fatalf("maintenance=%t committed confidence=%t provider requests=%d", maintained, committed, requests.Load())
+	}
 }
 
 func TestMemoryConfidenceOptionsRejectNoOpReceipt(t *testing.T) {

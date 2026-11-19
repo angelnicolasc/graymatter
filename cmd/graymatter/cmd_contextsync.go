@@ -143,8 +143,7 @@ func resolveContextFile(explicit string) string {
 }
 
 // projectFacts gathers candidates (one agent or the whole store), selects
-// under the budget and renders the full block. List returns tombstoned facts
-// too; Select filters them out.
+// injectable facts under the budget and renders the full block.
 func projectFacts(s cliStore, agentFilter string, budget int) (string, contextblock.Stats, error) {
 	agents := []string{agentFilter}
 	if agentFilter == "" {
@@ -269,4 +268,3 @@ func runContextCheck(cmd *cobra.Command, path string) error {
 	}
 	return nil
 }
-

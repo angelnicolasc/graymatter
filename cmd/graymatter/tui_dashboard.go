@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
 )
 
@@ -30,7 +31,8 @@ type agentAgg struct {
 }
 
 type dashboardData struct {
-	Loaded bool
+	Loaded          bool
+	MaintenanceMode string
 
 	// Err records that the store could not be read. Without it every figure
 	// below defaults to zero, and a dashboard of zeros is indistinguishable
@@ -79,6 +81,23 @@ func dashboardTick() tea.Cmd {
 	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
 		return dashboardTickMsg{}
 	})
+}
+
+// storeMaintenanceMode reports the connected owner's effective mode without
+// opening another connection or repeating the dashboard's fact scan.
+func storeMaintenanceMode(store cliStore) string {
+	switch s := store.(type) {
+	case *directStore, *demoTUIStore:
+		return daemon.MaintenanceOnly
+	case daemonStore:
+		return s.MaintenanceMode()
+	case *reconnectingStore:
+		return storeMaintenanceMode(s.snapshot())
+	case *readOnlyTUIStore:
+		return storeMaintenanceMode(s.cliStore)
+	default:
+		return ""
+	}
 }
 
 // loadDashboard builds a dashboardData snapshot from the store. It iterates
@@ -199,6 +218,7 @@ func (m *tuiModel) loadDashboard() tea.Cmd {
 			d.Tokens = ts
 		}
 
+		d.MaintenanceMode = storeMaintenanceMode(store)
 		return dashboardLoadedMsg{d, generation}
 	}
 }

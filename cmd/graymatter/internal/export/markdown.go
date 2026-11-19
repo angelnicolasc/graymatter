@@ -27,14 +27,23 @@ func (e *MarkdownExporter) Export(facts []memory.Fact, outDir string) error {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("# %s\n\n", agentID))
 		sb.WriteString(fmt.Sprintf("_%d facts_\n\n", len(agentFacts)))
+		sb.WriteString("_Lineage scope · fact projections. Retained evidence is available in the complete JSON audit export._\n\n")
 		sb.WriteString("---\n\n")
 		for _, f := range agentFacts {
 			sb.WriteString(fmt.Sprintf("## %s\n\n", f.CreatedAt.Format("2006-01-02 15:04:05")))
 			sb.WriteString(f.Text + "\n\n")
 			sb.WriteString(fmt.Sprintf(
-				"_weight: %.3f · accessed: %d times_\n\n---\n\n",
+				"_weight: %.3f · accessed: %d times_\n\n",
 				f.Weight, f.AccessCount,
 			))
+			writeFactLineage(&sb, "", f.LineageProjection)
+			if err := writeFactSubjects(&sb, f.Subjects); err != nil {
+				return err
+			}
+			if err := writeFactCitation(&sb, f); err != nil {
+				return err
+			}
+			sb.WriteString("\n---\n\n")
 		}
 		name := sanitiseFilename(agentID) + ".md"
 		if err := os.WriteFile(filepath.Join(outDir, name), []byte(sb.String()), 0o644); err != nil {

@@ -17,7 +17,7 @@ import (
 
 var bucketSessions = []byte("sessions")
 
-// ErrNoCheckpoint means the agent has no saved checkpoints. Storage and
+// ErrNoCheckpoint means the agent has no resumable checkpoint. Storage and
 // decoding failures do not match this sentinel.
 var ErrNoCheckpoint = errors.New("no checkpoints")
 
@@ -110,16 +110,37 @@ func List(db *bolt.DB, agentID string) ([]Checkpoint, error) {
 	return checkpoints, nil
 }
 
-// Latest returns the most recently created checkpoint for agentID.
+// Latest returns the first resumable checkpoint in List order for agentID.
+// Historical hook markers remain visible in List and Load.
 func Latest(db *bolt.DB, agentID string) (*Checkpoint, error) {
 	cps, err := List(db, agentID)
 	if err != nil {
 		return nil, err
 	}
-	if len(cps) == 0 {
-		return nil, fmt.Errorf("%w for agent %q", ErrNoCheckpoint, agentID)
+	for i := range cps {
+		if !isHookMarker(cps[i]) {
+			return &cps[i], nil
+		}
 	}
-	return &cps[0], nil
+	return nil, fmt.Errorf("%w for agent %q", ErrNoCheckpoint, agentID)
+}
+
+// isHookMarker recognizes only the shape saved by the PreCompact and
+// SessionEnd hooks. Hook provenance alone says nothing about recoverability.
+func isHookMarker(cp Checkpoint) bool {
+	if len(cp.Messages) != 0 || len(cp.State) != 3 || len(cp.Metadata) != 3 {
+		return false
+	}
+	if cp.State["source"] != "hooks" || cp.Metadata["source"] != "hooks" {
+		return false
+	}
+	event := cp.Metadata["event"]
+	if (event != "pre-compact" && event != "session-end") || cp.State["event"] != event {
+		return false
+	}
+	stateSessionID, stateOK := cp.State["session_id"].(string)
+	metadataSessionID, metadataOK := cp.Metadata["session_id"]
+	return stateOK && metadataOK && stateSessionID == metadataSessionID
 }
 
 // Delete removes a checkpoint permanently.

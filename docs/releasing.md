@@ -14,7 +14,11 @@ move, or recreate one to repair a release.
    published module free of `replace` directives.
 3. Run `python .github/scripts/release_check.py --tag vX.Y.Z` and
    `python -m unittest discover -s .github/scripts -p 'test_*.py'`.
-4. Open the release preparation PR. CI and Maintenance smoke must pass,
+4. To check a candidate before opening the PR, bring its branch up to date with
+   `main` and push it. In GitHub Actions, run **CI** and **Maintenance smoke**
+   on that branch. Verify that both runs tested the candidate commit and passed.
+   If the candidate or base changes, validate the new combination.
+5. Open the release preparation PR. CI and Maintenance smoke must pass,
    including the five GoReleaser snapshot targets and the Homebrew, Scoop and
    Nix manifests. Complete any real-client gates required by the features
    being released.

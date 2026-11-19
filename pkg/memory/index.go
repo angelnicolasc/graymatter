@@ -57,7 +57,7 @@ var (
 
 // indexVersion is bumped whenever the on-disk layout or the tokenisation
 // contract changes. A mismatch rebuilds rather than misreads.
-const indexVersion = 3
+const indexVersion = 4
 
 // postingSep separates a term from a fact ID inside the terms bucket. NUL
 // sorts below every byte a token can contain, so a prefix scan of
@@ -165,7 +165,7 @@ func indexTerms(f Fact, doStem bool) (map[string]int, int) {
 	if f.IsSuperseded() || f.Kind == KindAlias {
 		return nil, 0
 	}
-	toks := tokenizeStem(f.Text, doStem)
+	toks := tokenizeStem(factLexicalText(f), doStem)
 	if len(toks) == 0 {
 		return nil, 0
 	}
@@ -183,6 +183,9 @@ func indexTerms(f Fact, doStem bool) (map[string]int, int) {
 // caller's so the index can never be durable while the fact is not, or
 // the reverse.
 func idxAddFact(tx *bolt.Tx, f Fact, doStem bool) error {
+	if err := hydrateCitationTx(tx, &f); err != nil {
+		return err
+	}
 	rb, err := idxBucket(tx, bucketIdxRecency, f.AgentID)
 	if err != nil {
 		return err
@@ -214,6 +217,9 @@ func idxAddFact(tx *bolt.Tx, f Fact, doStem bool) error {
 // are derived from the stored text, so a caller that hands over a rewritten
 // fact would strand postings under the old terms.
 func idxRemoveFact(tx *bolt.Tx, f Fact, doStem bool) error {
+	if err := hydrateCitationTx(tx, &f); err != nil {
+		return err
+	}
 	if rb := idxBucketRO(tx, bucketIdxRecency, f.AgentID); rb != nil {
 		if err := rb.Delete(recencyKey(f.CreatedAt, f.ID)); err != nil {
 			return err
@@ -395,7 +401,7 @@ func idxReadState(tx *bolt.Tx, agentID string) (indexState, bool) {
 // maintenance hooks' back.
 func (s *Store) idxRebuild(agentID string) error {
 	doStem := s.cfg.StemKeywords
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.updateSubjectReadMetadata(func(tx *bolt.Tx) error {
 		for _, root := range [][]byte{bucketIdxTerms, bucketIdxRecency} {
 			parent, err := tx.CreateBucketIfNotExists(root)
 			if err != nil {
@@ -640,6 +646,10 @@ func (s *Store) idxLoadFacts(tx *bolt.Tx, agentID string, ids map[string]bool) (
 
 func (s *Store) idxLoadFactsContext(ctx context.Context, tx *bolt.Tx, agentID string, ids map[string]bool) (map[string]Fact, error) {
 	out := make(map[string]Fact, len(ids))
+	view := s.subjectReadView(tx, agentID)
+	if view.indexErr != nil {
+		return nil, view.indexErr
+	}
 	fb := tx.Bucket(bucketFacts)
 	if fb == nil {
 		return out, nil
@@ -652,13 +662,17 @@ func (s *Store) idxLoadFactsContext(ctx context.Context, tx *bolt.Tx, agentID st
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		raw := b.Get([]byte(id))
+		key := []byte(id)
+		raw := b.Get(key)
 		if raw == nil {
 			continue
 		}
 		f, err := unmarshalFactLite(raw)
 		if err != nil {
 			return nil, fmt.Errorf("index load %s: %w", id, err)
+		}
+		if err := view.hydrateRankedFact(tx, agentID, key, &f); err != nil {
+			return nil, err
 		}
 		out[id] = f
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,9 +19,7 @@ import (
 // terminal had no way to record that a fact was replaced. The consequence was
 // measurable: with no edge to follow, Recall ranks three versions of the same
 // value as three independent facts, and the caller cannot tell which one
-// holds. Both commands are the exact CLI mirror of the MCP actions, down to
-// the write ordering, so a store curated from the shell and one curated by an
-// agent end up in the same state.
+// holds. The CLI and MCP apply the same revision and retirement contracts.
 //
 // Matching a fact by its text is deliberately permissive: an exact match wins,
 // and otherwise a case-insensitive substring is accepted **only when it is
@@ -36,15 +35,13 @@ func reviseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "revise <agent-id> <old-fact> <new-fact>",
 		Aliases: []string{"update", "supersede"},
-		Short:   "Replace a fact with a corrected one, keeping the receipt",
+		Short:   "Replace a fact with a corrected one and mark the original as retired",
 		Long: `Record that a fact was superseded by a newer one.
 
-The replacement is written first, then the old fact is tombstoned with a
-pointer to it, so a failure part-way through can never leave the agent with a
-retired fact and nothing in its place. The old fact is not deleted: it stays
-in the store, stays visible to list, export and the TUI, and keeps its receipt
-(ADR-007). What changes is that Recall stops returning it from the next query
-onward, so the caller sees one answer instead of three.
+The replacement and all selected source retirements commit together. A changed
+source or failed write rolls back the revision. Recall excludes retired rows
+immediately. Ordinary pruning can remove unpinned retirement rows. The recorded
+source versions remain inspectable while the replacement owns their evidence.
 
 <old-fact> matches on exact text, or on a unique case-insensitive substring.
 Use --id to target a fact by its identifier when the text is ambiguous.`,
@@ -81,9 +78,9 @@ func forgetCmd() *cobra.Command {
 		Short: "Retire a fact that has no replacement",
 		Long: `Tombstone a fact with nothing to put in its place.
 
-Recall stops returning it immediately. Like revise, this is not a delete: the
-fact stays in the store with a receipt recording that an agent retired it, and
-ordinary decay collects it on the same curve as everything else.
+Recall stops returning it immediately. The fact remains in the store as a
+tombstone. Ordinary pruning can remove an unpinned tombstone once its weight
+drops below the threshold.
 
 <fact> matches on exact text, or on a unique case-insensitive substring.`,
 		Example: `  graymatter forget "backend" "deploys are frozen on Fridays"`,
@@ -188,49 +185,28 @@ func runRevise(ctx context.Context, agentID, oldText, newText, byID string, opti
 		return fmt.Errorf("that fact is already superseded: %q", victims[0].Text)
 	}
 
-	// Write the correction before retiring what it corrects — the same order
-	// the MCP handler uses, and for the same reason.
+	writer, ok := store.(rpc.ConfidenceWriter)
+	if !ok {
+		return errors.New("atomic revision is unavailable on this backend")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var replacementID string
-	var replacementConfidence string
-	_, newRevision := store.(rpc.ConfidenceWriter)
-	if writer, ok := store.(rpc.ConfidenceWriter); ok {
-		f, err := writer.ReviseFactsWithOptions(ctx, agentID, newText, opts, live...)
-		if err != nil {
-			if f.ID != "" {
-				return fmt.Errorf("replacement fact_id %s committed (confidence %s), revision failed: %w", f.ID, memory.EffectiveConfidence(f.Confidence), err)
-			}
-			return fmt.Errorf("write the corrected fact: %w", err)
+	replacement, err := writer.ReviseFactsWithOptions(ctx, agentID, newText, opts, live...)
+	if err != nil {
+		if replacement.ID != "" {
+			return fmt.Errorf("revision committed as fact_id %s (confidence %s). Follow-up error: %w",
+				replacement.ID, memory.EffectiveConfidence(replacement.Confidence), err)
 		}
-		replacementID, replacementConfidence = f.ID, f.Confidence
-	} else {
-		if opts.Confidence != nil {
-			return memory.ErrConfidenceUnsupported
-		}
-		writer, ok := store.(returningFactStore)
-		if !ok {
-			return fmt.Errorf("backend does not expose identity-preserving revision")
-		}
-		f, err := writer.PutReturningFact(ctx, agentID, newText)
-		if err != nil {
-			return fmt.Errorf("write the corrected fact: %w", err)
-		}
-		if f.ID == "" {
-			return fmt.Errorf("backend returned empty replacement identity")
-		}
-		replacementID = f.ID
+		return fmt.Errorf("revise fact: %w", err)
 	}
+	if replacement.ID == "" {
+		return errors.New("atomic revision returned no committed fact")
+	}
+	replacementID, replacementConfidence := replacement.ID, replacement.Confidence
 	retired := make([]string, 0, len(live))
-	for _, v := range live {
-		v.SupersededBy = replacementID
-		if !newRevision {
-			if err := store.UpdateFact(agentID, v); err != nil {
-				return fmt.Errorf("supersede the old fact: %w", err)
-			}
-		}
-		retired = append(retired, v.ID)
+	for _, victim := range live {
+		retired = append(retired, victim.ID)
 	}
 
 	if jsonOut {

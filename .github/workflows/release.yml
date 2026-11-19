@@ -31,7 +31,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache-dependency-path: |
             go.sum
             cmd/graymatter/go.sum
@@ -223,7 +223,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.11"
           cache: false
 
       # Both modules are warmed, not just the CLI: `go install` of the CLI

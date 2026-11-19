@@ -60,6 +60,8 @@ func (s *FactSummary) finish() {
 // index is consulted, built or repaired.
 func (s *Store) SummarizeFacts(ctx context.Context, agent string) (FactSummary, error) {
 	out := newFactSummary(agent)
+	count := 0
+	out.All.LiveEvidenceCount, out.Live.LiveEvidenceCount = &count, &count
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
@@ -72,6 +74,7 @@ func (s *Store) SummarizeFacts(ctx context.Context, agent string) (FactSummary, 
 		if bucket == nil {
 			return nil
 		}
+		citations, _ := evidenceNamespace(tx, bucketCitations, agent, false)
 		return bucket.ForEach(func(key, raw []byte) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -89,6 +92,21 @@ func (s *Store) SummarizeFacts(ctx context.Context, agent string) (FactSummary, 
 				return fmt.Errorf("cannot decode fact %q in raw facts for namespace %q: %w", key, agent, err)
 			}
 			out.add(row.Weight, row.CreatedAt, row.SupersededBy != "", row.AccessCount)
+			if citations != nil && row.SupersededBy == "" {
+				f, err := unmarshalFactLite(raw)
+				if err != nil {
+					return err
+				}
+				if f.ID != string(key) || f.AgentID != agent {
+					return fmt.Errorf("citation fact identity mismatch")
+				}
+				if err := hydrateCitationTx(tx, &f); err != nil {
+					return err
+				}
+				if f.Evidence != nil {
+					count++
+				}
+			}
 			return nil
 		})
 	})

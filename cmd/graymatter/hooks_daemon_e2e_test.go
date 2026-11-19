@@ -14,6 +14,8 @@ import (
 	"time"
 
 	graymatter "github.com/angelnicolasc/graymatter"
+	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/daemon"
+	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
 // The daemon-mode end-to-end: every other hooks test runs against the direct
@@ -25,7 +27,7 @@ import (
 //	user-prompt     → injects a recall; remember: saves deterministically
 //	pre-compact     → checkpoints silently
 //	session-end     → checkpoints AND spawns a detached consolidate whose
-//	                  effect is observable: a 0.005-weight fact is pruned
+//	                  effect is observable: an aged, 0.005-weight fact is pruned
 //
 // plus `hooks doctor` green, and memory_search(explain) over real MCP stdio.
 
@@ -64,6 +66,47 @@ func hookStdin(dir, prompt string) string {
 	return fmt.Sprintf(`{"session_id":"e2e","cwd":%q,"hook_event_name":"SessionEnd"}`, dir)
 }
 
+type detachedPruneStore interface {
+	List(string) ([]memory.Fact, error)
+	UpdateFact(string, memory.Fact) error
+}
+
+func ageDetachedPruneFact(t *testing.T, store detachedPruneStore, agent, text string) string {
+	t.Helper()
+	facts, err := store.List(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range facts {
+		if fact.Text != text {
+			continue
+		}
+		old := time.Now().UTC().Add(-201 * 24 * time.Hour)
+		fact.CreatedAt, fact.AccessedAt = old, old
+		fact.Weight = 0.005
+		if err := store.UpdateFact(agent, fact); err != nil {
+			t.Fatal(err)
+		}
+		return fact.ID
+	}
+	t.Fatalf("prune fixture fact %q was not stored for %q", text, agent)
+	return ""
+}
+
+func detachedPruneFactExists(t *testing.T, store detachedPruneStore, agent, id string) bool {
+	t.Helper()
+	facts, err := store.List(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range facts {
+		if fact.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 	bin := buildE2EBinary(t)
 
@@ -74,9 +117,8 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 	}
 	storeDir := filepath.Join(proj, ".graymatter")
 
-	// Seed through the library, then close: the daemon must own the store
-	// from here on. The prune marker (weight 0.005 < the 0.01 floor) gives
-	// the detached consolidate child an observable effect.
+	const pruneMarker = "ancient fact waiting to be pruned"
+	// Seed through the library, then close so the daemon can own the store.
 	func() {
 		cfg := graymatter.DefaultConfig()
 		cfg.DataDir = storeDir
@@ -102,24 +144,8 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 		if err := mem.RememberShared(ctx, "production deploys freeze on fridays; wait until monday"); err != nil {
 			t.Fatal(err)
 		}
-		if err := mem.Remember(ctx, agent, "ancient fact waiting to be pruned"); err != nil {
+		if err := mem.Remember(ctx, agent, pruneMarker); err != nil {
 			t.Fatal(err)
-		}
-		adv := mem.Advanced()
-		if adv == nil {
-			t.Fatal("store not initialised")
-		}
-		facts, err := adv.List(agent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range facts {
-			if f.Text == "ancient fact waiting to be pruned" {
-				f.Weight = 0.005
-				if err := adv.UpdateFact(agent, f); err != nil {
-					t.Fatal(err)
-				}
-			}
 		}
 	}()
 
@@ -175,6 +201,19 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 		t.Fatalf("pre-compact: exit=%d out=%q (must be silent)", code, out)
 	}
 
+	// The earlier hooks can refresh access times. Age the marker after the
+	// last recall so both its age and stored weight make it eligible.
+	client, err := daemon.ConnectNoSpawn(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	const agent = "proj-e2e"
+	markerID := ageDetachedPruneFact(t, client, agent, pruneMarker)
+	if !detachedPruneFactExists(t, client, agent, markerID) {
+		t.Fatal("prune fixture fact missing before session-end")
+	}
+
 	// 6. session-end checkpoints and spawns consolidation detached
 	start := time.Now()
 	out, code = runE2E(t, bin, proj, hookStdin(proj, ""), "hooks", "run", "session-end")
@@ -186,26 +225,13 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 		t.Errorf("session-end took %v; the detached design exists so it returns fast", elapsed)
 	}
 
-	// The consolidate child runs through the daemon and prunes the marker
-	// fact — the empirical proof the detached spawn landed. Observe through
-	// the daemon (a CLI recall), not by opening bbolt directly: on Windows
-	// the daemon's write lock excludes readers, so a direct open would time
-	// out and misreport a successful prune as a missing one. With
-	// MinRelevance=0 a recall always returns top-k by recency — even for a
-	// query matching nothing — so the check is the ABSENCE of the fact's
-	// text, never the "No memories found" notice.
-	prunedWithin := func() bool {
-		out, code := runE2E(t, bin, proj, "", "--dir", storeDir, "recall", "proj-e2e", "ancient fact waiting to be pruned", "--top-k", "8", "--quiet")
-		return code == 0 && !strings.Contains(out, "ancient fact waiting to be pruned")
-	}
+	// List through the daemon to observe physical removal without updating
+	// AccessedAt. The daemon keeps exclusive access to bbolt on Windows.
 	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if prunedWithin() {
-			break
-		}
+	for time.Now().Before(deadline) && detachedPruneFactExists(t, client, agent, markerID) {
 		time.Sleep(250 * time.Millisecond)
 	}
-	if !prunedWithin() {
+	if detachedPruneFactExists(t, client, agent, markerID) {
 		// The hook degrades silently by contract; the failure receipt lives
 		// in hooks.log. Dump it and the daemon log so the failure is
 		// diagnosable from the test output alone.
@@ -221,9 +247,7 @@ func TestHooksDaemonE2E_FullLifecycle(t *testing.T) {
 			}
 			t.Logf("daemon.log (tail):\n%s", strings.Join(lines, "\n"))
 		}
-		out, _ := runE2E(t, bin, proj, "", "--dir", storeDir, "recall", "proj-e2e", "ancient fact", "--top-k", "5")
-		t.Logf("recall still returns: %s", out)
-		t.Error("the detached consolidate child never pruned the 0.005-weight fact — the spawn did not land")
+		t.Errorf("detached maintenance did not prune eligible fact %q (%s)", pruneMarker, markerID)
 	}
 
 	// 7. both hook checkpoints exist
