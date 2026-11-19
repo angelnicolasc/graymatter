@@ -11,34 +11,51 @@
   <a href="https://pkg.go.dev/github.com/angelnicolasc/graymatter"><img src="https://pkg.go.dev/badge/github.com/angelnicolasc/graymatter.svg" alt="Go Reference"></a>
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
   <a href="https://glama.ai/mcp/servers/angelnicolasc/graymatter"><img src="https://glama.ai/mcp/servers/angelnicolasc/graymatter/badges/score.svg" alt="Glama MCP server score"></a>
-  <a href="https://github.com/angelnicolasc/graymatter/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-core%2090%25%20%C2%B7%20cli%2081%25-brightgreen" alt="Coverage (multi-platform union): core 90%, CLI 81%"></a>
+  <a href="https://github.com/angelnicolasc/graymatter/actions/runs/44426388996/job/135238443022"><img src="https://img.shields.io/badge/coverage-core%2082.5%25%20%C2%B7%20cli%2080.8%25-brightgreen" alt="Measured cross-platform statement coverage, core 82.5% and CLI 80.8%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
 </p>
 <div align="center">
 <br />
-
-<strong>Persistent, searchable memory for AI agents across sessions.</strong>
+<strong>Persistent memory for AI agents, in one local binary.</strong>
 <br /><br />
-GrayMatter keeps facts, their sources, and a knowledge graph in a local store.
-<br /><br />
-Run the MCP server with Claude Code, Cursor, Codex, OpenCode, or another MCP client.
-You can also embed the Go library directly. Storage and keyword recall work offline.
-
+When a release moves from Friday to Monday, your next session can pick up the new date and the decision behind it.
 <br />
+Run GrayMatter with Claude Code, Codex, Cursor, or another MCP client, or embed it in Go.
+<br /><br />
+<a href="#quick-start">Try the offline demo</a> · <a href="#library-usage">Use the Go library</a>
 </div>
 
 ---
 
 ## Why
 
-When a deployment window changes, the next agent needs the new date and the decision that established it. With GrayMatter’s optional `core` profile, the agent can replace the date, save the source and its exact wording, and retrieve them in a later session.
+<p align="center">
+  <strong>90% fewer context tokens per query</strong> after 100 sessions compared with full history.<br>
+  <strong>8.4% lower inference cost per task</strong> with empty memory and <strong>10.4% lower</strong> with 1,000 prior facts.<br>
+  <strong>Zero retired values in the top eight</strong> after explicit revisions.
+</p>
 
-Compared with an organized notes folder, GrayMatter reduced mean inference cost per task by **8.4% with empty memory** and **10.4% with 1,000 prior facts** in a three-session study. GrayMatter solved **50 of 113 tasks**, compared with **44** for the folder.
+<p align="center">
+  <a href="#token-efficiency"><img src=".github/assets/token-reduction-readme.png" width="800" alt="At 1, 10, 30, and 100 sessions, selective recall reduced context tokens per query by 0%, 12%, 71%, and 90% compared with full history."></a>
+  <br>About 670 tokens with selective recall, compared with 6,960 for the full history.
+</p>
 
-![Mean inference cost was lower in all eight task families at both memory sizes. Across the 113 paired tasks, 94 cost less with GrayMatter.](.github/assets/graymatter-inference-by-family.png)
+<p align="center">
+  <a href="benchmarks/agent_memory/RESULTS.md"><img src=".github/assets/graymatter-inference-by-family.png" width="800" alt="GrayMatter cost less on 94 of 113 paired tasks. Mean inference cost was lower in all eight task families at both starting memory sizes."></a>
+  <br>GrayMatter’s optional <code>core</code> profile cost less than an organized notes folder on <strong>94 of 113 paired tasks</strong>.<br>
+  Each task spanned three sessions with the same model and limits. GrayMatter solved <strong>50 tasks</strong>, compared with <strong>44</strong> for the folder.
+</p>
 
-[Study design, costs, and completion rates](benchmarks/agent_memory/RESULTS.md)
+<p align="center">
+  <a href="benchmarks/revision_currency/RESULTS.md"><img src=".github/assets/graymatter-revisions-and-citations.png" width="800" alt="Explicit revisions reduced retired appearances from 35 to zero. A separate MCP check showed that core retained the source and exact quote with the fact."></a>
+  <br>Saving corrections as independent facts surfaced old versions 35 times in 35 queries.<br>
+  With <code>core</code>, an agent can replace the current fact for a subject and keep the source’s exact words.
+</p>
+
+<p align="center">
+  <a href="#token-efficiency">Context tokens</a> · <a href="benchmarks/agent_memory/RESULTS.md">Inference cost and task completion</a> · <a href="#what-happens-when-a-fact-changes">Revisions and citations</a>
+</p>
 
 ---
 
@@ -313,10 +330,6 @@ keyword embedder, no LLM required:
 | 30       | ~1,880 tokens | ~550 tokens | 71% |
 | 100      | ~6,960 tokens | ~670 tokens | **90%** |
 
-<p align="center">
-  <img src=".github/assets/token-reduction.png" alt="At 100 sessions, GrayMatter injects about 670 context tokens per query, compared with 6,960 for full history." width="800">
-</p>
-
 ### Does it return the *right* facts?
 
 Tokens are only half the question. A second benchmark checks whether the
@@ -336,8 +349,6 @@ and retrieval tables above against their benchmark outputs. [Retrieval methodolo
 ### What happens when a fact changes?
 
 A separate keyword-retrieval benchmark made the same 35 queries against 600 facts. Storing corrections as independent facts let retired values appear **35 times** in the top eight. Recording explicit revisions brought that count to **zero**. The current value both reached the top eight and outranked every retired version in **25 of 35** queries, up from **8 of 35**.
-
-![Seventeen more queries returned the current value ahead of every retired version after explicit revisions. A separate MCP check shows that a valid write with text, source, and quote stores the fact text in full and retains the source and exact quote in core.](.github/assets/graymatter-revisions-and-citations.png)
 
 [Revision benchmark and per-group results](benchmarks/revision_currency/RESULTS.md) · [How citations are stored and retrieved](docs/citation-evidence.md)
 
