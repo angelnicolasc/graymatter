@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
 )
 
@@ -82,6 +83,18 @@ type Config struct {
 	// OpenAIModel overrides the OpenAI embedding model.
 	// Default: value of GRAYMATTER_OPENAI_MODEL env var, or "text-embedding-3-small"
 	OpenAIModel string
+
+	// AnthropicBaseURL is the directory before v1/messages. Empty uses
+	// ANTHROPIC_BASE_URL or https://api.anthropic.com.
+	AnthropicBaseURL string
+
+	// OpenAIBaseURL is the directory before embeddings. Empty uses
+	// OPENAI_BASE_URL or https://api.openai.com/v1.
+	OpenAIBaseURL string
+
+	// VoyageBaseURL is the directory before embeddings. Empty uses
+	// VOYAGE_BASE_URL or https://api.voyageai.com/v1.
+	VoyageBaseURL string
 
 	// ConsolidateLLM retains the configured compaction provider for compatibility.
 	// Automatic generative compaction is disabled for every value.
@@ -241,6 +254,9 @@ func DefaultConfig() Config {
 		VoyageAPIKey:            os.Getenv("VOYAGE_API_KEY"),
 		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
 		OpenAIModel:             envOrDefault("GRAYMATTER_OPENAI_MODEL", "text-embedding-3-small"),
+		AnthropicBaseURL:        providerurl.Select("", providerurl.AnthropicEnv, providerurl.AnthropicDefault),
+		OpenAIBaseURL:           providerurl.Select("", providerurl.OpenAIEnv, providerurl.OpenAIDefault),
+		VoyageBaseURL:           providerurl.Select("", providerurl.VoyageEnv, providerurl.VoyageDefault),
 		ConsolidateLLM:          resolveConsolidateLLM(),
 		ConsolidateModel:        "claude-haiku-4-5-20251001",
 		ConsolidateThreshold:    20,
@@ -314,7 +330,11 @@ func envBoolDefault(key string, def bool) bool {
 // Config implements memory.ConsolidateConfig so it can be passed directly
 // to Store.Consolidate / Store.MaybeConsolidate without an adapter.
 
-func (c Config) GetAnthropicAPIKey() string        { return c.AnthropicAPIKey }
+func (c Config) GetAnthropicAPIKey() string { return c.AnthropicAPIKey }
+
+// GetAnthropicBaseURL supplies the optional per-config Messages destination.
+func (c Config) GetAnthropicBaseURL() string { return c.AnthropicBaseURL }
+
 func (c Config) GetConsolidateLLM() string         { return c.ConsolidateLLM }
 func (c Config) GetConsolidateModel() string       { return c.ConsolidateModel }
 func (c Config) GetOllamaURL() string              { return c.OllamaURL }

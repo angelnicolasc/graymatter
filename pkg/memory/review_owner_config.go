@@ -3,6 +3,8 @@ package memory
 import (
 	"fmt"
 	"strings"
+
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 // ReviewOptionsFromConfig selects provider credentials and defaults from the
@@ -16,6 +18,11 @@ func ReviewOptionsFromConfig(cfg ConsolidateConfig, provider, model string) (Rev
 	switch options.Provider {
 	case "anthropic":
 		options.APIKey = cfg.GetAnthropicAPIKey()
+		base, err := providerurl.Parse("anthropic", anthropicBaseURL(cfg))
+		if err != nil {
+			return ReviewAnalyzeOptions{}, err
+		}
+		options.Endpoint = providerurl.Endpoint(base, "v1/messages")
 		if options.Model == "" {
 			options.Model = cfg.GetConsolidateModel()
 		}

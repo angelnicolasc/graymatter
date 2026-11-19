@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"math/rand"
 	"os"
@@ -15,11 +16,11 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/oklog/ulid/v2"
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
+	"github.com/angelnicolasc/graymatter/internal/anthropicclient"
 )
 
 var bucketHarness = []byte("harness_sessions")
@@ -119,32 +120,20 @@ type resumeStore interface {
 // On total failure the run state is written to <DataDir>/failed/<sessionID>.json
 // and an error is returned. Run never calls panic() or os.Exit().
 func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
-	// Apply defaults.
-	if cfg.DataDir == "" {
-		cfg.DataDir = ".graymatter"
-	}
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = 3
-	}
-	if cfg.Stdout == nil {
-		cfg.Stdout = os.Stdout
-	}
-	if cfg.Stderr == nil {
-		cfg.Stderr = os.Stderr
-	}
-
-	// Parse agent file.
-	def, err := ParseAgentFile(cfg.AgentFile, cfg.Inputs)
+	prepared, err := Prepare(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("parse agent file: %w", err)
+		return nil, err
 	}
+	return prepared.Run(ctx, cfg.Store)
+}
 
-	// Obtain a Store. In production the caller injects the daemon client so
-	// the run never fights the bbolt lock; tests and --no-daemon fall back to
-	// an in-process open here.
-	store := cfg.Store
+// Run executes the prepared agent, opening a local store if none was supplied.
+func (p *PreparedRun) Run(ctx context.Context, store Store) (*RunResult, error) {
+	cfg, def := p.cfg, p.def
+	// The CLI supplies the daemon-backed store. Library callers can use a
+	// local store that uses the same endpoint captured during preparation.
 	if store == nil {
-		ls, err := OpenLocalStore(cfg.DataDir, cfg.APIKey)
+		ls, err := openLocalStore(cfg.DataDir, cfg.APIKey, p.baseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +196,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		PID:       cfg.PID,
 		PIDStart:  processStart,
 		LogFile:   cfg.LogFile,
-		Inputs:    cfg.Inputs,
+		Inputs:    maps.Clone(cfg.Inputs),
 	}
 	if err := store.SessionSave(hs); err != nil {
 		return nil, fmt.Errorf("save harness session: %w", err)
@@ -259,16 +248,15 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		}
 
 		var msg *anthropic.Message
+		var err error
 		if cfg.llmDoer != nil {
 			msg, err = cfg.llmDoer(ctx, params)
 		} else {
-			var client anthropic.Client
-			if apiKey != "" {
-				client = anthropic.NewClient(option.WithAPIKey(apiKey))
-			} else {
-				client = anthropic.NewClient()
+			messages, clientErr := anthropicclient.NewMessages(p.baseURL, apiKey)
+			err = clientErr
+			if err == nil {
+				msg, err = messages.New(ctx, params)
 			}
-			msg, err = client.Messages.New(ctx, params)
 		}
 
 		if err != nil {

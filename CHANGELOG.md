@@ -8,6 +8,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable provider endpoints.** Set base URLs for Anthropic Messages,
+  OpenAI embeddings, and Voyage embeddings using Go configuration or
+  environment variables. A running daemon uses its startup configuration.
+
 ### Security
 
 - Build CI and release binaries with Go 1.26.11, which includes standard-library fixes for [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) in `crypto/x509` and [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) in `net/http`.

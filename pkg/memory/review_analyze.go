@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 const (
@@ -105,6 +107,7 @@ func (s *Store) ReviewAnalyze(ctx context.Context, namespace string, opts Review
 
 func reviewEndpoint(opts ReviewAnalyzeOptions) (string, error) {
 	base := opts.Endpoint
+	var endpoint *url.URL
 	var path string
 	switch opts.Provider {
 	case "anthropic":
@@ -112,27 +115,32 @@ func reviewEndpoint(opts ReviewAnalyzeOptions) (string, error) {
 			return "", errors.New("Anthropic review requires an API key")
 		}
 		if base == "" {
-			base = "https://api.anthropic.com"
+			base = anthropicBaseURL(nil)
 		}
-		path = "/v1/messages"
+		parsed, err := providerurl.Parse("anthropic", base)
+		if err != nil {
+			return "", err
+		}
+		endpoint, path = parsed, "/v1/messages"
 	case "ollama":
 		if base == "" {
 			base = "http://localhost:11434"
 		}
-		path = "/api/generate"
+		parsed, err := url.Parse(base)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+			return "", errors.New("review provider endpoint must be an HTTP(S) URL without credentials, query, or fragment")
+		}
+		endpoint, path = parsed, "/api/generate"
 	default:
 		return "", errors.New("review provider must be anthropic or ollama")
 	}
-	endpoint, err := url.Parse(base)
-	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
-		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" {
-		return "", errors.New("review provider endpoint must be an HTTP(S) URL without credentials, query, or fragment")
+	escaped := strings.TrimRight(endpoint.EscapedPath(), "/")
+	if !strings.HasSuffix(escaped, path) {
+		escaped += path
 	}
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/")
-	if !strings.HasSuffix(endpoint.Path, path) {
-		endpoint.Path += path
-	}
-	endpoint.RawPath = ""
+	endpoint.RawPath = escaped
+	endpoint.Path, _ = url.PathUnescape(escaped)
 	return endpoint.String(), nil
 }
 
@@ -217,15 +225,15 @@ func requestReview(ctx context.Context, opts ReviewAnalyzeOptions, endpoint stri
 		Timeout:       reviewHTTPTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	resp, err := client.Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request %s review: %w", opts.Provider, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("%s review provider returned HTTP %d", opts.Provider, resp.StatusCode)
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("%s review provider returned HTTP %d", opts.Provider, response.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, ReviewMaxResponseBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(response.Body, ReviewMaxResponseBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read %s review response: %w", opts.Provider, err)
 	}

@@ -193,7 +193,7 @@ func openDirectStoreAt(dir string) (*directStore, error) {
 	}
 	ds := &directStore{mem: mem, store: store}
 	if os.Getenv("GRAYMATTER_KG") == "1" {
-		if err := maybeWireKG(store); err != nil {
+		if err := maybeWireKG(store, mem.Config()); err != nil {
 			_ = mem.Close()
 			return nil, err
 		}
@@ -207,13 +207,13 @@ func openDirectStoreAt(dir string) (*directStore, error) {
 // advanced store: the graph opens on the same bbolt handle and the regex
 // extractor feeds consolidation. Opt-in via GRAYMATTER_KG=1 (direct mode) or
 // daemon --kg.
-func maybeWireKG(adv graymatter.AdvancedStore) error {
+func maybeWireKG(adv graymatter.AdvancedStore, cfg graymatter.Config) error {
 	g, err := kg.Open(adv.DB())
 	if err != nil {
 		return fmt.Errorf("knowledge graph: %w", err)
 	}
 	graphAdapter := kg.NewGraphAdapter(g)
-	extractor := kg.NewExtractorAdapter(kg.ExtractorFromEnv())
+	extractor := kg.NewExtractorAdapter(kg.ExtractorForStore(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL))
 	adv.SetKG(graphAdapter, extractor)
 	return nil
 }

@@ -72,6 +72,12 @@ mem, err := graymatter.NewWithConfig(graymatter.Config{
 maintenance. They apply decay and pruning and run configured graph
 extraction. Generative compaction is disabled for both Anthropic and Ollama.
 
+Set `cfg.AnthropicBaseURL`, `cfg.OpenAIBaseURL`, or `cfg.VoyageBaseURL` before
+`NewWithConfig` to use a compatible gateway. Explicit fields take precedence
+over `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, and `VOYAGE_BASE_URL`. An Anthropic
+base is the directory before `v1/messages`. OpenAI and Voyage bases are the
+directory before `embeddings`, such as `https://gateway.example/tenant/v1`.
+
 ## Metrics and hooks
 
 Library users get `OnRecall`, `OnPut`, and `OnVectorIndexError` hooks plus a

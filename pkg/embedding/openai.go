@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
+
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 const (
-	openaiEmbedURL = "https://api.openai.com/v1/embeddings"
-	openaiModel    = "text-embedding-3-small"
-	openaiDims     = 1536
+	openaiModel = "text-embedding-3-small"
+	openaiDims  = 1536
 )
 
 // OpenAIProvider calls the OpenAI Embeddings API (text-embedding-3-small by default).
@@ -21,7 +21,9 @@ const (
 type OpenAIProvider struct {
 	apiKey     string
 	model      string
-	httpClient *http.Client
+	endpoint   string
+	httpClient httpDoer
+	initErr    error
 	mu         sync.Mutex
 	cache      map[string][]float32
 	cacheOrder []string
@@ -34,16 +36,21 @@ func NewOpenAI(cfg Config) *OpenAIProvider {
 	if model == "" {
 		model = openaiModel
 	}
+	base := providerurl.Select(cfg.OpenAIBaseURL, providerurl.OpenAIEnv, providerurl.OpenAIDefault)
+	endpoint, client, err := newEmbeddingHTTPClient("openai", base)
 	return &OpenAIProvider{
-		apiKey: cfg.OpenAIAPIKey,
-		model:  model,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		apiKey:     cfg.OpenAIAPIKey,
+		model:      model,
+		endpoint:   endpoint,
+		httpClient: client,
+		initErr:    err,
 		cache:      make(map[string][]float32, cacheSize),
 		cacheOrder: make([]string, 0, cacheSize),
 	}
 }
+
+// InitializationError reports an invalid effective base URL, if any.
+func (o *OpenAIProvider) InitializationError() error { return o.initErr }
 
 type openaiEmbedRequest struct {
 	Model string   `json:"model"`
@@ -60,6 +67,9 @@ type openaiEmbedResponse struct {
 }
 
 func (o *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	if o.initErr != nil {
+		return nil, o.initErr
+	}
 	o.mu.Lock()
 	if emb, ok := o.cache[text]; ok {
 		o.mu.Unlock()
@@ -75,7 +85,7 @@ func (o *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, err
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openaiEmbedURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

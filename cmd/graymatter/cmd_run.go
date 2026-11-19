@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/harness"
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 func runCmd() *cobra.Command {
@@ -40,17 +42,30 @@ Examples:
   graymatter run sales-closer.md --resume latest`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			agentFile := args[0]
-
-			// Parse --input key=value pairs.
-			inputMap := parseInputFlags(inputs)
-
-			// --- Background parent: spawn child and exit ---
-			if background && !backgroundChild {
-				return spawnBackground(agentFile, dataDir, sessionIDFlag, os.Args[1:])
+			cfg := harness.RunConfig{
+				AgentFile:  args[0],
+				Inputs:     parseInputFlags(inputs),
+				DataDir:    dataDir,
+				MaxRetries: maxRetries,
+				ResumeID:   resumeID,
+				Stdout:     cmd.OutOrStdout(),
+				Stderr:     cmd.ErrOrStderr(),
+			}
+			if backgroundChild {
+				cfg.SessionID = sessionIDFlag
+				cfg.PID = os.Getpid()
+				cfg.LogFile = harness.LogFilePath(dataDir, sessionIDFlag)
+			}
+			prepared, err := harness.Prepare(cfg)
+			if err != nil {
+				return err
 			}
 
-			// --- Foreground or background child: run the agent ---
+			if background && !backgroundChild {
+				env := backgroundRunEnv(os.Environ(), prepared.AnthropicBaseURL())
+				return spawnBackground(dataDir, sessionIDFlag, os.Args[1:], env, os.Executable)
+			}
+
 			// Route persistence through the shared store (daemon by default)
 			// so a run never fights the bbolt lock with a TUI or MCP server.
 			store, err := openStore()
@@ -59,22 +74,7 @@ Examples:
 			}
 			defer func() { _ = store.Close() }()
 
-			cfg := harness.RunConfig{
-				AgentFile:  agentFile,
-				Inputs:     inputMap,
-				DataDir:    dataDir,
-				MaxRetries: maxRetries,
-				ResumeID:   resumeID,
-				Stdout:     cmd.OutOrStdout(),
-				Stderr:     cmd.ErrOrStderr(),
-				Store:      store,
-			}
-			if backgroundChild {
-				cfg.SessionID = sessionIDFlag
-				cfg.PID = os.Getpid()
-				cfg.LogFile = harness.LogFilePath(dataDir, sessionIDFlag)
-			}
-			result, err := harness.Run(context.Background(), cfg)
+			result, err := prepared.Run(context.Background(), store)
 			if err != nil {
 				return err
 			}
@@ -102,7 +102,7 @@ Examples:
 // spawnBackground re-invokes the current binary as a detached child process.
 // The child receives --background-child and --session-id=<sid> flags so it
 // knows to run as the background worker. The parent writes a PID file and exits.
-func spawnBackground(agentFile, dir, providedSID string, origArgs []string) error {
+func spawnBackground(dir, providedSID string, origArgs, env []string, executable func() (string, error)) error {
 	sessionID := providedSID
 	if sessionID == "" {
 		sessionID = ulid.Make().String()
@@ -121,7 +121,7 @@ func spawnBackground(agentFile, dir, providedSID string, origArgs []string) erro
 	pidFile := filepath.Join(runDir, sessionID+".pid")
 
 	// Resolve the path to the current executable.
-	exe, err := os.Executable()
+	exe, err := executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
@@ -136,6 +136,7 @@ func spawnBackground(agentFile, dir, providedSID string, origArgs []string) erro
 	}
 
 	c := exec.Command(exe, childArgs...)
+	c.Env = env
 	c.SysProcAttr = detachSysProcAttr()
 	c.Stdout = lf
 	c.Stderr = lf
@@ -157,6 +158,20 @@ func spawnBackground(agentFile, dir, providedSID string, origArgs []string) erro
 
 	fmt.Printf("Session %s started in background.\nPID: %d\nLog: %s\n", sessionID, pid, logFile)
 	return nil
+}
+
+// backgroundRunEnv replaces only the Anthropic base used by the prepared run.
+// Windows environment keys are case-insensitive.
+func backgroundRunEnv(parent []string, baseURL string) []string {
+	env := make([]string, 0, len(parent)+1)
+	for _, entry := range parent {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == providerurl.AnthropicEnv || (runtime.GOOS == "windows" && strings.EqualFold(name, providerurl.AnthropicEnv)) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, providerurl.AnthropicEnv+"="+baseURL)
 }
 
 // buildChildArgs strips --background/-b from origArgs and appends

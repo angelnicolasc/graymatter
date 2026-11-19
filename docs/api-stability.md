@@ -34,6 +34,11 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `DefaultConfig() Config` | |
 | `EmbeddingMode` type and constants | |
 
+The provider base URL fields are additive. Initialize `Config` with named fields
+or start from `DefaultConfig`. Positional struct literals require every field.
+Provider URL configuration adds no required method to `ConsolidateConfig`,
+`ExtractConfig` or `embedding.Provider`.
+
 ### `github.com/angelnicolasc/graymatter/pkg/memory`
 
 | Identifier | Notes |

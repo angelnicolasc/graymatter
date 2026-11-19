@@ -89,6 +89,10 @@ jobs:
         shell: bash
         run: go test -race -count=1 -timeout=300s .
 
+      - name: Test provider configuration and transports
+        shell: bash
+        run: go test -race -count=1 -timeout=300s ./pkg/embedding/... ./internal/providerurl/... ./internal/providerhttp/... ./internal/anthropicclient/...
+
       - name: Test CLI entrypoint package
         working-directory: cmd/graymatter
         shell: bash

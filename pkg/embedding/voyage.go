@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
+
+	"github.com/angelnicolasc/graymatter/internal/providerurl"
 )
 
 const (
-	voyageEmbedURL = "https://api.voyageai.com/v1/embeddings"
-	voyageModel    = "voyage-3"
-	voyageDims     = 1024
+	voyageModel = "voyage-3"
+	voyageDims  = 1024
 )
 
 // VoyageProvider calls the Voyage AI embeddings API (voyage-3 model).
@@ -25,8 +25,9 @@ const (
 // and Put silently degraded to keyword-only memory. See CHANGELOG v0.15.
 type VoyageProvider struct {
 	apiKey     string
-	endpoint   string // full request target; test seam, defaults to voyageEmbedURL
-	httpClient *http.Client
+	endpoint   string
+	httpClient httpDoer
+	initErr    error
 	mu         sync.Mutex
 	cache      map[string][]float32 // insertion-ordered eviction, see store()
 	cacheOrder []string
@@ -34,16 +35,20 @@ type VoyageProvider struct {
 
 // NewVoyage creates a Voyage-backed embedding provider.
 func NewVoyage(cfg Config) *VoyageProvider {
+	base := providerurl.Select(cfg.VoyageBaseURL, providerurl.VoyageEnv, providerurl.VoyageDefault)
+	endpoint, client, err := newEmbeddingHTTPClient("voyage", base)
 	return &VoyageProvider{
-		apiKey:   cfg.VoyageAPIKey,
-		endpoint: voyageEmbedURL,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		apiKey:     cfg.VoyageAPIKey,
+		endpoint:   endpoint,
+		httpClient: client,
+		initErr:    err,
 		cache:      make(map[string][]float32, cacheSize),
 		cacheOrder: make([]string, 0, cacheSize),
 	}
 }
+
+// InitializationError reports an invalid effective base URL, if any.
+func (v *VoyageProvider) InitializationError() error { return v.initErr }
 
 // NewAnthropic returns a Voyage provider.
 //
@@ -71,6 +76,9 @@ type voyageEmbedResponse struct {
 }
 
 func (v *VoyageProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	if v.initErr != nil {
+		return nil, v.initErr
+	}
 	// Check cache.
 	v.mu.Lock()
 	if emb, ok := v.cache[text]; ok {
