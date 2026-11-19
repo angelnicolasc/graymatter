@@ -117,6 +117,9 @@ func (r *reconnectingStore) mutate(fn func(cliStore) error) error {
 		return err
 	}
 	err := fn(r.snapshot())
+	if errors.Is(err, memory.ErrMutationOutcomeUnknown) {
+		return err
+	}
 	// A local preflight or an acknowledged rollback may return the caller's
 	// context error. The typed revision RPC marks an unacknowledged write
 	// separately, even when cancellation triggered the loss of its reply.
@@ -426,7 +429,10 @@ func (r *reconnectingStore) Delete(agentID, factID string) error {
 }
 
 func (r *reconnectingStore) Consolidate(ctx context.Context, agentID string) error {
-	return r.do(func(s cliStore) error { return s.Consolidate(ctx, agentID) })
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.mutate(func(s cliStore) error { return s.Consolidate(ctx, agentID) })
 }
 
 // Ready reports whether the store answers right now, reconnecting first if the

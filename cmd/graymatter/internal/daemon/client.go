@@ -42,6 +42,56 @@ func Connect(dataDir string) (*Client, error) {
 	return connect(dataDir, true)
 }
 
+// ConnectContext obtains a dedicated connection for a reporting operation. All
+// network phases and retries share the caller's remaining budget.
+func ConnectContext(ctx context.Context, dataDir string) (*Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, connectBudget)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	absDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: resolve data dir: %w", err)
+	}
+	dial := func() (*Client, error) {
+		c, err := rpc.DialContext(ctx, rpc.DialOptions{DataDir: absDir, PingOnDial: true})
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			_ = c.Close()
+			return nil, err
+		}
+		return &Client{Client: c, dataDir: absDir}, nil
+	}
+	if c, err := dial(); err == nil {
+		return c, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := spawnDaemonContext(ctx, absDir); err != nil {
+		return nil, fmt.Errorf("daemon not running and auto-start failed: %w", err)
+	}
+	for delay := 25 * time.Millisecond; ; {
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if c, err := dial(); err == nil {
+			return c, nil
+		}
+		delay = min(delay*8/5, 400*time.Millisecond)
+	}
+}
+
 // ConnectNoSpawn dials the daemon for dataDir but never starts one. For
 // `daemon status` / `daemon stop`, where spawning would defeat the point.
 func ConnectNoSpawn(dataDir string) (*Client, error) {
@@ -102,12 +152,22 @@ var resolveExecutable = os.Executable
 // spawnDaemon launches `graymatter daemon run` detached, with stdout/stderr
 // appended to <dataDir>/daemon.log.
 func spawnDaemon(absDir string) error {
+	return spawnDaemonContext(context.Background(), absDir)
+}
+
+func spawnDaemonContext(ctx context.Context, absDir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	exe, err := resolveExecutable()
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
 	if err := os.MkdirAll(absDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	logFile, err := os.OpenFile(filepath.Join(absDir, "daemon.log"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -123,6 +183,9 @@ func spawnDaemon(absDir string) error {
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = detachSysProcAttr()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s daemon run: %w", exe, err)
 	}

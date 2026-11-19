@@ -224,6 +224,29 @@ client session. For HTTP, restart the MCP service and refresh the client's
 cached discovery if needed. The MCP frontend serves tool discovery, while
 the data daemon handles storage requests.
 
+## Memory maintenance reports
+
+Use `graymatter consolidate <agent-id> --json` to run one maintenance pass and
+receive one JSON object with `schema_version: 1`, `agent_id`, `summary`,
+`maintenance`, and `error`. The synthesis status is `skipped` with reason
+`disabled` during maintenance, including when a synthesis provider is
+configured. Generate proposals through `review analyze` and apply an approved
+change through `review apply`.
+
+`maintenance` contains the decay and prune phase statuses and their confirmed
+`facts_decayed` and `facts_pruned` counts. A fact whose weight changed before it
+was pruned contributes to both counts. The graph status describes configured
+extraction, cleanup and graph decay. A failed or incomplete phase can retain
+effects that committed earlier. If the daemon reply is lost after dispatch,
+both text and JSON commands report an unknown outcome. Neither resends the
+maintenance request. In JSON, `maintenance` is null and `error.code` is
+`outcome_unknown`. Inspect the store before deciding whether to run maintenance
+again.
+
+The report uses the store owner's policy in direct and daemon mode. The
+daemon must advertise both `consolidation-report-v1` and `maintenance-only-v1`.
+Arguments and flags follow the ordinary CLI error handling.
+
 ## Status legend
 
 | Mark | Meaning |

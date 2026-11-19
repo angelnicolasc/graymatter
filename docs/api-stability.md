@@ -22,6 +22,7 @@ Starting with **v0.1.0**, GrayMatter follows a best-effort compatibility policy 
 | `(*Memory).Remember(ctx context.Context, agentID, text string) error` | |
 | `(*Memory).Recall(ctx context.Context, agentID, query string) ([]string, error)` | |
 | `(*Memory).Consolidate(ctx context.Context, agentID string) error` | Runs decay, pruning and configured graph extraction. Generative compaction is disabled. |
+| `(*Memory).ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error)` | Runs one maintenance pass. Reports skipped synthesis, commit-confirmed counts and graph disposition. |
 | `(*Memory).RememberShared(ctx context.Context, text string) error` | |
 | `(*Memory).RecallShared(ctx context.Context, query string) ([]string, error)` | |
 | `(*Memory).RecallAll(ctx context.Context, agentID, query string) ([]string, error)` | |
@@ -67,6 +68,7 @@ Provider URL configuration adds no required method to `ConsolidateConfig`,
 | `(*Store).PutShared(ctx, text string) error` | |
 | `(*Store).MaybeConsolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
 | `(*Store).Consolidate(ctx, agentID string, cfg ConsolidateConfig) error` | |
+| `(*Store).ConsolidateWithReport(ctx context.Context, agentID string, cfg ConsolidateConfig) (ConsolidationReport, error)` | Optional reporting operation. Confirmed effects may accompany an error. |
 | `(*Store).Close() error` | |
 | `(*Store).SetKG(graph GraphAccessor, extractor EntityExtractorAccessor)` | |
 | `(*Store).DB() *bolt.DB` | |

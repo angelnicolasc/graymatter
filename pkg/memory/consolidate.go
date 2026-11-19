@@ -76,6 +76,10 @@ func (s *Store) MaybeConsolidate(ctx context.Context, agentID string, cfg Consol
 // Consolidate runs decay, pruning, and configured knowledge-graph maintenance.
 // It does not request summaries, publish generative facts, or retire sources.
 func (s *Store) Consolidate(ctx context.Context, agentID string, cfg ConsolidateConfig) error {
+	return s.consolidate(ctx, agentID, cfg, nil)
+}
+
+func (s *Store) consolidate(ctx context.Context, agentID string, cfg ConsolidateConfig, effects *ConsolidationMaintenanceReport) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
@@ -106,9 +110,29 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	extractor, graph, maintenance := s.extractor, s.graph, s.graphMaintenance
 	s.mu.RUnlock()
 	provenance, _ := graph.(GraphProvenanceWriter)
-	if migrator, ok := maintenance.(graphProvenanceMigrator); ok {
+	migrator, migrates := maintenance.(graphProvenanceMigrator)
+	cleanup, cleans := maintenance.(GraphProvenanceWriter)
+	decayer, decays := maintenance.(GraphDecayer)
+	extracts := extractor != nil && graph != nil
+	graphConfigured := extracts || migrates || cleans || decays
+	graphStatus := MaintenanceNotAttempted
+	if !graphConfigured {
+		graphStatus = MaintenanceSkipped
+	}
+	graphFailed := false
+	if effects != nil {
+		defer func() {
+			if graphFailed {
+				graphStatus = MaintenanceFailed
+			}
+			effects.Graph = graphStatus
+		}()
+	}
+	if migrates {
+		graphStatus = MaintenanceIncomplete
 		// Inventory legacy aliases before canonical pruning can remove them.
 		if err := migrator.MigrateGraphProvenance(); err != nil {
+			graphFailed = true
 			return fmt.Errorf("inventory graph provenance: %w", err)
 		}
 	}
@@ -118,6 +142,9 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		return err
 	}
 	if len(facts) == 0 && graph == nil && maintenance == nil {
+		if effects != nil {
+			effects.Decay, effects.Prune = MaintenanceComplete, MaintenanceComplete
+		}
 		return errors.Join(migrationErr, s.sweepLineage(agentID, nowT))
 	}
 
@@ -141,10 +168,17 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	// hand weight back, and a fact whose weight was deliberately zeroed —
 	// a supersede tombstone (ADR-007) — must stay collectable by pruning
 	// instead of being resurrected by its own recent access time.
+	if effects != nil {
+		effects.Decay = MaintenanceIncomplete
+	}
 	for batch := range slices.Chunk(facts, maintenanceDecayBatchSize) {
-		if err := s.decayBatch(ctx, agentID, batch, nowT, lambda); err != nil {
+		if err := s.decayBatchObserved(ctx, agentID, batch, nowT, lambda, effects); err != nil {
 			return errors.Join(migrationErr, err)
 		}
+	}
+
+	if effects != nil {
+		effects.Decay, effects.Prune = MaintenanceComplete, MaintenanceIncomplete
 	}
 
 	// Step 2: prune low-weight facts, including retired rows, when aging applies.
@@ -160,11 +194,14 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 		if !pruneEligible(f, nowT, lambda) {
 			continue
 		}
-		if err := s.pruneFact(agentID, f.ID, nowT, lambda); err != nil {
+		if err := s.pruneFactObserved(agentID, f.ID, nowT, lambda, effects); err != nil {
 			maintenanceErrs = append(maintenanceErrs, fmt.Errorf("prune fact %s: %w", f.ID, err))
 		}
 	}
 
+	if effects != nil && len(maintenanceErrs) == 0 {
+		effects.Prune = MaintenanceComplete
+	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(migrationErr, err)
 	}
@@ -185,13 +222,17 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	//     recall enrichment traversable (issue #24).
 	//   - Legacy: ID-only upserts, no edges — preserved verbatim so older
 	//     extractor implementations behave exactly as before.
-	if extractor != nil && graph != nil {
+	if graphConfigured {
+		graphStatus = MaintenanceIncomplete
+	}
+	if extracts {
 		typed, typedOK := extractor.(TypedEntityExtractor)
 		writer, writeOK := graph.(EdgeWriter)
 		var target string
 		if typedOK && provenance != nil {
 			target, err = s.graphTarget(provenance)
 			if err != nil {
+				graphFailed = true
 				maintenanceErrs = append(maintenanceErrs, fmt.Errorf("identify graph for extraction: %w", err))
 			}
 		}
@@ -210,6 +251,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 			if typedOK && provenance != nil {
 				if target != "" {
 					if err := s.extractGraphRevision(ctx, typed, provenance, f, target); err != nil && !errors.Is(err, ErrFactChanged) {
+						graphFailed = true
 						maintenanceErrs = append(maintenanceErrs, fmt.Errorf("extract graph revision %s: %w", f.ID, err))
 					}
 				}
@@ -223,6 +265,7 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 			if typedOK && writeOK {
 				refs, links, extractErr := typed.ExtractTyped(f.Text)
 				if extractErr != nil {
+					graphFailed = true
 					continue
 				}
 				for _, ref := range refs {
@@ -241,14 +284,15 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 						}
 					}
 				}
-				if clean {
-					_ = s.markExtracted(agentID, f.ID, sig)
+				if !clean || s.markExtracted(agentID, f.ID, sig) != nil {
+					graphFailed = true
 				}
 				continue
 			}
 
 			ids, extractErr := extractor.ExtractIDs(f.Text)
 			if extractErr != nil {
+				graphFailed = true
 				continue
 			}
 			for _, id := range ids {
@@ -259,8 +303,8 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 					}
 				}
 			}
-			if clean {
-				_ = s.markExtracted(agentID, f.ID, sig)
+			if !clean || s.markExtracted(agentID, f.ID, sig) != nil {
+				graphFailed = true
 			}
 		}
 	}
@@ -273,19 +317,24 @@ func (s *Store) Consolidate(ctx context.Context, agentID string, cfg Consolidate
 	// project stayed prominent forever. Same recompute-from-staleness rule
 	// as Step 1, for the same reason: multiplying re-applied whole elapsed
 	// periods per cycle and compounded forgetting.
-	if writer, ok := maintenance.(GraphProvenanceWriter); ok {
-		if err := s.drainGraphCleanup(writer); err != nil {
+	if cleans {
+		if err := s.drainGraphCleanup(cleanup); err != nil {
+			graphFailed = true
 			maintenanceErrs = append(maintenanceErrs, fmt.Errorf("deliver graph cleanup: %w", err))
 		}
 	}
-	if decayer, ok := maintenance.(GraphDecayer); ok {
+	if decays {
 		if err := decayer.DecayGraph(halfLife); err != nil {
+			graphFailed = true
 			if s.cfg.OnConsolidateError != nil {
 				s.cfg.OnConsolidateError(agentID, fmt.Errorf("graph decay: %w", err))
 			}
 		}
 	}
 
+	if graphConfigured {
+		graphStatus = MaintenanceComplete
+	}
 	return errors.Join(append(maintenanceErrs, migrationErr)...)
 }
 

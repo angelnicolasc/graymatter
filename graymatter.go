@@ -285,6 +285,16 @@ func (m *Memory) Consolidate(ctx context.Context, agentID string) error {
 	return m.store.Consolidate(ctx, agentID, m.cfg)
 }
 
+// ConsolidateWithReport runs one maintenance pass and reports that synthesis
+// was skipped. A report can accompany a maintenance error.
+func (m *Memory) ConsolidateWithReport(ctx context.Context, agentID string) (memory.ConsolidationReport, error) {
+	if m.store == nil {
+		return memory.ConsolidationReport{Status: memory.ConsolidationNotAttempted, Reason: "operation_unavailable"},
+			memory.NewConsolidationError("operation_unavailable", m.initErr)
+	}
+	return m.store.ConsolidateWithReport(ctx, agentID, m.cfg)
+}
+
 // RememberShared stores an observation in the shared memory namespace,
 // readable by all agents via RecallShared and RecallAll.
 func (m *Memory) RememberShared(ctx context.Context, text string) error {

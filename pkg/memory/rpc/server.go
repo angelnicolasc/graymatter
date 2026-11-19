@@ -86,6 +86,10 @@ type Server struct {
 // used when handling RPC ConsolidateRequest calls; pass the same Config
 // the daemon uses elsewhere so consolidation policy is consistent.
 func NewServer(backend Backend, consolidateCfg memory.ConsolidateConfig) *Server {
+	// Capability probes must only call methods on an available backend.
+	if isNilValue(backend) {
+		backend = nil
+	}
 	s := &Server{
 		backend:        backend,
 		consolidateCfg: consolidateCfg,
@@ -466,6 +470,14 @@ func (s *Server) PendingVectorCount(req *PendingVectorCountRequest, resp *Pendin
 	return nil
 }
 
+func (s *Server) maintenanceOnly() bool {
+	if store, ok := s.backend.(*memory.Store); ok {
+		return store != nil
+	}
+	custom, optedIn := s.backend.(interface{ MaintenanceOnly() bool })
+	return optedIn && !isNilValue(custom) && custom.MaintenanceOnly()
+}
+
 // Ping handles a liveness probe. Touches activity so a heartbeat keeps
 // the daemon alive — useful for long-idle TUIs that just want the
 // dashboard refreshed without making writes.
@@ -485,13 +497,14 @@ func (s *Server) Ping(req *PingRequest, resp *PingResponse) error {
 	if (review || lineage) && !slices.Contains(resp.Capabilities, InspectionContextV1) {
 		resp.Capabilities = append(resp.Capabilities, InspectionContextV1)
 	}
-	_, localStore := s.backend.(*memory.Store)
-	custom, optedIn := s.backend.(interface{ MaintenanceOnly() bool })
-	if localStore || optedIn && custom.MaintenanceOnly() {
+	if s.maintenanceOnly() {
 		resp.Capabilities = append(resp.Capabilities, MaintenanceOnlyV1)
 		if _, ok := s.backend.(returningFactWriter); ok {
 			resp.Capabilities = append(resp.Capabilities, FactIdentityV1)
 		}
+	}
+	if s.supportsConsolidationReporting() {
+		resp.Capabilities = append(resp.Capabilities, ConsolidationReportV1)
 	}
 	if _, ok := s.scopedBatchRecaller(); ok {
 		resp.Capabilities = append(resp.Capabilities, ScopedBatchRecallV1)

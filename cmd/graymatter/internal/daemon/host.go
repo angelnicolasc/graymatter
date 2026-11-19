@@ -30,6 +30,7 @@ import (
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/kg"
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/session"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
+	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
 // HostServiceName is the net/rpc service name for the host-level service,
@@ -435,6 +436,23 @@ type rememberBackend struct {
 }
 
 func (rememberBackend) MaintenanceOnly() bool { return true }
+
+type reportingRememberBackend struct {
+	rememberBackend
+	memory.ReportingConsolidator
+}
+
+func (b reportingRememberBackend) SupportsConsolidationReport() bool {
+	return rpc.SupportsConsolidationReporting(b.ReportingConsolidator)
+}
+
+func withConsolidationReporting(backend rememberBackend) rpc.Backend {
+	reporter, ok := backend.AdvancedStore.(memory.ReportingConsolidator)
+	if !ok || !rpc.SupportsConsolidationReporting(reporter) {
+		return backend
+	}
+	return reportingRememberBackend{rememberBackend: backend, ReportingConsolidator: reporter}
+}
 
 func (b rememberBackend) Put(ctx context.Context, agentID, text string) error {
 	return b.mem.Remember(ctx, agentID, text)

@@ -153,6 +153,10 @@ const maintenanceDecayBatchSize = 256
 // decayBatch rereads each selected identity under the writer lock. A batch
 // whose durable values are already current rolls back without a metadata write.
 func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fact, now time.Time, lambda float64) error {
+	return s.decayBatchObserved(ctx, namespace, selected, now, lambda, nil)
+}
+
+func (s *Store) decayBatchObserved(ctx context.Context, namespace string, selected []Fact, now time.Time, lambda float64, effects *ConsolidationMaintenanceReport) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -164,7 +168,7 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 		state, indexed := idxReadState(tx, namespace)
 		keepPostings := s.cfg.CandidateRetrieval && indexed && state.Version == indexVersion &&
 			state.Stemmed == s.cfg.StemKeywords && s.idxCounted(namespace)
-		changed := false
+		changed := 0
 		for _, entry := range selected {
 			if rows.Get([]byte(entry.ID)) == nil {
 				continue // a concurrent delete already collected the row
@@ -189,13 +193,16 @@ func (s *Store) decayBatch(ctx context.Context, namespace string, selected []Fac
 			if err != nil {
 				return fmt.Errorf("decay fact %s: %w", entry.ID, err)
 			}
-			changed = true
+			changed++
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !changed {
+		if changed == 0 {
 			return errFactUnchanged
+		}
+		if effects != nil {
+			tx.OnCommit(func() { effects.FactsDecayed += changed })
 		}
 		return nil
 	})
@@ -223,6 +230,10 @@ func (s *Store) persistDecayedFactTx(tx *bolt.Tx, rows *bolt.Bucket, namespace s
 }
 
 func (s *Store) pruneFact(agentID, id string, now time.Time, lambda float64) error {
+	return s.pruneFactObserved(agentID, id, now, lambda, nil)
+}
+
+func (s *Store) pruneFactObserved(agentID, id string, now time.Time, lambda float64, effects *ConsolidationMaintenanceReport) error {
 	if s.readOnly {
 		return ErrStoreReadOnly
 	}
@@ -240,7 +251,13 @@ func (s *Store) pruneFact(agentID, id string, now time.Time, lambda float64) err
 		if pending, err := pendingLegacyEvidenceTx(tx, current); err != nil || pending {
 			return err
 		}
-		return s.deleteFactTx(tx, agentID, id)
+		if err := s.deleteFactTx(tx, agentID, id); err != nil {
+			return err
+		}
+		if effects != nil {
+			tx.OnCommit(func() { effects.FactsPruned++ })
+		}
+		return nil
 	})
 }
 

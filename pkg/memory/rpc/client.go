@@ -8,6 +8,7 @@ import (
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/angelnicolasc/graymatter/pkg/memory"
@@ -37,6 +38,8 @@ type Client struct {
 	inspectionOnce            sync.Once
 	inspectionSendSlots       chan struct{}
 	inspectionCancelSlots     chan struct{}
+	owned                     bool
+	reportStarted             atomic.Bool
 }
 
 // DialOptions tunes how Dial finds and connects to a daemon.
@@ -79,19 +82,8 @@ var ErrCallTimeout = errors.New("rpc call timed out")
 // discovery file is missing or the listener refuses connections, so
 // spawn-on-connect logic can errors.Is for that case.
 func Dial(opts DialOptions) (*Client, error) {
-	if opts.DefaultConfidenceWeight != nil {
-		if err := (memory.RecallOptions{ConfidenceWeight: opts.DefaultConfidenceWeight}).Validate(); err != nil {
-			return nil, err
-		}
-	}
-	if opts.DataDir == "" {
-		opts.DataDir = ".graymatter"
-	}
-	if opts.DialTimeout == 0 {
-		opts.DialTimeout = 2 * time.Second
-	}
-	if opts.CallTimeout == 0 {
-		opts.CallTimeout = 30 * time.Second
+	if err := setDialDefaults(&opts); err != nil {
+		return nil, err
 	}
 
 	addr, token, err := readDiscovery(opts.DataDir)
@@ -114,6 +106,35 @@ func Dial(opts DialOptions) (*Client, error) {
 		}
 	}
 
+	c := newClient(conn, addr, opts)
+	if opts.PingOnDial {
+		if err := c.Ping(); err != nil {
+			_ = c.Close()
+			return nil, fmt.Errorf("rpc: ping after dial: %w", err)
+		}
+	}
+	return c, nil
+}
+
+func setDialDefaults(opts *DialOptions) error {
+	if opts.DefaultConfidenceWeight != nil {
+		if err := (memory.RecallOptions{ConfidenceWeight: opts.DefaultConfidenceWeight}).Validate(); err != nil {
+			return err
+		}
+	}
+	if opts.DataDir == "" {
+		opts.DataDir = ".graymatter"
+	}
+	if opts.DialTimeout == 0 {
+		opts.DialTimeout = 2 * time.Second
+	}
+	if opts.CallTimeout == 0 {
+		opts.CallTimeout = 30 * time.Second
+	}
+	return nil
+}
+
+func newClient(conn net.Conn, addr string, opts DialOptions) *Client {
 	c := &Client{
 		rpc:                     rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn)),
 		conn:                    conn,
@@ -125,14 +146,7 @@ func Dial(opts DialOptions) (*Client, error) {
 		c.defaultConfidenceWeight = *opts.DefaultConfidenceWeight
 		c.defaultConfidenceOverride = true
 	}
-
-	if opts.PingOnDial {
-		if err := c.Ping(); err != nil {
-			_ = c.Close()
-			return nil, fmt.Errorf("rpc: ping after dial: %w", err)
-		}
-	}
-	return c, nil
+	return c
 }
 
 // Close releases the underlying connection. Safe to call multiple times.
@@ -392,7 +406,13 @@ func (c *Client) Consolidate(ctx context.Context, agentID string) error {
 	if err := c.requireMaintenanceOnly(ctx); err != nil {
 		return err
 	}
-	return c.CallService(ServiceName, "Consolidate", &ConsolidateRequest{AgentID: agentID}, &ConsolidateResponse{}, consolidateTimeout)
+	err := c.CallService(ServiceName, "Consolidate", &ConsolidateRequest{AgentID: agentID}, &ConsolidateResponse{}, consolidateTimeout)
+	var serverErr rpc.ServerError
+	if err != nil && !errors.As(err, &serverErr) {
+		// Only a response from the daemon can acknowledge this maintenance pass.
+		return fmt.Errorf("%w: %w", memory.ErrMutationOutcomeUnknown, err)
+	}
+	return err
 }
 
 // PendingVectorCount returns the number of facts waiting to be re-indexed.
