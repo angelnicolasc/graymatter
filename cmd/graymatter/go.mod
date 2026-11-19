@@ -31,7 +31,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/BurntSushi/toml v1.4.0
-	github.com/angelnicolasc/graymatter v0.20.1
+	github.com/angelnicolasc/graymatter v0.21.0
 	github.com/anthropics/anthropic-sdk-go v1.33.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8

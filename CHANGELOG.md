@@ -8,20 +8,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+---
+
+## [0.21.0] - 2026-11-19
+
+Agents can now keep a decision with its source and exact quote, then replace it
+when the decision changes. Existing MCP clients start with the same seven tools.
+See the [three-session memory study](https://github.com/angelnicolasc/graymatter/blob/v0.21.0/benchmarks/agent_memory/RESULTS.md) for the comparison with an organized notes folder.
+
 ### Added
 
-- **Configurable provider endpoints.** Set base URLs for Anthropic Messages,
-  OpenAI embeddings, and Voyage embeddings using Go configuration or
-  environment variables. A running daemon uses its startup configuration.
+- **Citations and current values by subject.** Start `graymatter mcp serve --tools core` to enable evidence-backed writes. Reusing a subject replaces its current fact in one transaction. Core search reads project and shared memory together and can retrieve an omitted citation by fact ID. The default `full` profile keeps the legacy write contract, so a successful text write in that profile can ignore citation and subject fields. [MCP profile guide](https://github.com/angelnicolasc/graymatter/blob/v0.21.0/docs/integrations.md)
+- **Explicit review.** `graymatter review analyze` sends a bounded set of facts to the selected provider and records proposals in a separate journal. Inspect a proposal and use `review apply` to approve a change. The store checks that the sources still match before recording a delayed response.
+- **Maintenance reports.** `graymatter consolidate <agent-id> --json` reports committed decay and pruning counts and the outcome of graph maintenance. If the daemon loses its reply after dispatch, both text and JSON report an unknown outcome. Inspect the store before retrying.
+- **Configurable provider endpoints.** Set base URLs for Anthropic Messages, OpenAI embeddings and Voyage embeddings through Go configuration or environment variables. Explicit review and configured graph extraction follow the store owner's endpoint, including in daemon mode.
 
-### Security
+### Changed
 
-- Build CI and release binaries with Go 1.26.11, which includes standard-library fixes for [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) in `crypto/x509` and [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) in `net/http`.
-- **Generative compaction is disabled.** Automatic and explicit consolidation run maintenance only. Anthropic and Ollama summariser settings remain accepted for compatibility, and responses from those providers cannot publish active summaries or retire their sources. Decay, pruning, and configured graph extraction continue. Status distinguishes effective maintenance mode from historical summary counters.
+- **Consolidation runs maintenance only.** Decay, pruning and configured graph extraction continue. If you used automatic model-generated summaries, switch to explicit review. Existing summaries remain subject to the ordinary retention rules. Anthropic and Ollama summarizer settings remain accepted. Status distinguishes the current maintenance mode from historical summary counts.
+- **Checkpoint recovery and recall.** The `full` profile preserves the previous latest-checkpoint selection. The optional `core` profile skips markers that contain only hook metadata. Ordinary recall and prompt context use live facts, while eligible aliases support query expansion.
 
 ### Fixed
 
-- **Explicit memory revisions commit atomically.** CLI, MCP, and TUI revisions store the replacement and retire the selected sources in one transaction. A source conflict or write failure leaves the revision unapplied. Daemon clients require atomic revision support before dispatch.
+- **Atomic revisions.** CLI, MCP and TUI revisions store the replacement and retire the selected sources in one transaction. A conflict leaves the revision unapplied, and daemon clients verify support before sending the write.
+- **Retention and maintenance.** Pruning rechecks a fact's age and stored weight inside the transaction. Decay updates skip unchanged index entries, reducing contention with session-end checkpoints.
+
+### Security
+
+- Release binaries use Go 1.26.11, which includes standard-library fixes for [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) and [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
+
+### Upgrading from 0.20.1
+
+1. If you run an earlier version, upgrade to 0.20.1 first. Close clients using the store, run `graymatter daemon stop` for the relevant data directory, and copy its closed `gray.db` to a separate location. Keep that copy for rollback.
+2. Install 0.21.0, restart the MCP server and reconnect its clients. Existing launch commands use `full`. Add `--tools core` explicitly for citations and subject-based writes. Restart a daemon that asks for an update before using new operations.
+3. To roll back, stop the new clients and daemon. Remove any explicit `--tools` flag from the MCP launch command. Restore the pre-upgrade copy to a separate data directory and point 0.20.1 at it. Keep the upgraded store if you need to recover writes made after the backup.
 
 ---
 
@@ -1338,7 +1358,9 @@ See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable publ
 
 See [`docs/api-stability.md`](docs/api-stability.md) for the list of stable public identifiers and the compatibility promise for the v0.x series.
 
-[Unreleased]: https://github.com/angelnicolasc/graymatter/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/angelnicolasc/graymatter/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/angelnicolasc/graymatter/compare/v0.20.1...v0.21.0
+[0.20.1]: https://github.com/angelnicolasc/graymatter/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/angelnicolasc/graymatter/compare/v0.19.1...v0.20.0
 [0.12.1]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.1
 [0.12.0]: https://github.com/angelnicolasc/graymatter/releases/tag/v0.12.0
