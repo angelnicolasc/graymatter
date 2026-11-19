@@ -34,6 +34,9 @@ const (
 // Config holds all GrayMatter configuration. All fields have sane defaults
 // via DefaultConfig(). Zero-value Config is not valid — always call DefaultConfig().
 type Config struct {
+	// MaxQuoteBytes bounds newly supplied literal citations. Zero uses 2048.
+	// Existing evidence is never truncated when this limit is reduced.
+	MaxQuoteBytes int
 	// ConfidenceWeight is the product preference default in [0, 0.5]. The
 	// compatible opt-in delivery keeps it zero pending a published rollout.
 	ConfidenceWeight float64
@@ -57,12 +60,12 @@ type Config struct {
 	// Default: value of GRAYMATTER_OLLAMA_MODEL env var, or "nomic-embed-text"
 	OllamaModel string
 
-	// OllamaConsolidateModel is the local model used for consolidation
-	// summarisation when ConsolidateLLM is "ollama".
+	// OllamaConsolidateModel is a legacy compaction setting. Maintenance does
+	// not use this model.
 	// Default: value of GRAYMATTER_OLLAMA_CONSOLIDATE_MODEL env var, or "llama3.2"
 	OllamaConsolidateModel string
 
-	// AnthropicAPIKey for the Anthropic consolidation endpoints.
+	// AnthropicAPIKey is used for explicit Anthropic fact extraction.
 	// Default: value of ANTHROPIC_API_KEY env var.
 	AnthropicAPIKey string
 
@@ -81,32 +84,27 @@ type Config struct {
 	// Default: value of GRAYMATTER_OPENAI_MODEL env var, or "text-embedding-3-small"
 	OpenAIModel string
 
-	// AnthropicBaseURL is the directory for Anthropic Messages requests.
-	// GrayMatter appends v1/messages. Empty uses ANTHROPIC_BASE_URL or
-	// https://api.anthropic.com.
+	// AnthropicBaseURL is the directory before v1/messages. Empty uses
+	// ANTHROPIC_BASE_URL or https://api.anthropic.com.
 	AnthropicBaseURL string
 
-	// OpenAIBaseURL is the directory for OpenAI embeddings requests.
-	// GrayMatter appends embeddings. Empty uses OPENAI_BASE_URL or
-	// https://api.openai.com/v1.
+	// OpenAIBaseURL is the directory before embeddings. Empty uses
+	// OPENAI_BASE_URL or https://api.openai.com/v1.
 	OpenAIBaseURL string
 
-	// VoyageBaseURL is the directory for Voyage embeddings requests.
-	// GrayMatter appends embeddings. Empty uses VOYAGE_BASE_URL or
-	// https://api.voyageai.com/v1.
+	// VoyageBaseURL is the directory before embeddings. Empty uses
+	// VOYAGE_BASE_URL or https://api.voyageai.com/v1.
 	VoyageBaseURL string
 
-	// ConsolidateLLM specifies which LLM provider drives memory consolidation.
-	// Values: "anthropic", "ollama", "" (disable consolidation).
-	// Default: "anthropic" if ANTHROPIC_API_KEY is set, else "" (disabled).
-	// To use Ollama as the consolidation LLM, set this field explicitly to "ollama".
+	// ConsolidateLLM retains the configured compaction provider for compatibility.
+	// Automatic generative compaction is disabled for every value.
 	ConsolidateLLM string
 
-	// ConsolidateModel is the model used for consolidation summarisation.
+	// ConsolidateModel is used for explicit Anthropic fact extraction.
 	// Default: "claude-haiku-4-5-20251001"
 	ConsolidateModel string
 
-	// ConsolidateThreshold is the minimum fact count that triggers consolidation.
+	// ConsolidateThreshold is the minimum fact count that triggers maintenance.
 	// Default: 20
 	ConsolidateThreshold int
 
@@ -115,7 +113,7 @@ type Config struct {
 	// Default: 720h (30 days)
 	DecayHalfLife time.Duration
 
-	// AsyncConsolidate runs consolidation in a background goroutine after Remember.
+	// AsyncConsolidate runs maintenance in a background goroutine after Remember.
 	// Default: true
 	AsyncConsolidate bool
 
@@ -273,18 +271,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// resolveConsolidateLLM returns the best available consolidation LLM based on
-// environment variables. It does NOT probe network endpoints at startup.
-//
-// Detection order:
-//  1. "anthropic" — if ANTHROPIC_API_KEY is set
-//  2. ""          — disabled (set ConsolidateLLM="ollama" explicitly for Ollama)
-//
-// Ollama is excluded from auto-detection because probing the Ollama endpoint on
-// every process startup would add 500 ms+ of latency. Configure it explicitly:
-//
-//	cfg := graymatter.DefaultConfig()
-//	cfg.ConsolidateLLM = "ollama"
+// resolveConsolidateLLM retains the legacy provider default for callers
+// that inspect the configuration. It does not enable compaction.
 func resolveConsolidateLLM() string {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		return "anthropic"

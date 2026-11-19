@@ -100,6 +100,11 @@ mean corrections are common enough that carrying the history costs more than
 it is worth, and that pruning should collect them on a shorter horizon than
 live facts.
 
+**Versioned evidence amendment.** The historical percentage was a correction
+heuristic. Canonical tombstones and retained source snapshots now have separate
+lifetimes. Measure retained logical bytes and ownership when assessing evidence
+storage.
+
 Automatic contradiction detection unlocks under both of:
 
 1. It lives inside `Consolidate` — the one step already permitted to be smart
@@ -123,3 +128,15 @@ hand-labelled sample must exceed **0.95** before it is enabled by default.
   second lookup on every recall and a consistency problem between two buckets.
 - **Automatic detection now.** Latency on the hot path, non-determinism in the
   core, and a failure mode that quietly deletes true facts.
+
+## Amendment — scope of retirement and deletion
+
+The original decision describes how correction and retirement preserve a
+tombstone at the time of the operation. The maintenance cycle may later prune
+either a live fact or a tombstone once its weight drops below 0.01, provided it
+is unpinned. Pruning is the automatic deletion path for fact rows.
+
+`Store.Delete` and the REST `DELETE /forget` routes provide explicit deletion.
+They can remove a canonical row immediately, including pinned rows and
+tombstones. Explain and inspection can use a tombstone only while its row
+remains stored. See [fact retention and deletion](../api-stability.md#fact-retention-and-deletion).

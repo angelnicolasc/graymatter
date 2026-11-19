@@ -27,19 +27,21 @@ func fact(id string, weight float64, created daysAgo, text string) memory.Fact {
 type daysAgo int
 
 func TestSelect_RespectsBudget(t *testing.T) {
+	// The first fact renders as 130 bytes including the heading and final newline.
+	const budget = 44
 	facts := []memory.Fact{
 		fact("01", 1.0, 0, "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"),
 		fact("02", 0.9, 1, "short"),
 		fact("03", 0.8, 2, "also short"),
 		fact("04", 0.7, 3, "tiny"),
 	}
-	sel, st := Select(facts, 30)
+	sel, st := Select(facts, budget)
 	if len(sel) == 0 {
 		t.Fatal("nothing selected")
 	}
 	body := RenderBody(sel)
-	if got := tokens.Approx(body); got > 30 {
-		t.Fatalf("body costs %d tokens, budget is 30", got)
+	if got := tokens.Approx(body); got > budget {
+		t.Fatalf("body costs %d tokens, budget is %d", got, budget)
 	}
 	// The stats counter and the rendered body must agree on cost: two ways to
 	// count that can drift would make the budget a lie in one of them.

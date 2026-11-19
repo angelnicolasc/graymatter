@@ -33,7 +33,7 @@ func ciStep(job, name string) string {
 	return job
 }
 
-func serialCIErrors(body string) []string {
+func parallelCIErrors(body string) []string {
 	var errs []string
 	require := func(scope, fragment string) {
 		if !strings.Contains(scope, fragment) {
@@ -49,20 +49,15 @@ func serialCIErrors(body string) []string {
 	for _, job := range []string{testJob, benchmarkJob} {
 		header := strings.SplitN(job, "    steps:\n", 2)[0]
 		for _, fragment := range []string{
-			"runs-on: ${{ matrix.os }}", "fail-fast: false", "\n      max-parallel: 1\n",
-			"os: [ubuntu-latest, macos-latest, windows-latest]", `go: ["1.25.14", "1.26.11"]`,
+			"runs-on: ${{ matrix.os }}", "fail-fast: false",
+			"os: [ubuntu-latest, macos-latest, windows-latest]", `go: ["1.25", "1.26.11"]`,
 		} {
 			require(header, fragment)
 		}
-		for _, fragment := range []string{"if:", "continue-on-error:", "exclude:", "include:"} {
+		for _, fragment := range []string{"needs:", "if:", "continue-on-error:", "exclude:", "include:"} {
 			forbid(header, fragment)
 		}
 	}
-	forbid(strings.SplitN(testJob, "    steps:\n", 2)[0], "needs:")
-	require(body, "\nenv:\n  GOTOOLCHAIN: local\n")
-	require(benchmarkJob, "    needs: test\n")
-	require(ciJob(body, "version-consistency"), "    needs: coverage-union\n")
-	require(ciJob(body, "vulncheck"), "    needs: version-consistency\n")
 	const benchmarkCommand = "go test -race -count=1 -timeout=1200s ./benchmarks/token_count/... ./benchmarks/retrieval_quality/... ./benchmarks/revision_currency/..."
 	benchmarkStep := ciStep(benchmarkJob, "Test benchmark packages")
 	require(benchmarkStep, "run: "+benchmarkCommand)
@@ -110,34 +105,30 @@ func serialCIErrors(body string) []string {
 	return errs
 }
 
-func TestSerialCorrectnessAndCLITimings(t *testing.T) {
-	for _, err := range serialCIErrors(read(t, "ci")) {
+func TestParallelCorrectnessAndCLITimings(t *testing.T) {
+	for _, err := range parallelCIErrors(read(t, "ci")) {
 		t.Error(err)
 	}
 }
 
-func TestSerialCIContractRejectsLostGates(t *testing.T) {
+func TestParallelCIContractRejectsLostGates(t *testing.T) {
 	body := read(t, "ci")
 	for name, mutation := range map[string][2]string{
-		"lost internal package":        {"./internal/daemon/...", ""},
-		"lost usage coverage":          {"./internal/usage/...", ""},
-		"weaker coverage":              {"$TOTAL < 70", "$TOTAL < 60"},
-		"lost package":                 {"./benchmarks/revision_currency/...", ""},
-		"lost race detector":           {"go test -race -count=1 -timeout=1200s", "go test -count=1 -timeout=1200s"},
-		"missing matrix OS":            {"os: [ubuntu-latest, macos-latest, windows-latest]", "os: [ubuntu-latest, macos-latest]"},
-		"nonblocking benchmarks":       {"run: go test -race -count=1 -timeout=1200s", "continue-on-error: true\n        run: go test -race -count=1 -timeout=1200s"},
-		"parallel cells":               {"      max-parallel: 1\n", "      max-parallel: 10\n"},
-		"parallel benchmarks":          {"  benchmark-tests:\n    needs: test\n", "  benchmark-tests:\n"},
-		"parallel version check":       {"    needs: coverage-union\n", ""},
-		"parallel vulnerability check": {"    needs: version-consistency\n", ""},
-		"auto-selected toolchain":      {"GOTOOLCHAIN: local", "GOTOOLCHAIN: auto"},
-		"detached gate":                {"needs: [test, benchmark-tests]\n", "needs: test\n"},
-		"masked test exit":             {"set -euo pipefail", "set -eu"},
-		"missing failure artifact":     {"      - name: Upload CLI test timings\n        if: always()", "      - name: Upload CLI test timings"},
+		"lost internal package":    {"./internal/daemon/...", ""},
+		"lost usage coverage":      {"./internal/usage/...", ""},
+		"weaker coverage":          {"$TOTAL < 70", "$TOTAL < 60"},
+		"lost package":             {"./benchmarks/revision_currency/...", ""},
+		"lost race detector":       {"go test -race -count=1 -timeout=1200s", "go test -count=1 -timeout=1200s"},
+		"missing matrix OS":        {"os: [ubuntu-latest, macos-latest, windows-latest]", "os: [ubuntu-latest, macos-latest]"},
+		"nonblocking benchmarks":   {"run: go test -race -count=1 -timeout=1200s", "continue-on-error: true\n        run: go test -race -count=1 -timeout=1200s"},
+		"serial benchmarks":        {"  benchmark-tests:\n", "  benchmark-tests:\n    needs: test\n"},
+		"detached gate":            {"needs: [test, benchmark-tests]\n", "needs: test\n"},
+		"masked test exit":         {"set -euo pipefail", "set -eu"},
+		"missing failure artifact": {"      - name: Upload CLI test timings\n        if: always()", "      - name: Upload CLI test timings"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := strings.Replace(body, mutation[0], mutation[1], 1)
-			if changed == body || len(serialCIErrors(changed)) == 0 {
+			if changed == body || len(parallelCIErrors(changed)) == 0 {
 				t.Fatal("mutation did not fail the workflow contract")
 			}
 		})

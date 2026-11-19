@@ -147,7 +147,7 @@ func TestReviseTombstonePointsAtTheReplacement(t *testing.T) {
 		}
 	}
 	if victim.ID == "" {
-		t.Fatal("the retired fact was deleted; storage must stay append-only")
+		t.Fatal("revision should retain the old fact as a tombstone")
 	}
 	if !victim.IsSuperseded() {
 		t.Fatal("the old fact was not tombstoned")

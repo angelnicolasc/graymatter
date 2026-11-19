@@ -25,9 +25,10 @@ var ErrMutationOutcomeUnknown = errors.New("mutation outcome unknown; refresh be
 // preserve metadata but omit embeddings. Total counts all matches in this read.
 // Separate pages are live reads, not a transaction spanning user interaction.
 type FactPage struct {
-	Facts      []Fact `json:"facts"`
-	NextCursor string `json:"next_cursor,omitempty"`
-	Total      int    `json:"total"`
+	Facts         []Fact         `json:"facts"`
+	NextCursor    string         `json:"next_cursor,omitempty"`
+	Total         int            `json:"total"`
+	SubjectIssues *SubjectIssues `json:"subject_issues,omitempty"`
 }
 
 // Inspector is optional; published store interfaces remain source compatible.
@@ -88,7 +89,7 @@ type factPageCursor struct {
 	Before string `json:"before"`
 }
 
-// ListFacts scans lightweight rows with O(limit) retained memory and transfers
+// ListFacts scans lightweight rows and historical tombstone links, then transfers
 // only the requested page. Total is exact at the cost of an O(N) metadata scan;
 // embeddings are skipped by the decoder rather than loaded then discarded.
 // States: active (live content), retired (all tombstones), alias (live aliases),
@@ -127,6 +128,13 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 	out := FactPage{Facts: make([]Fact, 0, limit)}
 	hasMore := false
 	err := s.db.View(func(tx *bolt.Tx) error {
+		idx, err := resolveSubjectIndexTx(tx, agent)
+		if err != nil {
+			return err
+		}
+		var issues SubjectIssues
+		issues.add(agent, idx)
+		out.SubjectIssues = issues.nonempty()
 		parent := tx.Bucket(bucketFacts)
 		if parent == nil {
 			return nil
@@ -135,6 +143,7 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 		if b == nil {
 			return nil
 		}
+		incoming := make(map[string][]string)
 		c := b.Cursor()
 		for k, v := c.Last(); k != nil; k, v = c.Prev() {
 			if err := ctx.Err(); err != nil {
@@ -150,6 +159,9 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 			if f.AgentID != agent || f.ID != string(k) {
 				return fmt.Errorf("fact identity mismatch in namespace %q", agent)
 			}
+			if f.SupersededBy != "" && f.SupersededBy != SupersededByAgent {
+				incoming[f.SupersededBy] = append(incoming[f.SupersededBy], f.ID)
+			}
 			match := state == "all" || state == "retired" && f.IsSuperseded() || state == "alias" && f.IsAlias() && !f.IsSuperseded() || state == "active" && !f.IsAlias() && !f.IsSuperseded()
 			if !match || !strings.Contains(strings.ToLower(f.Text), query) {
 				continue
@@ -159,11 +171,19 @@ func (s *Store) ListFacts(ctx context.Context, agent, state, query, cursor strin
 				continue
 			}
 			if len(out.Facts) < limit {
+				if err := hydrateLineageTx(tx, &f); err != nil {
+					return err
+				}
+				if err := verifyLineageProjectionTx(ctx, tx, &f); err != nil {
+					return err
+				}
 				out.Facts = append(out.Facts, f)
 			} else {
 				hasMore = true
 			}
 		}
+		projectLegacyLineage(out.Facts, incoming)
+		projectSubjectFacts(idx.ByVersion, out.Facts)
 		return nil
 	})
 	if err != nil {
@@ -186,10 +206,10 @@ func unmarshalInspectionFact(data []byte) (Fact, error) {
 	if err := json.Unmarshal(data, &row); err != nil {
 		return Fact{}, err
 	}
-	return Fact{ID: row.ID, AgentID: row.AgentID, Text: row.Text, CreatedAt: row.CreatedAt, AccessedAt: row.AccessedAt, AccessCount: row.AccessCount, Weight: row.Weight, SupersededBy: row.SupersededBy, Confidence: row.Confidence, Kind: row.Kind, AliasSource: row.AliasSource, Pinned: row.Pinned, PinnedAt: row.PinnedAt}, nil
+	return Fact{LineageProjection: row.LineageProjection, ID: row.ID, AgentID: row.AgentID, Text: row.Text, CreatedAt: row.CreatedAt, AccessedAt: row.AccessedAt, AccessCount: row.AccessCount, Weight: row.Weight, SupersededBy: row.SupersededBy, Confidence: row.Confidence, Kind: row.Kind, AliasSource: row.AliasSource, Pinned: row.Pinned, PinnedAt: row.PinnedAt}, nil
 }
 
-func curationMatches(expected, current Fact) bool {
+func sourceVersionMatches(expected, current Fact) bool {
 	return sourceMatches(expected, current, false) && expected.SupersededBy == current.SupersededBy &&
 		expected.Pinned == current.Pinned && expected.PinnedAt.Equal(current.PinnedAt) &&
 		expected.CreatedAt.Equal(current.CreatedAt) && expected.AliasSource == current.AliasSource
@@ -223,7 +243,7 @@ func (s *Store) CurateFact(ctx context.Context, agent, factID, action, text stri
 		return Fact{}, fmt.Errorf("invalid curation action %q", action)
 	}
 	check := func(current Fact) error {
-		if !curationMatches(expected, current) {
+		if !sourceVersionMatches(expected, current) {
 			return fmt.Errorf("%w: reload fact %s", ErrFactChanged, factID)
 		}
 		return ctx.Err()
@@ -240,18 +260,7 @@ func (s *Store) CurateFact(ctx context.Context, agent, factID, action, text stri
 		}); err != nil {
 			return Fact{}, err
 		}
-		f, err := s.putReturningFactPrepared(ctx, agent, text, expected.Kind, "", WriteOptions{}, func(tx *bolt.Tx, replacement *Fact) error {
-			current, err := factInTx(tx, agent, factID)
-			if err != nil {
-				return err
-			}
-			if err := check(current); err != nil {
-				return err
-			}
-			replacement.Confidence = derivedConfidence([]Fact{current})
-			current.SupersededBy = replacement.ID
-			return s.persistFactTx(tx, tx.Bucket(bucketFacts).Bucket([]byte(agent)), agent, current)
-		})
+		f, err := s.reviseSources(ctx, agent, text, WriteOptions{}, []Fact{expected})
 		f.Embedding = nil
 		return f, err
 	}

@@ -58,6 +58,10 @@ func (b *reflectIdentityBackend) CheckpointResume(agent string) (*session.Checkp
 	b.record("CheckpointResume", agent)
 	return nil, nil
 }
+func (b *reflectIdentityBackend) CheckpointList(agent string) ([]session.Checkpoint, error) {
+	b.record("CheckpointList", agent)
+	return nil, nil
+}
 func (b *reflectIdentityBackend) AuditWrite(e audit.Entry) error {
 	b.record("AuditWrite", e.Agent)
 	return nil

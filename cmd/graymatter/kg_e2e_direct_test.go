@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ func TestKGEndToEnd_DirectMode(t *testing.T) {
 	dataDir = filepath.Join(dir, ".graymatter")
 	t.Cleanup(func() { dataDir = old })
 	t.Setenv("GRAYMATTER_KG", "1")
+	t.Setenv("GRAYMATTER_KG_LLM_EXTRACT", "0")
 
 	ds, err := openDirectStore()
 	if err != nil {
@@ -71,6 +73,58 @@ func TestKGEndToEnd_DirectMode(t *testing.T) {
 		t.Errorf("expected person and organization nodes from typed path; types seen: %v", foundTyped)
 	}
 
+	facts, err := ds.store.List("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	factIDs := make(map[string]bool, len(facts))
+	for _, fact := range facts {
+		factIDs[fact.ID] = true
+	}
+	edges, err := g.AllEdges()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coMention *kg.Edge
+	for i := range edges {
+		edge := &edges[i]
+		if edge.From == "person:maria rodriguez" && edge.To == "organization:northwind labs" && edge.Relation == "co_mentioned" {
+			coMention = edge
+			break
+		}
+	}
+	if coMention == nil {
+		t.Fatal("missing expected co-mention after consolidation")
+	}
+	// Decode the persisted edge shape so the same regression exercises the
+	// prior writer without depending on the new Go fields.
+	raw, err := json.Marshal(coMention)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var provenance struct {
+		Version   int  `json:"provenance_version"`
+		Complete  bool `json:"sources_complete"`
+		Truncated bool `json:"sources_truncated"`
+		Manual    bool `json:"manual_support"`
+		Supports  []struct {
+			Namespace string `json:"namespace"`
+			FactID    string `json:"fact_id"`
+			Digest    string `json:"digest"`
+		} `json:"supports"`
+	}
+	if err := json.Unmarshal(raw, &provenance); err != nil {
+		t.Fatal(err)
+	}
+	if provenance.Version != 1 || provenance.Complete || !provenance.Truncated || provenance.Manual ||
+		len(provenance.Supports) != 10 || len(coMention.Sources) != 10 {
+		t.Fatalf("overflowed extraction provenance = %+v, sources %v", provenance, coMention.Sources)
+	}
+	for i, source := range provenance.Supports {
+		if source.Namespace != "proj" || source.Digest == "" || !factIDs[source.FactID] || coMention.Sources[i] != source.FactID {
+			t.Errorf("support %d = %+v, projected fact ID = %q", i, source, coMention.Sources[i])
+		}
+	}
 	res, err := ds.Recall(ctx, "proj", "ledgerline rollout deliverable review", 8)
 	if err != nil {
 		t.Fatal(err)

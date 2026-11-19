@@ -45,7 +45,7 @@ func TestDemoSeed_PlantsCorpusAndIsIdempotent(t *testing.T) {
 		t.Fatalf("first seed planted %d facts, want %d", planted, want)
 	}
 
-	// Re-run: append-only store, so a duplicate plant would be visible garbage.
+	// Re-running must leave the existing demo corpus free of duplicates.
 	again, err := seedDemoCorpus(s)
 	if err != nil {
 		t.Fatalf("second seed: %v", err)

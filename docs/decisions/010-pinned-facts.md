@@ -1,4 +1,4 @@
-# 010 — Pinned facts are exempt from decay, pruning and summarisation
+# 010 — Pinned facts are exempt from decay and pruning
 
 **Status:** Accepted — **Date:** 2026-08-25
 
@@ -20,14 +20,10 @@ model that was implicit rather than enforced.
 ## Decision
 
 A fact can be pinned (`graymatter pin`, `memory_reflect action=pin`) and
-unpinned. The exemption is total and covers all three consolidation steps
-(invariant I-1):
+unpinned. Automatic maintenance preserves pinned facts (invariant I-1):
 
-1. **Decay** — the weight of a pinned fact is never rewritten.
-2. **Summarisation** — a pinned fact is never in the batch the LLM consumes
-   (`summarisationBatch` filters before the weight sort; pinned facts are
-   precisely the rarely-accessed ones that sort surfaces first).
-3. **Pruning** — the only code path that ever removes a fact skips pins.
+1. **Decay** — maintenance preserves the weight of a pinned fact.
+2. **Pruning** — automatic pruning skips pinned facts.
 
 The exemption is **visible**: pinned facts carry a star in the TUI, are
 counted by `status` (human line and `pinned` in JSON), and carry
@@ -48,8 +44,6 @@ auditable rather than silently reset).
   unpinned or superseded. That is why the exemption is loud — surfaces show
   the pin so contradictions are visible, and `memory_reflect update` on a
   pinned fact produces a fresh (unpinned) replacement the user can re-pin.
-- Consolidation batches shrink when pins are present; with everything pinned
-  the summariser has nothing to consume, which is the configured intent.
 
 ## Reversal condition
 
@@ -58,3 +52,10 @@ without the users noticing (the visibility surfaces failing at their job),
 the design should move to slow decay (e.g. a 50× half-life) instead of total
 exemption — retaining the reminder signal while keeping the guarantee in
 practice. Measured via `doctor` health rules once W5 lands.
+
+## Amendment — scope of pin protection
+
+A pin protects a fact against automatic decay, pruning and summarisation.
+Explicit deletion through `Store.Delete` or the REST `DELETE /forget` routes
+can still remove a pinned row. See
+[fact retention and deletion](../api-stability.md#fact-retention-and-deletion).

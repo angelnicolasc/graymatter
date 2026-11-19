@@ -116,13 +116,17 @@ func TestHealthRuleDumping(t *testing.T) {
 }
 
 // TestHealthRuleNearPruneCritical connects the doctor to W1's pin: a fact
-// that says "always" but weighs almost nothing must be listed.
+// that says "always" but weighs almost nothing must be listed. Alias
+// vocabulary with the same wording does not express a permanent instruction.
 func TestHealthRuleNearPruneCritical(t *testing.T) {
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	facts := []memory.Fact{
 		{ID: "A", AgentID: "a", Text: "The deploy policy is canary first", CreatedAt: now, AccessedAt: now, Weight: 0.04},
 		{ID: "B", AgentID: "a", Text: "Always answer in Spanish when asked", CreatedAt: now, AccessedAt: now, Weight: 0.9},
 		{ID: "C", AgentID: "a", Text: "low weight but nothing critical here", CreatedAt: now, AccessedAt: now, Weight: 0.01},
+		{ID: "D", AgentID: "a", Text: "alias: policy = rule", Weight: 0.009, Kind: memory.KindAlias},
+		{ID: "E", AgentID: "a", Text: "alias: decision = outcome", Weight: 0.009, Kind: memory.KindAlias, AliasSource: memory.AliasSourceUsage},
+		{ID: "F", AgentID: "a", Text: "alias: always = invariably", Weight: 0.009, Kind: memory.KindAlias, AliasSource: "future"},
 	}
 	got := finding(t, auditAgentHealth("a", facts), "near-prune-critical")
 	if got.Status != "warn" {
@@ -249,5 +253,21 @@ func TestHealthReport_StableAndVerdict(t *testing.T) {
 	renderHealth(&buf, parsed)
 	if buf.Len() == 0 || !strings.Contains(buf.String(), "Store health · verdict") {
 		t.Error("human rendering lost its header")
+	}
+}
+
+func TestHealthSeparatesDerivedSourceTombstones(t *testing.T) {
+	facts := []memory.Fact{{
+		ID: "head", Text: "derived fact",
+		LineageProjection: memory.LineageProjection{LineageStatus: memory.LineageVerified},
+	}}
+	for i := range 8 {
+		id := fmt.Sprintf("source-%d", i)
+		facts[0].DerivedFrom = append(facts[0].DerivedFrom, memory.LineageReference{FactID: id})
+		facts = append(facts, memory.Fact{ID: id, SupersededBy: "head"})
+	}
+	got := auditAgentHealth("a", facts)
+	if got.Tombstones != 8 || got.DerivedSourceTombstones != 8 || finding(t, got, "supersede-loop").Status != "ok" {
+		t.Fatalf("derived sources were counted as correction churn: %+v", got)
 	}
 }

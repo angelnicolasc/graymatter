@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -40,6 +41,9 @@ type EmbeddingHealth struct {
 	// PendingVectors is the current size of the retry queue for facts whose
 	// bbolt write succeeded but whose vector upsert has not landed yet.
 	PendingVectors int `json:"pending_vectors"`
+	// VectorSearchDegraded means affected namespaces use canonical keyword
+	// and recency ranking while vectors are pending or unavailable.
+	VectorSearchDegraded bool `json:"vector_search_degraded,omitempty"`
 }
 
 // recordEmbedDegraded bumps the degradation counter and stores the last
@@ -81,6 +85,8 @@ func recordEmbedDegraded(db *bolt.DB, embedErr error) {
 func ReadEmbeddingHealth(db *bolt.DB) (EmbeddingHealth, error) {
 	h := EmbeddingHealth{}
 	err := db.View(func(tx *bolt.Tx) error {
+		h.PendingVectors = pendingVectorCountTx(tx)
+		h.VectorSearchDegraded = h.PendingVectors != 0
 		b := tx.Bucket(bucketMeta)
 		if b == nil {
 			return nil
@@ -118,18 +124,15 @@ func lastDegradedMessage(raw []byte) string {
 
 // EmbeddingHealth reads this store's observed embedding state.
 func (s *Store) EmbeddingHealth() (EmbeddingHealth, error) {
-	h, err := ReadEmbeddingHealth(s.db)
-	if err != nil {
-		return EmbeddingHealth{}, err
+	health, err := ReadEmbeddingHealth(s.db)
+	if _, unavailable := s.vectors.(unavailableVectorStore); unavailable && err == nil {
+		health.VectorSearchDegraded = true
 	}
-	h.PendingVectors = s.PendingVectorCount()
-	return h, nil
+	return health, err
 }
 
-// CountEmbeddings returns the number of live facts carrying a vector,
-// against the number of live facts total, across all agents. Tombstones are
-// excluded on both sides: retired facts say nothing about the channel's
-// present state.
+// CountEmbeddings counts live, non-blank content facts across all agents
+// and reports how many of those facts carry a vector.
 func (s *Store) CountEmbeddings() (withVector, total int, err error) {
 	agents, err := s.ListAgents()
 	if err != nil {
@@ -141,7 +144,7 @@ func (s *Store) CountEmbeddings() (withVector, total int, err error) {
 			return 0, 0, err
 		}
 		for _, f := range facts {
-			if f.IsSuperseded() {
+			if !f.Embeddable() || f.IsSuperseded() || strings.TrimSpace(f.Text) == "" {
 				continue
 			}
 			total++

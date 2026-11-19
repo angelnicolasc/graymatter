@@ -49,6 +49,26 @@ Framing is mitigation, not a guarantee. Models do sometimes follow instructions
 in data. The durable control is limiting who can write a fact in the first
 place.
 
+Declared `source` and literal `quote` fields are equally untrusted. Citation
+responses delimit and JSON-escape them; decoding preserves their exact text,
+not authority. A source identifier is not fetched or authenticated, and its
+capture time records receipt, not verification. See [citation evidence](citation-evidence.md).
+
+### MCP startup instructions
+
+MCP clients may include the server's `initialize` instructions in a system
+prompt. Project-local stdio in `core` can append the fixed line
+`Memory is empty. Skip the initial memory search.` when the project and
+`__shared__` have no live facts at startup. A pending checkpoint or any read
+error during the startup check suppresses the line. The server keeps stored
+text out of these instructions. Retrieved facts and citations remain untrusted
+tool data.
+Shared HTTP and `full` send static instructions.
+
+The line describes memory at startup. An agent that skips the initial search
+can see shared writes made later through an explicit search during the session
+or through the next session's startup search.
+
 ### If you are a library consumer
 
 Do not concatenate `Recall` output straight into a system prompt. Fence it and
@@ -91,9 +111,10 @@ parameter. One compromised agent can therefore poison another's memory, and a
 shared store is a shared trust domain. If you run agents with different trust
 levels, give them different data directories.
 
-**No provenance on facts.** A fact does not record who wrote it or where it came
-from, so `recall` cannot tell "the user said this" apart from "a web page said
-this". Treat the whole store at the trust level of its least trusted writer.
+**No authenticated provenance on facts.** Optional source/quote fields are
+writer declarations. They do not establish who wrote the original words or
+whether the source is genuine. Treat the whole store at the trust level of its
+least trusted writer.
 
 **Same-user processes are inside the boundary.** The daemon's token sits in a
 file readable by the user who owns the store, by design. Any process running as

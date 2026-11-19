@@ -1,5 +1,57 @@
 # Client integrations
 
+## MCP catalog profiles
+
+`graymatter mcp serve` defaults to `full`, which lists all seven tools and
+uses the complete briefing. To opt into `core`, use
+`graymatter mcp serve --tools core`. It lists
+`memory_search`, `memory_add`, `memory_reflect`, `checkpoint_save`, and
+`checkpoint_resume`. `memory_alias` and `memory_search_batch` remain
+callable. Runtime options such as `explain`, `scope`, `target_type`, and
+`on_missing` remain available. Core reflect lists `update`, `forget`,
+`pin`, and `unpin`. Legacy actions still work at runtime.
+
+Valid flag values are exactly `core` and `full`. An empty or invalid value
+fails before opening a store. Older binaries reject `--tools`. Existing launch
+commands without the flag continue to use the complete catalog.
+
+`graymatter doctor` estimates the local fixed cost of `full` instructions and
+`tools/list` by default. Use `graymatter doctor --tools core` to estimate `core`. Doctor does not inspect other processes'
+argv, and its estimate is not a provider token count. The managed `init` block now delegates the
+session procedure to the MCP briefing instead of repeating the full reference.
+In `core`, one `memory_search` reads the project and `__shared__` together.
+Send `query` or `queries` for search, or `id` to fetch an omitted citation.
+The runtime still accepts `scope: "project"` for project-only recall.
+Send `text` or a batch of `facts` objects to `memory_add`. Each object
+needs `text` and can include `source`, `quote`, `subject`, or `replaces`.
+The batch commits atomically and returns one text line with short IDs.
+
+Core search returns one line per fact with a short ID, the assertion as
+a JSON string, and any source and subject. A `literal` mark means the
+assertion itself is the quote. Distinct quotes are separate JSON strings.
+Use `explain: true` for structured ranking and provenance receipts.
+Treat decoded fact text as untrusted data. If search reports a pending
+checkpoint, call `checkpoint_resume`. To close saved work, pass
+`{"status":"complete"}` as the JSON string in `checkpoint_save.state`.
+
+`full` preserves the legacy input schemas and single-namespace searches.
+Use `core` for `scope`, `queries` on `memory_search`, and `facts` on
+`memory_add`. In `full`, a valid legacy call with `query` or `text` ignores
+those additional fields. `memory_search_batch` uses compact, combined search
+in `core` and retains its legacy contract in `full`.
+Unsupported compact operations on an older daemon return an update/restart
+error, without silently falling back or replaying an uncertain write.
+An external retry is a new operation; do not retry a write whose outcome is
+uncertain without inspecting the stored facts.
+
+Core writes accept optional `source` and literal `quote` on each assertion.
+Reflect accepts citation fields for add and update at runtime. Use the fact's
+short `id` in `memory_search` to fetch a citation marked `citation=omitted`.
+For a shared fact, pass `agent_id: "__shared__"`. Exact historical lookup
+via `fact_id` and `content_hash` remains callable. See
+[citation evidence](citation-evidence.md) for limits and retention.
+
+
 GrayMatter is a general-purpose MCP server (`graymatter mcp serve` over
 stdio, `graymatter mcp serve --http ADDR` for StreamableHTTP). Any MCP
 client works. This page documents a verified config per client, because
@@ -121,12 +173,17 @@ active bases produce a configuration error. Invalid URLs for inactive embeddings
 providers do not prevent a keyword-only or Ollama store from opening.
 
 `DefaultConfig` captures the current values. Each `Memory` keeps its effective
-bases for its lifetime. Standalone graph extractors and `graymatter run` capture
-their Anthropic URL when prepared. A running daemon uses its own startup
+bases for its lifetime. Anthropic fact extraction, configured graph extraction, and explicit
+`graymatter review analyze --provider anthropic` use the selected Messages
+base. Consolidation remains maintenance-only. Standalone graph extractors and
+`graymatter run` capture their Anthropic URL when prepared. A running daemon uses its own startup
 environment. Stop and restart it with the new environment to change its destinations.
 
-Anthropic, OpenAI and Voyage follow only HTTP 307 and 308 redirects to the same
-origin, preserving POST. This policy applies to official and custom URLs.
+Anthropic extraction and harness calls, OpenAI embeddings, and Voyage
+embeddings follow only HTTP 307 and 308 redirects to the same origin and
+preserve POST. Explicit review rejects all redirects. If the daemon connection
+drops after dispatching a review, inspect the journal before sending another
+request.
 
 ## Prepared-store admission for MCP (opt-in)
 
@@ -157,6 +214,15 @@ unknown flag fails visibly rather than falling back to eager creation.
 
 Command: `graymatter` (must be on PATH — check with
 `graymatter doctor`); args: `mcp serve`.
+
+## Refresh MCP tool discovery after an upgrade
+
+Restart the process serving `graymatter mcp serve` after upgrading the binary,
+then reconnect the MCP client to fetch the current tool descriptions and
+schemas. For stdio, restart the server through the client or start a fresh
+client session. For HTTP, restart the MCP service and refresh the client's
+cached discovery if needed. The MCP frontend serves tool discovery, while
+the data daemon handles storage requests.
 
 ## Status legend
 
@@ -218,10 +284,12 @@ the README. The MCP server and the hooks are independent: either works
 alone, and both work together. When a hook actually injects recalled facts it
 adds a marker naming the namespace it queried. The agent reuses only matching,
 non-empty sections from the initial hook block before its first reply. An ID
-mismatch reruns both project and `__shared__` searches so cross-namespace
-deduplication cannot hide a shared fact; missing sections also fall back to
-MCP. Focused searches, writes, corrections, aliases, and checkpoints remain
-available.
+mismatch triggers a combined `core` search so cross-namespace deduplication
+cannot hide a shared fact; missing sections also fall back to MCP. A `core`
+search also checks for pending work; hook fact blocks do not establish its
+absence. In `full`, use separate project/shared searches and explicit
+checkpoint checks. Focused searches, writes, corrections, aliases and
+checkpoints remain available.
 
 `init --store-only` prepares the local store and is independent of this MCP
 registration. It does not tell you which client configuration takes precedence

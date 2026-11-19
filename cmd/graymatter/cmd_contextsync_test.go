@@ -110,6 +110,40 @@ func TestContextSync_CreatesBlockAndBacksUp(t *testing.T) {
 	}
 }
 
+func TestContextSync_ExcludesAliases(t *testing.T) {
+	s, path := setupSyncStore(t)
+	const agent = "proj"
+	facts, err := s.List(agent)
+	if err != nil || len(facts) == 0 {
+		t.Fatalf("seeded facts: %v, %v", facts, err)
+	}
+	pinned := facts[0]
+	pinned.Pinned = true
+	if err := s.UpdateFact(agent, pinned); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutAlias(context.Background(), agent, "settlement", []string{"clearing"}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := syncContextBlock(s, path, agent, contextblock.DefaultBudgetTokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, verified, found := contextblock.Parse(string(data))
+	if !found || !verified || result.Facts != len(facts) || !strings.Contains(body, pinned.Text) || strings.Contains(body, "settlement = clearing") {
+		t.Fatalf("unexpected context block (result %+v, found %v, verified %v):\n%s", result, found, verified, body)
+	}
+	listed, err := s.List(agent)
+	if err != nil || len(listed) != len(facts)+1 {
+		t.Fatalf("List lost stored rows after context sync: %v, %v", listed, err)
+	}
+}
+
 func TestContextSync_DetectsManualEdit(t *testing.T) {
 	s, path := setupSyncStore(t)
 

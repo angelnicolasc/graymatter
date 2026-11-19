@@ -117,6 +117,12 @@ func (r *reconnectingStore) mutate(fn func(cliStore) error) error {
 		return err
 	}
 	err := fn(r.snapshot())
+	// A local preflight or an acknowledged rollback may return the caller's
+	// context error. The typed revision RPC marks an unacknowledged write
+	// separately, even when cancellation triggered the loss of its reply.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	var networkError net.Error
 	if connDead(err) || errors.Is(err, memoryrpc.ErrCallTimeout) || errors.Is(err, io.ErrClosedPipe) || errors.As(err, &networkError) {
 		return fmt.Errorf("%w: %v", memory.ErrMutationOutcomeUnknown, err)
@@ -151,8 +157,11 @@ func (r *reconnectingStore) Remember(ctx context.Context, agentID, text string) 
 }
 
 func (r *reconnectingStore) PutReturningFact(ctx context.Context, agentID, text string) (memory.Fact, error) {
+	if err := ctx.Err(); err != nil {
+		return memory.Fact{}, err
+	}
 	var fact memory.Fact
-	err := r.do(func(s cliStore) error {
+	err := r.mutate(func(s cliStore) error {
 		writer, ok := s.(returningFactStore)
 		if !ok {
 			return errors.New("store does not expose PutReturningFact")
@@ -161,6 +170,9 @@ func (r *reconnectingStore) PutReturningFact(ctx context.Context, agentID, text 
 		fact, err = writer.PutReturningFact(ctx, agentID, text)
 		return err
 	})
+	if errors.Is(err, memory.ErrMutationOutcomeUnknown) {
+		return memory.Fact{}, err
+	}
 	return fact, err
 }
 
@@ -246,7 +258,7 @@ func (r *reconnectingStore) Stats(agentID string) (memory.MemoryStats, error) {
 }
 
 func (r *reconnectingStore) UpdateFact(agentID string, f memory.Fact) error {
-	return r.do(func(s cliStore) error { return s.UpdateFact(agentID, f) })
+	return r.mutate(func(s cliStore) error { return s.UpdateFact(agentID, f) })
 }
 
 func (r *reconnectingStore) CheckpointSave(cp session.Checkpoint) (session.Checkpoint, error) {

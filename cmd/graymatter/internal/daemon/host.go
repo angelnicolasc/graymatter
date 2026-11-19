@@ -38,12 +38,13 @@ const HostServiceName = "GrayMatterHost"
 
 // Host is the daemon-side receiver for host-level RPCs.
 type Host struct {
-	mem     *graymatter.Memory
-	db      *bolt.DB
-	graph   *kg.Graph
-	adapter *kg.GraphAdapter
-	kgAuto  bool   // whether consolidation feeds the graph (opts.KG / env / sentinel)
-	stop    func() // initiates graceful daemon shutdown
+	mem       *graymatter.Memory
+	db        *bolt.DB
+	graph     *kg.Graph
+	adapter   *kg.GraphAdapter
+	kgAuto    bool // whether consolidation feeds the graph (opts.KG / env / sentinel)
+	kgInitErr error
+	stop      func() // initiates graceful daemon shutdown
 }
 
 // --- wire types -------------------------------------------------------------
@@ -83,8 +84,24 @@ type SessionResolveResponse struct{ ID string }
 type KGNodesRequest struct{}
 type KGNodesResponse struct{ Nodes []kg.Node }
 
-type KGEdgesRequest struct{}
-type KGEdgesResponse struct{ Edges []kg.Edge }
+type KGEdgesRequest struct{ Inspect bool }
+type KGEdgesResponse struct {
+	Edges      []kg.Edge
+	Inspection *KGInspection
+}
+
+type KGInspection struct {
+	Nodes      []kg.Node
+	Edges      []kg.EdgeInspection
+	Provenance *kg.ProvenanceReport
+}
+
+type KGReconcileRequest struct {
+	Expected      kg.Edge
+	ManualSupport bool
+	Supports      []kg.SourceEvidence
+}
+type KGReconcileResponse struct{}
 
 type KGLinkRequest struct{ From, To, Relation string }
 type KGLinkResponse struct{}
@@ -120,22 +137,28 @@ type AgentSummary struct {
 	NewestAt  time.Time `json:"newest_at,omitempty"`
 }
 
+// MaintenanceOnly is the effective policy of a daemon with generative compaction disabled.
+const MaintenanceOnly = "maintenance-only"
+
 type StoreOverviewRequest struct{}
 type StoreOverviewResponse struct {
-	TotalAgents      int            `json:"total_agents"`
-	TotalLiveFacts   int            `json:"total_live_facts"`
-	TotalTombstones  int            `json:"total_tombstones"`
-	PendingVectorOps int            `json:"pending_vector_ops"`
-	Consolidations   int            `json:"consolidations"` // cycles that applied at least one proposal
-	FactsConsumed    int            `json:"facts_consumed"` // batch facts tombstoned by those proposals
-	Agents           []AgentSummary `json:"agents"`
+	TotalAgents      int                    `json:"total_agents"`
+	TotalLiveFacts   int                    `json:"total_live_facts"`
+	TotalTombstones  int                    `json:"total_tombstones"`
+	PendingVectorOps int                    `json:"pending_vector_ops"`
+	MaintenanceMode  string                 `json:"maintenance_mode,omitempty"`
+	Consolidations   int                    `json:"consolidations"` // historical cycles that applied a proposal
+	FactsConsumed    int                    `json:"facts_consumed"` // historical batch facts tombstoned by proposals
+	Agents           []AgentSummary         `json:"agents"`
+	Review           *memory.ReviewOverview `json:"review,omitempty"`
 }
 
 type KGStateRequest struct{}
 type KGStateResponse struct {
-	AutoPopulate bool `json:"auto_populate"`
-	Nodes        int  `json:"nodes"`
-	Edges        int  `json:"edges"`
+	AutoPopulate bool                 `json:"auto_populate"`
+	Nodes        int                  `json:"nodes"`
+	Edges        int                  `json:"edges"`
+	Provenance   *kg.ProvenanceReport `json:"provenance,omitempty"`
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -232,6 +255,17 @@ func (h *Host) KGNodes(req *KGNodesRequest, resp *KGNodesResponse) error {
 
 // KGEdges returns every knowledge-graph edge (empty when no graph exists).
 func (h *Host) KGEdges(req *KGEdgesRequest, resp *KGEdgesResponse) error {
+	if req != nil && req.Inspect {
+		if h.kgInitErr != nil {
+			return fmt.Errorf("knowledge graph unavailable: %w", h.kgInitErr)
+		}
+		inspection, err := ReadKGInspection(h.graph)
+		if err != nil {
+			return err
+		}
+		resp.Inspection = &inspection
+		return nil
+	}
 	if h.graph == nil {
 		resp.Edges = nil
 		return nil
@@ -242,6 +276,26 @@ func (h *Host) KGEdges(req *KGEdgesRequest, resp *KGEdgesResponse) error {
 	}
 	resp.Edges = edges
 	return nil
+}
+
+// ReadKGInspection reads the graph for direct and daemon diagnostics.
+func ReadKGInspection(graph *kg.Graph) (KGInspection, error) {
+	if graph == nil {
+		return KGInspection{}, nil
+	}
+	nodes, edges, provenance, err := graph.Inspect()
+	if err != nil {
+		return KGInspection{}, err
+	}
+	return KGInspection{Nodes: nodes, Edges: edges, Provenance: &provenance}, nil
+}
+
+// KGReconcile applies one operator-provided proof to the expected edge.
+func (h *Host) KGReconcile(req *KGReconcileRequest, _ *KGReconcileResponse) error {
+	if h.graph == nil {
+		return errNoKG
+	}
+	return h.graph.ReconcileProvenance(req.Expected, req.ManualSupport, req.Supports)
 }
 
 // KGLink creates an edge between two nodes.
@@ -324,7 +378,11 @@ func (h *Host) StoreOverview(req *StoreOverviewRequest, resp *StoreOverviewRespo
 		resp.Agents = append(resp.Agents, sum)
 	}
 	resp.PendingVectorOps = adv.PendingVectorCount()
+	resp.MaintenanceMode = MaintenanceOnly
 	resp.Consolidations, resp.FactsConsumed = memory.ReadConsolidationCounters(h.db)
+	if err := ReadStoreReviewOverview(h.db, resp); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -333,6 +391,9 @@ func (h *Host) StoreOverview(req *StoreOverviewRequest, resp *StoreOverviewRespo
 // daemon; only extraction is gated, which is why Nodes/Edges can be non-zero
 // while AutoPopulate is false (explicit agent links populate it too).
 func (h *Host) KGState(req *KGStateRequest, resp *KGStateResponse) error {
+	if h.kgInitErr != nil {
+		return fmt.Errorf("knowledge graph unavailable: %w", h.kgInitErr)
+	}
 	resp.AutoPopulate = h.kgAuto
 	if h.graph == nil {
 		return nil
@@ -342,11 +403,12 @@ func (h *Host) KGState(req *KGStateRequest, resp *KGStateResponse) error {
 		return err
 	}
 	resp.Nodes = len(nodes)
-	edges, err := h.graph.AllEdges()
+	report, err := h.graph.ProvenanceReport()
 	if err != nil {
 		return err
 	}
-	resp.Edges = len(edges)
+	resp.Edges = report.Complete + report.Incomplete
+	resp.Provenance = &report
 	return nil
 }
 
@@ -371,6 +433,8 @@ type rememberBackend struct {
 	graymatter.AdvancedStore
 	mem *graymatter.Memory
 }
+
+func (rememberBackend) MaintenanceOnly() bool { return true }
 
 func (b rememberBackend) Put(ctx context.Context, agentID, text string) error {
 	return b.mem.Remember(ctx, agentID, text)
@@ -425,6 +489,22 @@ func (b rememberBackend) RecallAll(ctx context.Context, agentID, query string, t
 		return ra.RecallAll(ctx, agentID, query, topK)
 	}
 	return b.mem.RecallAll(ctx, agentID, query)
+}
+
+func (b rememberBackend) BatchRecallScopedSupported() bool {
+	_, ok := b.AdvancedStore.(memory.ScopedBatchRecaller)
+	return ok
+}
+
+func (b rememberBackend) BatchRecallScoped(ctx context.Context, agentID string, queries []string, topK int, all bool, opts *memory.RecallOptions) ([]memory.BatchResult, error) {
+	recaller, ok := b.AdvancedStore.(memory.ScopedBatchRecaller)
+	if !ok {
+		return nil, memory.ErrBatchRecallUnsupported
+	}
+	if topK <= 0 {
+		topK = b.mem.Config().TopK
+	}
+	return recaller.BatchRecallScoped(ctx, agentID, queries, topK, all, opts)
 }
 
 // RecallExplain mirrors the Recall topK policy on the explain path: TopK<=0

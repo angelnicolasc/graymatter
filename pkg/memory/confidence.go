@@ -18,11 +18,29 @@ const DefaultConfidenceWeight = 0.0
 var ErrConfidenceUnsupported = errors.New("confidence options unsupported: update and restart the store daemon")
 
 // WriteOptions distinguishes omission (legacy storage) from an explicit label.
+// It is comparable, including when it carries an explicit list of replacements.
 type WriteOptions struct {
-	Confidence *string `json:"confidence,omitempty"`
+	Confidence *string        `json:"confidence,omitempty"`
+	Source     *string        `json:"source,omitempty"`
+	Quote      *string        `json:"quote,omitempty"`
+	Subject    *string        `json:"subject,omitempty"`
+	Replaces   ReplacementIDs `json:"-"`
 }
 
 func (o WriteOptions) Validate() error {
+	if err := o.validateSubjectOptions(); err != nil {
+		return err
+	}
+	var source, quote string
+	if o.Source != nil {
+		source = *o.Source
+	}
+	if o.Quote != nil {
+		quote = *o.Quote
+	}
+	if err := validateCitationStrings(source, quote); err != nil {
+		return err
+	}
 	if o.Confidence != nil {
 		return ValidateConfidence(*o.Confidence)
 	}
@@ -97,12 +115,14 @@ func ConfidenceLevel(raw string) int {
 }
 
 // RetrievalMetadata describes the effective policy even for empty results.
-// Legacy calls with no options omit this object entirely.
+// Calls with no options omit it when the vector index is available.
 type RetrievalMetadata struct {
 	MinConfidence    *string `json:"min_confidence,omitempty"`
 	ConfidenceWeight float64 `json:"confidence_weight"`
 	Policy           string  `json:"policy"`
 	KG               string  `json:"kg"`
+	// VectorFallback gives the reason a recall skipped external vector ranking.
+	VectorFallback string `json:"vector_fallback,omitempty"`
 }
 
 func (m *RetrievalMetadata) Text() string {
@@ -113,7 +133,11 @@ func (m *RetrievalMetadata) Text() string {
 	if m.MinConfidence != nil {
 		filter = *m.MinConfidence
 	}
-	return fmt.Sprintf("Retrieval policy %s: min_confidence=%s, confidence_weight=%g; KG=%s.", m.Policy, filter, m.ConfidenceWeight, m.KG)
+	text := fmt.Sprintf("Retrieval policy %s: min_confidence=%s, confidence_weight=%g; KG=%s.", m.Policy, filter, m.ConfidenceWeight, m.KG)
+	if m.VectorFallback != "" {
+		text += fmt.Sprintf(" Vector search degraded (%s).", m.VectorFallback)
+	}
+	return text
 }
 
 // ConfidenceRanking retains the base RRF score separately from the score that
@@ -128,9 +152,10 @@ type ConfidenceRanking struct {
 }
 
 type RecallResult struct {
-	Facts     []string           `json:"facts"`
-	Feedback  string             `json:"feedback,omitempty"`
-	Retrieval *RetrievalMetadata `json:"retrieval,omitempty"`
+	Facts         []string           `json:"facts"`
+	Feedback      string             `json:"feedback,omitempty"`
+	Retrieval     *RetrievalMetadata `json:"retrieval,omitempty"`
+	ReviewNotices []ReviewNotice     `json:"conflict_notices,omitempty"`
 }
 
 type RecallExplainResult struct {

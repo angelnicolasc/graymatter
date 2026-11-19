@@ -29,7 +29,10 @@ type workbenchStore struct {
 func (s *workbenchStore) CurateFact(_ context.Context, a, id, action, text string, f memory.Fact) (memory.Fact, error) {
 	s.calls = append(s.calls, action+":"+a+":"+id)
 	s.lastExpected = f
-	return f, s.err
+	if s.err != nil {
+		return memory.Fact{}, s.err
+	}
+	return f, nil
 }
 func (s *workbenchStore) Remember(_ context.Context, a, text string) error {
 	s.calls = append(s.calls, "add:"+a+":"+text)
@@ -123,6 +126,24 @@ func TestWorkbenchMutationFailurePreservesEditor(t *testing.T) {
 	m = next.(tuiModel)
 	if m.modal != "" || !strings.Contains(m.status, "Outcome unknown") {
 		t.Fatal("ambiguous mutation left replayable modal")
+	}
+}
+
+func TestWorkbenchRevisionReportsKnownCommitDespiteFollowUpError(t *testing.T) {
+	m := workbenchModel(t, &workbenchStore{})
+	m.modal, m.busy = "revise", true
+	next, refresh := m.Update(mutationMsg{
+		action: "revise",
+		agent:  "project",
+		fact:   memory.Fact{ID: "replacement-id"},
+		err:    errors.New("follow-up failed"),
+	})
+	m = next.(tuiModel)
+	if m.modal != "" || m.busy || m.unknownMutation != "" || refresh == nil {
+		t.Fatalf("known commit was not closed and refreshed: %q", m.status)
+	}
+	if !strings.Contains(m.status, "Revision committed as replacement-id") || !strings.Contains(m.status, "follow-up failed") {
+		t.Fatalf("known commit receipt hidden: %q", m.status)
 	}
 }
 

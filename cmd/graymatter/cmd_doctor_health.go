@@ -43,10 +43,11 @@ type healthFinding struct {
 }
 
 type healthAgentReport struct {
-	Agent      string          `json:"agent"`
-	LiveFacts  int             `json:"live_facts"`
-	Tombstones int             `json:"tombstones"`
-	Findings   []healthFinding `json:"findings"`
+	Agent                   string          `json:"agent"`
+	LiveFacts               int             `json:"live_facts"`
+	Tombstones              int             `json:"tombstones"`
+	DerivedSourceTombstones int             `json:"derived_source_tombstones,omitempty"`
+	Findings                []healthFinding `json:"findings"`
 }
 
 type healthReport struct {
@@ -110,19 +111,33 @@ func severity(s string) int {
 // only on the store's bytes.
 func auditAgentHealth(agent string, facts []memory.Fact) healthAgentReport {
 	live := make([]memory.Fact, 0, len(facts))
-	tomb := 0
+	derivedBy := make(map[string]map[string]bool)
+	for _, f := range facts {
+		if f.LineageStatus != memory.LineageVerified || len(f.DerivedFrom) == 0 {
+			continue
+		}
+		sources := make(map[string]bool, len(f.DerivedFrom))
+		for _, ref := range f.DerivedFrom {
+			sources[ref.FactID] = true
+		}
+		derivedBy[f.ID] = sources
+	}
+	tomb, derived := 0, 0
 	for _, f := range facts {
 		if f.IsSuperseded() {
 			tomb++
+			if derivedBy[f.SupersededBy][f.ID] {
+				derived++
+			}
 		} else {
 			live = append(live, f)
 		}
 	}
 	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
 
-	rep := healthAgentReport{Agent: agent, LiveFacts: len(live), Tombstones: tomb}
+	rep := healthAgentReport{Agent: agent, LiveFacts: len(live), Tombstones: tomb, DerivedSourceTombstones: derived}
 	rep.Findings = append(rep.Findings,
-		ruleSupersedeLoop(tomb, len(live)),
+		ruleSupersedeLoop(tomb-derived, len(live)),
 		ruleDumping(live),
 		ruleNearPruneCritical(live),
 		ruleDuplicates(live),
@@ -130,11 +145,8 @@ func auditAgentHealth(agent string, facts []memory.Fact) healthAgentReport {
 	return rep
 }
 
-// ruleSupersedeLoop flags a correction rate so high it means the agent keeps
-// rewriting its own knowledge — usually a prompt problem or two agents
-// fighting over one namespace. Recent-only detection would need the wall
-// clock, breaking the stable-output contract; the lifetime ratio catches the
-// chronic loops, which are the actionable kind.
+// ruleSupersedeLoop treats correction and unclassified tombstone ratios as a
+// diagnostic signal. Known derivation sources and version snapshots are separate.
 func ruleSupersedeLoop(tomb, live int) healthFinding {
 	f := healthFinding{Rule: "supersede-loop", Status: "ok"}
 	total := tomb + live
@@ -146,10 +158,10 @@ func ruleSupersedeLoop(tomb, live int) healthFinding {
 	switch {
 	case ratio >= supersedeFailRatio:
 		f.Status = "fail"
-		f.Detail = fmt.Sprintf("%.0f%% of the store is tombstones (%d of %d) — a correction loop, not memory", ratio*100, tomb, total)
+		f.Detail = fmt.Sprintf("%.0f%% of classified or unclassified fact rows are correction candidates (%d of %d) — investigate repeated revisions", ratio*100, tomb, total)
 	case ratio >= supersedeWarnRatio:
 		f.Status = "warn"
-		f.Detail = fmt.Sprintf("%.0f%% tombstones (%d of %d) — check whether updates contradict themselves repeatedly", ratio*100, tomb, total)
+		f.Detail = fmt.Sprintf("%.0f%% correction or unclassified tombstones (%d of %d) — investigate repeated revisions", ratio*100, tomb, total)
 	default:
 		f.Detail = fmt.Sprintf("%d tombstone(s) of %d fact(s)", tomb, total)
 	}
@@ -226,12 +238,12 @@ func (b *dumpBurst) avgLen() int {
 // ruleNearPruneCritical connects W5 to W1 (ADR-010): a live fact about to be
 // collected whose wording says it was meant to be permanent. It never fails —
 // decay doing its job is correct behaviour — but each hit is worth a pin or
-// an explicit supersede.
+// an explicit supersede. Alias vocabulary is outside this content heuristic.
 func ruleNearPruneCritical(live []memory.Fact) healthFinding {
 	f := healthFinding{Rule: "near-prune-critical", Status: "ok", Detail: "no critical-looking facts near prune"}
 	var hits []string
 	for _, x := range live {
-		if x.Weight >= nearPruneWeight {
+		if x.IsAlias() || x.Weight >= nearPruneWeight {
 			continue
 		}
 		text := strings.ToLower(x.Text)

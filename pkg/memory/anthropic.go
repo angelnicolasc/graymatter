@@ -11,11 +11,14 @@ type anthropicBaseURLConfig interface {
 	GetAnthropicBaseURL() string
 }
 
-func newAnthropicMessages(cfg any, key string) (anthropic.MessageService, error) {
+func anthropicBaseURL(cfg any) string {
 	var explicit string
 	if config, ok := cfg.(anthropicBaseURLConfig); ok {
 		explicit = config.GetAnthropicBaseURL()
 	}
-	base := providerurl.Select(explicit, providerurl.AnthropicEnv, providerurl.AnthropicDefault)
-	return anthropicclient.NewMessages(base, key)
+	return providerurl.Select(explicit, providerurl.AnthropicEnv, providerurl.AnthropicDefault)
+}
+
+func newAnthropicMessages(cfg ExtractConfig, key string) (anthropic.MessageService, error) {
+	return anthropicclient.NewMessages(anthropicBaseURL(cfg), key)
 }

@@ -7,6 +7,11 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
+func (b rememberBackend) AtomicRevisionSupported() bool {
+	store, ok := b.AdvancedStore.(interface{ AtomicRevisionSupported() bool })
+	return ok && store.AtomicRevisionSupported()
+}
+
 func (b rememberBackend) InspectionCapabilities() []string {
 	var caps []string
 	if _, ok := b.AdvancedStore.(memory.Inspector); ok {

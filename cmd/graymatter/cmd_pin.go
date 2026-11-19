@@ -11,7 +11,7 @@ import (
 )
 
 // pinCmd and unpinCmd expose the pin exemption (ADR-010) on the CLI: a
-// pinned fact is exempt from decay, pruning and summarisation, so a dormant
+// pinned fact is exempt from decay and pruning, so a dormant
 // project cannot collect standing obligations or architecture decisions.
 // Pinning is visible by design — status counts pinned facts, the TUI marks
 // them, export flags them — because an invisible exemption would reintroduce
@@ -20,12 +20,11 @@ import (
 func pinCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pin <agent-id> <text>",
-		Short: "Exempt a fact from decay, pruning and summarisation",
-		Long: `Mark a fact as permanent. Pinned facts are exempt from the forgetting
-curve (ADR-001) and from consolidation: they are never pruned, never
-summarised away, and their weight does not decay. The pin is visible —
-status counts pinned facts, the TUI marks them, export flags them — and
-graymatter unpin restores normal decay.`,
+		Short: "Exempt a fact from decay and pruning",
+		Long: `Protect a fact from automatic decay and pruning.
+Explicit deletion can still remove a pinned fact. Status counts pinned facts,
+the TUI marks them, and export flags them. Use graymatter unpin to restore
+normal decay.`,
 		Example: `  graymatter pin "backend-architect" "The write path is single-writer by design; readers never block on consolidation"`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

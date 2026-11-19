@@ -193,10 +193,12 @@ func openDirectStoreAt(dir string) (*directStore, error) {
 	}
 	ds := &directStore{mem: mem, store: store}
 	if os.Getenv("GRAYMATTER_KG") == "1" {
-		if err := maybeWireKG(store); err != nil {
+		if err := maybeWireKG(store, mem.Config()); err != nil {
 			_ = mem.Close()
 			return nil, err
 		}
+	} else if err := wireExistingGraphMaintenance(store); err != nil {
+		fmt.Fprintf(os.Stderr, "knowledge graph maintenance unavailable: %v\n", err)
 	}
 	return ds, nil
 }
@@ -205,14 +207,34 @@ func openDirectStoreAt(dir string) (*directStore, error) {
 // advanced store: the graph opens on the same bbolt handle and the regex
 // extractor feeds consolidation. Opt-in via GRAYMATTER_KG=1 (direct mode) or
 // daemon --kg.
-func maybeWireKG(adv graymatter.AdvancedStore) error {
+func maybeWireKG(adv graymatter.AdvancedStore, cfg graymatter.Config) error {
 	g, err := kg.Open(adv.DB())
 	if err != nil {
 		return fmt.Errorf("knowledge graph: %w", err)
 	}
 	graphAdapter := kg.NewGraphAdapter(g)
-	extractor := kg.NewExtractorAdapter(kg.ExtractorFromEnv())
+	extractor := kg.NewExtractorAdapter(kg.ExtractorForStore(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL))
 	adv.SetKG(graphAdapter, extractor)
+	return nil
+}
+
+func wireExistingGraphMaintenance(adv graymatter.AdvancedStore) error {
+	maintainer, ok := adv.(interface{ SetGraphMaintenance(memory.GraphAccessor) })
+	if !ok || adv.IsReadOnly() {
+		return nil
+	}
+	// Ordinary memory commands leave a store without graph state alone.
+	if _, err := kg.OpenRead(adv.DB()); err != nil {
+		if errors.Is(err, kg.ErrNoGraph) {
+			return nil
+		}
+		return err
+	}
+	graph, err := kg.Open(adv.DB())
+	if err != nil {
+		return err
+	}
+	maintainer.SetGraphMaintenance(kg.NewGraphAdapter(graph))
 	return nil
 }
 
@@ -427,7 +449,7 @@ func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp := &daemon.StoreOverviewResponse{Agents: make([]daemon.AgentSummary, 0, len(agents))}
+	resp := &daemon.StoreOverviewResponse{MaintenanceMode: daemon.MaintenanceOnly, Agents: make([]daemon.AgentSummary, 0, len(agents))}
 	for _, a := range agents {
 		facts, err := memory.ReadFactSummary(context.Background(), d.store, a)
 		if err != nil {
@@ -441,6 +463,9 @@ func (d *directStore) StoreOverview() (*daemon.StoreOverviewResponse, error) {
 	}
 	resp.PendingVectorOps = d.store.PendingVectorCount()
 	resp.Consolidations, resp.FactsConsumed = memory.ReadConsolidationCounters(d.store.DB())
+	if err := daemon.ReadStoreReviewOverview(d.store.DB(), resp); err != nil {
+		return nil, err
+	}
 	return resp, nil
 }
 
@@ -460,11 +485,12 @@ func (d *directStore) KGState() (*daemon.KGStateResponse, error) {
 		return nil, err
 	}
 	resp.Nodes = len(nodes)
-	edges, err := g.AllEdges()
+	report, err := g.ProvenanceReport()
 	if err != nil {
 		return nil, err
 	}
-	resp.Edges = len(edges)
+	resp.Edges = report.Complete + report.Incomplete
+	resp.Provenance = &report
 	return resp, nil
 }
 

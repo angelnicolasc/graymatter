@@ -16,16 +16,18 @@ consequences, reversal condition.
 | [004](004-local-first-single-node.md) | Local-first and single-node, deliberately not multi-tenant | Accepted |
 | [005](005-embedding-degradation-chain.md) | Embeddings degrade Ollama → OpenAI → Anthropic → keyword | Accepted |
 | [006](006-configurable-signal-weights.md) | Retrieval signal weights are configurable | Accepted |
-| [007](007-supersede-tombstones.md) | Contradictions are resolved by tombstone, never by delete | Accepted |
+| [007](007-supersede-tombstones.md) | Corrections retire prior facts as tombstones | Accepted |
 | [008](008-knowledge-graph-wiring.md) | Knowledge-graph auto-population ships gated (`--kg` / env) | Accepted |
 | [009](009-kg-sentinel-activation.md) | KG activation persists as data-dir state via `init --kg` | Accepted |
-| [010](010-pinned-facts.md) | Pinned facts are exempt from decay, pruning and summarisation | Accepted |
-| [011](011-consolidation-propose-apply.md) | Consolidation is propose/apply with tombstone receipts; Ollama summarises locally | Accepted |
+| [010](010-pinned-facts.md) | Pinned facts are exempt from decay and pruning | Accepted |
+| [011](011-consolidation-propose-apply.md) | Historical propose/apply design for generative compaction | Historical |
 | [012](012-tool-definition-quality.md) | Tool definitions are engineered against the TDQS rubric and pinned by contract tests | Accepted |
 | [013](013-structured-tool-results.md) | Tool results carry structuredContent twins with declared output schemas | Accepted |
 | [014](014-agent-id-canonical.md) | agent_id is the canonical agent parameter; agent remains a deprecated alias | Accepted |
 | [015](015-checkpoint-resume-empty-result.md) | checkpoint_resume returns a successful absence result under on_missing=empty | Accepted |
 | [016](016-confidence-options.md) | Explicit confidence writes, eligibility filters and bounded opt-in retrieval preference | Accepted, default promotion pending |
+
+| [017](017-explicit-memory-lifecycle.md) | Eligibility, resumable checkpoints, confirmed writes and bounded maintenance | Proposed |
 
 ## Writing a new one
 

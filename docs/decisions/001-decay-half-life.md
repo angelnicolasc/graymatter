@@ -56,7 +56,11 @@ reversed two quarters ago is not competing for a slot with a decision made
 last week. It is a judgement, not a measurement, and it is exposed as
 `DecayHalfLife` precisely because it is a judgement.
 
-### The threshold is read twice, deliberately
+### Historical summarisation threshold
+
+The current runtime uses `ConsolidateThreshold` for automatic maintenance
+only. The separate summarisation threshold below describes the previous
+generative path.
 
 `ConsolidateThreshold` gates two different things with two different
 comparisons, which looks like an off-by-one and is not:

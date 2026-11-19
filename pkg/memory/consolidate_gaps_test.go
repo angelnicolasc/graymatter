@@ -13,12 +13,6 @@ import (
 	"github.com/angelnicolasc/graymatter/pkg/embedding"
 )
 
-// Coverage-gap tests for the consolidation edges: the Anthropic wire paths
-// (mocked through the provider's base URL), the Ollama client's remaining
-// failure modes, and the closed-store error branches. The empty-Anthropic-
-// response regression here guards a real defect: an empty model reply used to
-// become an empty summary fact that consumed its whole batch.
-
 const anthropicMessageShape = `{
   "id": "msg_01",
   "type": "message",
@@ -29,7 +23,9 @@ const anthropicMessageShape = `{
   "usage": {"input_tokens": 1, "output_tokens": 1}
 }`
 
-// anthropicServer returns a Messages API mock and sets ANTHROPIC_BASE_URL to it.
+// anthropicServer returns a Messages-API mock and points the SDK at it via
+// ANTHROPIC_BASE_URL, which anthropic.NewClient honours. handler receives the
+// raw request body; it replies with whatever text it is given.
 func anthropicServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -45,11 +41,6 @@ func anthropicServer(t *testing.T, status int, body string) *httptest.Server {
 func anthropicTextMessage(text string) string {
 	esc := strings.NewReplacer("\\", "\\\\", `"`, `\"`, "\n", `\n`).Replace(text)
 	return fmt.Sprintf(anthropicMessageShape, fmt.Sprintf(`{"type":"text","text":"%s"}`, esc))
-}
-
-func anthropicCfg() *testConsolidateCfg {
-	return &testConsolidateCfg{threshold: 3, halfLife: 720 * time.Hour,
-		llm: "anthropic", apiKey: "test-key", model: "claude-test"}
 }
 
 func openHookedStore(t *testing.T, hook func(string, error)) *Store {
@@ -152,89 +143,7 @@ func TestExtractFacts_TableDriven(t *testing.T) {
 	}
 }
 
-// TestConsolidation_AnthropicEmptyContentNeverTouchesTheStore is the
-// regression for the defect the coverage audit surfaced: an empty model
-// response used to be applied as an empty summary fact that tombstoned the
-// entire batch toward garbage. Now it is a discarded proposal.
-func TestConsolidation_AnthropicEmptyContentNeverTouchesTheStore(t *testing.T) {
-	var reported []error
-	s := openHookedStore(t, func(_ string, err error) { reported = append(reported, err) })
-	seedBatch(t, s, "empty-anthropic")
-
-	anthropicServer(t, 200, fmt.Sprintf(anthropicMessageShape, "")) // content:[] — empty
-
-	if err := s.Consolidate(context.Background(), "empty-anthropic", anthropicCfg()); err != nil {
-		t.Fatalf("Consolidate: %v", err)
-	}
-	found := false
-	for _, e := range reported {
-		if errors.Is(e, ErrInvalidProposal) && strings.Contains(e.Error(), "empty content") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("empty-content reply reported as %v, want ErrInvalidProposal naming it", reported)
-	}
-	facts, _ := s.List("empty-anthropic")
-	if len(facts) != 5 {
-		t.Fatalf("store mutated by an empty proposal: %d facts, want 5", len(facts))
-	}
-	for _, f := range facts {
-		if f.IsSuperseded() || f.Text == "" {
-			t.Errorf("batch fact %q was consumed by an empty proposal", f.Text)
-		}
-	}
-	if cycles, _ := s.ConsolidationCounters(); cycles != 0 {
-		t.Errorf("counters advanced on a discarded proposal")
-	}
-}
-
-func TestConsolidation_AnthropicSuccessConsumesWholeBatchWithReceipts(t *testing.T) {
-	s := openHookedStore(t, func(_ string, err error) { t.Errorf("hook fired: %v", err) })
-	seedBatch(t, s, "anthropic-ok")
-
-	anthropicServer(t, 200, anthropicTextMessage("One paragraph holding every consumed fact."))
-
-	if err := s.Consolidate(context.Background(), "anthropic-ok", anthropicCfg()); err != nil {
-		t.Fatalf("Consolidate: %v", err)
-	}
-	facts, _ := s.List("anthropic-ok")
-	const wantBatch = 2 // weakest half of 5: len(live)/2
-	var summary *Fact
-	live := 0
-	for i := range facts {
-		if facts[i].Text == "One paragraph holding every consumed fact." {
-			summary = &facts[i]
-			continue
-		}
-		if !facts[i].IsSuperseded() {
-			live++
-		} else if facts[i].SupersededBy != summaryIDOf(facts, summary) {
-			t.Errorf("tombstone %q points at %q, not the summary", facts[i].Text, facts[i].SupersededBy)
-		}
-	}
-	if summary == nil {
-		t.Fatal("summary never landed")
-	}
-	if live != 5-wantBatch {
-		t.Errorf("%d batch facts stayed live beyond the unconsumed half", live)
-	}
-	cycles, consumed := s.ConsolidationCounters()
-	if cycles != 1 || consumed != wantBatch {
-		t.Errorf("counters = (%d,%d), want (1,%d)", cycles, consumed, wantBatch)
-	}
-}
-
-// summaryIDOf resolves the summary fact's ID once it exists; before that it
-// returns a sentinel that can never match, so premature comparisons fail.
-func summaryIDOf(facts []Fact, summary *Fact) string {
-	if summary == nil {
-		return "\x00unlanded"
-	}
-	return summary.ID
-}
-
-func TestSummariseFacts_UnknownProviderIsASilentSkip(t *testing.T) {
+func TestConsolidate_IgnoresUnknownLegacyProvider(t *testing.T) {
 	s := openHookedStore(t, func(_ string, err error) {
 		t.Errorf("unknown provider reported as failure: %v", err)
 	})
@@ -246,65 +155,6 @@ func TestSummariseFacts_UnknownProviderIsASilentSkip(t *testing.T) {
 	facts, _ := s.List("weird-provider")
 	if len(facts) != 5 {
 		t.Errorf("facts = %d, want 5 untouched", len(facts))
-	}
-}
-
-func TestOllama_MalformedEnvelopeFailsWithoutRetry(t *testing.T) {
-	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"response":`) // truncated JSON envelope
-	}))
-	defer srv.Close()
-
-	s := openHookedStore(t, nil)
-	seedBatch(t, s, "envelope-agent")
-	cfg := &testConsolidateCfg{threshold: 4, halfLife: 720 * time.Hour,
-		llm: "ollama", ollamaURL: srv.URL}
-
-	var reported []error
-	s.cfg.OnConsolidateError = func(_ string, err error) { reported = append(reported, err) }
-
-	if err := s.Consolidate(context.Background(), "envelope-agent", cfg); err != nil {
-		t.Fatal(err)
-	}
-	if attempts != 1 {
-		t.Errorf("malformed envelope earned %d attempts, want 1 (not retryable)", attempts)
-	}
-	if len(reported) == 0 || !strings.Contains(reported[0].Error(), "decode envelope") {
-		t.Errorf("reported %v, want envelope decode error", reported)
-	}
-}
-
-func TestOllama_LongErrorBodyIsTruncatedInTheReport(t *testing.T) {
-	long := strings.Repeat("x", 500)
-	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		http.Error(w, long, http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	var reported []error
-	s := openHookedStore(t, func(_ string, err error) { reported = append(reported, err) })
-	seedBatch(t, s, "long-body-agent")
-	cfg := &testConsolidateCfg{threshold: 4, halfLife: 720 * time.Hour,
-		llm: "ollama", ollamaURL: srv.URL}
-
-	if err := s.Consolidate(context.Background(), "long-body-agent", cfg); err != nil {
-		t.Fatal(err)
-	}
-	if attempts != 2 {
-		t.Errorf("503 earned %d attempts, want 2", attempts)
-	}
-	if len(reported) == 0 {
-		t.Fatal("fallback was silent")
-	}
-	for _, e := range reported {
-		if strings.Contains(e.Error(), strings.Repeat("x", 300)) {
-			t.Error("error carries the untruncated body; logs would drown in it")
-		}
 	}
 }
 
@@ -322,16 +172,13 @@ func TestClosedStore_ConsolidationPathsFailLoudly(t *testing.T) {
 	if err := s.Consolidate(context.Background(), "closed-agent", cfg); err == nil {
 		t.Error("Consolidate on closed store returned no error")
 	}
-	if got := s.factIDByText("closed-agent", "anything"); got != "" {
-		t.Errorf("factIDByText on closed store = %q, want empty", got)
-	}
 	err := s.PutConfident(context.Background(), "closed-agent", "x", "verified")
 	if err == nil {
 		t.Error("PutConfident on closed store returned no error")
 	}
 }
 
-// errTypedExtractor fails extraction for every fact: the step-4 loop must
+// errTypedExtractor fails extraction for every fact: the extraction pass must
 // skip the fact without recording a watermark, so a later healthy pass can
 // pick it up.
 type errTypedExtractor struct{}

@@ -14,14 +14,14 @@ import (
 func kgCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kg",
-		Short: "Knowledge graph inspection and rendering",
+		Short: "Inspect, reconcile, or render the knowledge graph",
 		Long: `Work with the auto-populated knowledge graph: entities extracted
-from memory, edges with fact-ID receipts.
+from memory, edges with fact-ID receipts and provenance state.
 
 Enable auto-population with ` + "`graymatter init --kg`" + ` (writes the kg.auto
 sentinel) or by running the daemon with --kg.`,
 	}
-	cmd.AddCommand(kgRenderCmd())
+	cmd.AddCommand(kgRenderCmd(), kgInspectCmd(), kgReconcileCmd())
 	return cmd
 }
 

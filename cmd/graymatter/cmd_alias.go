@@ -33,9 +33,9 @@ func aliasCmd() *cobra.Command {
 using either side reaches the facts the other side matches.
 
 An alias is a fact of kind "alias": it is never injected into a result, never
-counted in the ranking, and never scored — it only expands the query. It is
-revisable like any other fact, and a superseded alias stops expanding, so a
-wrong one is corrected rather than lived with.
+counted in the ranking, and never scored — it only expands the query. A live
+authored alias is exempt from decay and pruning. It can be revised or retired.
+Retired aliases stop expanding and follow ordinary maintenance unless pinned.
 
 Single-token pairs expand both ways; a multi-word phrase expands only from the
 term to the phrase, because splitting a phrase back into its words would drag

@@ -32,12 +32,17 @@ with the same persistent memory store.
 Routes:
   POST   /remember        {"agent":"<id>","text":"<text>"}
   GET    /recall           ?agent=<id>&q=<query>[&k=<int>]
-  POST   /consolidate      {"agent":"<id>"}
+  POST   /consolidate      {"agent":"<id>"} (maintenance only)
   GET    /facts            ?agent=<id>[&limit=<int>]
   DELETE /forget           {"agent":"<id>","id":"<fact-id>"}
                            or {"agent":"<id>","query":"<q>","confirm":true}
   DELETE /forget/{id}      ?agent=<id>
   GET    /healthz
+
+DELETE removes matching fact rows immediately, including pinned facts.
+
+POST /consolidate applies decay, pruning, and configured graph extraction.
+Generative compaction is disabled.
 
 Every route except /healthz requires an HTTP bearer token:
 

@@ -13,6 +13,7 @@
 //	GET    /recall?agent=<id>&q=<query>[&k=<int>]
 //	POST   /consolidate        body: {"agent":"<id>"}
 //	GET    /facts?agent=<id>[&limit=<int>]
+//	GET    /lineage?agent=<id>&fact_id=<id>[&content_hash=<hash>]
 //	DELETE /forget             body: {"agent":"<id>","id":"<fact-id>"}
 //	                           or:   {"agent":"<id>","query":"<q>","confirm":true}
 //	DELETE /forget/{id}?agent=<id>
@@ -36,6 +37,7 @@ import (
 
 	"github.com/angelnicolasc/graymatter/cmd/graymatter/internal/httpauth"
 	"github.com/angelnicolasc/graymatter/pkg/memory"
+	"github.com/angelnicolasc/graymatter/pkg/memory/rpc"
 )
 
 const (
@@ -140,6 +142,7 @@ func New(addr string, store Store, logger *slog.Logger, opts ...Option) *Server 
 	protected.HandleFunc("GET /recall", s.handleRecall)
 	protected.HandleFunc("POST /consolidate", s.handleConsolidate)
 	protected.HandleFunc("GET /facts", s.handleFacts)
+	protected.HandleFunc("GET /lineage", s.handleLineage)
 	protected.HandleFunc("DELETE /forget", s.handleForget)
 	protected.HandleFunc("DELETE /forget/{id}", s.handleForgetByID)
 	// /metrics lists every agent ID the server has seen, which is a free
@@ -266,13 +269,8 @@ func (s *Server) handleConsolidate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is required")
 		return
 	}
-	// No API-key gate here. Consolidation is mostly decay and pruning, which
-	// need no LLM; summarisation is one conditional step that runs when the
-	// store owner has a provider configured and the agent is over threshold.
-	// Gating on this process's environment was wrong in both directions once
-	// the work moved behind the daemon: it rejected requests the daemon could
-	// have served, and admitted ones where the daemon had no key anyway.
-	// Whoever owns the store owns the policy.
+	// The store owner applies its maintenance policy, including any
+	// configured graph extraction. The endpoint needs no summariser key.
 	if err := s.store.Consolidate(r.Context(), req.Agent); err != nil {
 		s.writeInternalError(w, "consolidate", err)
 		return
@@ -307,12 +305,46 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 		Text      string    `json:"text"`
 		Weight    float64   `json:"weight"`
 		CreatedAt time.Time `json:"created_at"`
+		memory.LineageProjection
 	}
 	views := make([]factView, len(facts))
 	for i, f := range facts {
-		views[i] = factView{ID: f.ID, Text: f.Text, Weight: f.Weight, CreatedAt: f.CreatedAt}
+		views[i] = factView{
+			ID: f.ID, Text: f.Text, Weight: f.Weight, CreatedAt: f.CreatedAt,
+			LineageProjection: f.LineageProjection,
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"facts": views})
+}
+
+func (s *Server) handleLineage(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	agent, factID := query.Get("agent"), query.Get("fact_id")
+	if agent == "" || factID == "" {
+		writeError(w, http.StatusBadRequest, "agent and fact_id query params are required")
+		return
+	}
+	store, ok := s.store.(interface {
+		InspectLineage(context.Context, string, string, string) (memory.LineageInspection, error)
+	})
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "lineage inspection is unavailable")
+		return
+	}
+	inspection, err := store.InspectLineage(r.Context(), agent, factID, query.Get("content_hash"))
+	if errors.Is(err, rpc.ErrLineageUnsupported) {
+		writeError(w, http.StatusNotImplemented, "lineage inspection is unavailable")
+		return
+	}
+	if errors.Is(err, memory.ErrFactNotFound) {
+		writeError(w, http.StatusNotFound, "lineage version is unavailable")
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, "inspect lineage", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inspection)
 }
 
 type forgetRequest struct {
@@ -352,7 +384,7 @@ func (s *Server) handleForgetByID(w http.ResponseWriter, r *http.Request) {
 				s.writeInternalError(w, "delete fact", err)
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "deleted_id": id})
+			writeFactDeletion(w, id)
 			return
 		}
 	}
@@ -421,11 +453,19 @@ func (s *Server) handleForget(w http.ResponseWriter, r *http.Request) {
 				s.writeInternalError(w, "delete fact", err)
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "deleted_id": f.ID})
+			writeFactDeletion(w, f.ID)
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "not_found"})
+}
+
+func writeFactDeletion(w http.ResponseWriter, factID string) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "ok", "deleted_id": factID,
+		"deletion_scope":    "fact_record",
+		"lineage_retention": "Evidence snapshots remain available while retained by lineage or review.",
+	})
 }
 
 // --- HTTP utilities ---

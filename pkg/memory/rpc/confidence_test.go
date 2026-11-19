@@ -132,6 +132,14 @@ func (s *LegacyProtocolService) Ping(req *PingRequest, resp *LegacyPingResponse)
 	resp.Protocol = Protocol
 	return nil
 }
+func (s *LegacyProtocolService) Put(*PutRequest, *PutResponse) error {
+	s.calls.Add(1)
+	return nil
+}
+func (s *LegacyProtocolService) Consolidate(*ConsolidateRequest, *ConsolidateResponse) error {
+	s.calls.Add(1)
+	return nil
+}
 func (s *LegacyProtocolService) PutReturningFact(req *PutReturningFactRequest, resp *PutReturningFactResponse) error {
 	s.calls.Add(1)
 	resp.Fact = memory.Fact{ID: "old-id", Text: req.Text}
@@ -198,14 +206,29 @@ func TestNewClientLegacyDaemonNegotiation(t *testing.T) {
 			t.Fatalf("new all error=%v", err)
 		}
 	}
-	if _, err := c.PutWithOptionsReturningFact(ctx, "a", "fact", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, ErrUnsupportedCapability) {
+	if _, err := c.PutWithOptionsReturningFact(ctx, "a", "fact", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
 		t.Fatalf("new write error=%v", err)
 	}
 	if _, err := c.PutSharedWithOptionsReturningFact(ctx, "must not land", memory.WriteOptions{Confidence: &verified}); !errors.Is(err, ErrUnsupportedCapability) {
 		t.Fatalf("new shared write against previous daemon error=%v", err)
 	}
-	if _, err := c.ReviseWithOptions(ctx, "a", "old", "new", memory.WriteOptions{}); !errors.Is(err, ErrUnsupportedCapability) {
+	if _, err := c.ReviseWithOptions(ctx, "a", "old", "new", memory.WriteOptions{}); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
 		t.Fatalf("atomic revision error=%v", err)
+	}
+	if err := c.Put(ctx, "a", "fact"); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
+		t.Fatalf("typed legacy put error=%v", err)
+	}
+	if _, err := c.PutReturningFact(ctx, "a", "fact"); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
+		t.Fatalf("typed legacy returning put error=%v", err)
+	}
+	if _, err := c.PutWithOptionsReturningFact(ctx, "a", "fact", memory.WriteOptions{}); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
+		t.Fatalf("typed legacy default put error=%v", err)
+	}
+	if _, err := c.ReviseFactsWithOptions(ctx, "a", "new", memory.WriteOptions{}); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
+		t.Fatalf("typed legacy revision error=%v", err)
+	}
+	if err := c.Consolidate(ctx, "a"); !errors.Is(err, ErrMaintenancePolicyUnsupported) {
+		t.Fatalf("typed legacy maintenance error=%v", err)
 	}
 	if svc.calls.Load() != 0 {
 		t.Fatalf("unsupported operations reached old backend: %d", svc.calls.Load())
@@ -213,8 +236,9 @@ func TestNewClientLegacyDaemonNegotiation(t *testing.T) {
 	if svc.pings.Load() != 1 {
 		t.Fatalf("capabilities not cached: %d pings", svc.pings.Load())
 	}
-	if _, err := c.PutWithOptionsReturningFact(ctx, "a", "legacy", memory.WriteOptions{}); err != nil {
-		t.Fatal(err)
+	var raw PutReturningFactResponse
+	if err := c.CallService(ServiceName, "PutReturningFact", &PutReturningFactRequest{AgentID: "a", Text: "raw"}, &raw, 0); err != nil || raw.Fact.ID != "old-id" {
+		t.Fatalf("generic transport escape hatch = %+v, %v", raw, err)
 	}
 	plain, err := c.RecallWithOptions(ctx, "a", "fact", 8, memory.RecallOptions{})
 	if err != nil || plain.Retrieval != nil || len(plain.Facts) != 1 {
@@ -416,6 +440,16 @@ type confidenceFailureBackend struct {
 	failure error
 }
 
+func (*confidenceFailureBackend) MaintenanceOnly() bool              { return true }
+func (*confidenceFailureBackend) AtomicRevisionSupported() bool      { return true }
+func (*confidenceFailureBackend) SupportsAuthoritativeLineage() bool { return true }
+func (*confidenceFailureBackend) InspectLineage(context.Context, string, string, string) (memory.LineageInspection, error) {
+	return memory.LineageInspection{}, memory.ErrFactNotFound
+}
+func (*confidenceFailureBackend) ExportLineage(context.Context, string) (memory.LineageArchive, error) {
+	return memory.LineageArchive{}, nil
+}
+
 func (b *confidenceFailureBackend) PutWithOptionsReturningFact(context.Context, string, string, memory.WriteOptions) (memory.Fact, error) {
 	return b.fact, b.failure
 }
@@ -443,7 +477,7 @@ func confidenceClientForBackend(t *testing.T, backend Backend) *Client {
 func TestConfidenceRPCPreservesKnownCommittedFactOnLaterError(t *testing.T) {
 	ctx := context.Background()
 	for _, knownCommit := range []bool{false, true} {
-		backend := &confidenceFailureBackend{failure: errors.New("retirement failed")}
+		backend := &confidenceFailureBackend{failure: errors.New("backend follow-up failed")}
 		if knownCommit {
 			backend.fact = memory.Fact{ID: "committed-exact-id", Confidence: "unverified", Text: "replacement"}
 		}

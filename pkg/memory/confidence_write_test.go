@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,7 +63,7 @@ func TestConfidenceWriteValidationBeforeEffects(t *testing.T) {
 }
 
 func TestConfidenceWriteFailureRollsBackFactMetadataAndLineage(t *testing.T) {
-	for _, operation := range []string{"add", "revision", "summary"} {
+	for _, operation := range []string{"add", "revision"} {
 		t.Run(operation, func(t *testing.T) {
 			s, err := Open(StoreConfig{DataDir: t.TempDir(), Embedder: &countingEmbedder{}, VectorBackend: newFlakyVectorStore(0), CandidateRetrieval: true})
 			if err != nil {
@@ -89,8 +88,6 @@ func TestConfidenceWriteFailureRollsBackFactMetadataAndLineage(t *testing.T) {
 				_, writeErr = s.PutWithOptionsReturningFact(context.Background(), "a", "replacement", confidenceOptions("verified"))
 			case "revision":
 				_, writeErr = s.ReviseFactsWithOptions(context.Background(), "a", "replacement", confidenceOptions("verified"), old)
-			case "summary":
-				_, writeErr = s.applyProposal(context.Background(), "a", []Fact{old}, &consolidationProposal{Summary: "replacement", Consumes: []string{old.ID}})
 			}
 			if writeErr == nil {
 				t.Fatal("injected write failure reported success")
@@ -360,7 +357,7 @@ func TestConfidenceRevisionRejectsChangedSnapshotBeforeCommit(t *testing.T) {
 	}
 }
 
-func TestConfidenceRevisionRetirementFailureReportsCommittedID(t *testing.T) {
+func TestConfidenceRevisionReceiptSurvivesLaterSourceDeletion(t *testing.T) {
 	s, cleanup := openTestStore(t)
 	defer cleanup()
 	old := mustConfidenceFact(t, s, "a", "source", "unverified")
@@ -377,69 +374,21 @@ func TestConfidenceRevisionRetirementFailureReportsCommittedID(t *testing.T) {
 		done <- result{f, err}
 	}()
 	id := <-committed
-	if err := s.Delete("a", old.ID); err != nil {
-		t.Fatal(err)
-	}
+	source, found := s.loadFact("a", old.ID)
+	deleteErr := s.Delete("a", old.ID)
 	close(release)
 	r := <-done
-	if r.err == nil || r.fact.ID != id || r.fact.Confidence != "unverified" {
-		t.Fatalf("partial outcome hidden: %+v", r)
+	if !found || source.SupersededBy != id {
+		t.Fatalf("observer saw source before retirement: %+v", source)
+	}
+	if deleteErr != nil {
+		t.Fatal(deleteErr)
+	}
+	if r.err != nil || r.fact.ID != id || r.fact.Confidence != "unverified" {
+		t.Fatalf("revision lost its committed receipt: %+v", r)
 	}
 	if f, ok := s.loadFact("a", id); !ok || f.Confidence != "unverified" {
 		t.Fatalf("committed replacement missing: %+v", f)
-	}
-}
-
-func TestConfidenceDerivedRetirementRejectsPostCommitSourceDowngrade(t *testing.T) {
-	for _, operation := range []string{"revision", "summary"} {
-		t.Run(operation, func(t *testing.T) {
-			s, cleanup := openTestStore(t)
-			defer cleanup()
-			old := mustConfidenceFact(t, s, "a", "source", "verified")
-			committed := make(chan string, 1)
-			release := make(chan struct{})
-			s.cfg.OnPut = func(_ string, id string, _ time.Duration) { committed <- id; <-release }
-			type result struct {
-				fact  Fact
-				count int
-				err   error
-			}
-			done := make(chan result, 1)
-			go func() {
-				if operation == "revision" {
-					fact, err := s.ReviseFactsWithOptions(context.Background(), "a", "replacement", WriteOptions{}, old)
-					done <- result{fact: fact, err: err}
-				} else {
-					count, err := s.applyProposal(context.Background(), "a", []Fact{old}, &consolidationProposal{Summary: "replacement", Consumes: []string{old.ID}})
-					done <- result{count: count, err: err}
-				}
-			}()
-			id := <-committed
-			current, _ := s.loadFact("a", old.ID)
-			current.Confidence = "unverified"
-			if err := s.UpdateFact("a", current); err != nil {
-				t.Fatal(err)
-			}
-			close(release)
-			outcome := <-done
-			if !errors.Is(outcome.err, ErrFactChanged) {
-				t.Fatalf("source downgrade retirement was not rejected: %+v", outcome)
-			}
-			if operation == "revision" && outcome.fact.ID != id {
-				t.Fatalf("known committed replacement identity lost: %+v", outcome)
-			}
-			if operation == "summary" && (outcome.count != 0 || !errors.Is(outcome.err, ErrConsolidationRetirement) || !strings.Contains(outcome.err.Error(), id)) {
-				t.Fatalf("known committed summary outcome lost: %+v", outcome)
-			}
-			replacement, ok := s.loadFact("a", id)
-			if !ok || replacement.Confidence != "inferred" {
-				t.Fatalf("committed snapshot changed silently: %+v", replacement)
-			}
-			current, _ = s.loadFact("a", old.ID)
-			if current.IsSuperseded() || current.Confidence != "unverified" {
-				t.Fatalf("changed source was consumed or overwritten: %+v", current)
-			}
-		})
 	}
 }
 
@@ -528,46 +477,6 @@ func TestConfidenceLifecycleDoesNotResurrectRetiredFact(t *testing.T) {
 	}
 }
 
-func TestConfidenceSummaryPostCommitFailureKeepsConservativeReceipt(t *testing.T) {
-	s, cleanup := openTestStore(t)
-	defer cleanup()
-	old := mustConfidenceFact(t, s, "a", "source", "unverified")
-	committed := make(chan string, 1)
-	release := make(chan struct{})
-	s.cfg.OnPut = func(_ string, id string, _ time.Duration) { committed <- id; <-release }
-	type result struct {
-		count int
-		err   error
-	}
-	done := make(chan result, 1)
-	go func() {
-		n, err := s.applyProposal(context.Background(), "a", []Fact{old}, &consolidationProposal{Summary: "summary", Consumes: []string{old.ID}})
-		done <- result{n, err}
-	}()
-	id := <-committed
-	current, _ := s.loadFact("a", old.ID)
-	current.Confidence = "verified"
-	if err := s.UpdateFact("a", current); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetPinned("a", true, current); err != nil {
-		t.Fatal(err)
-	}
-	close(release)
-	r := <-done
-	if r.count != 0 || !errors.Is(r.err, ErrConsolidationRetirement) {
-		t.Fatalf("failed source retirement hidden: %+v", r)
-	}
-	summary, ok := s.loadFact("a", id)
-	if !ok || summary.Confidence != "unverified" {
-		t.Fatalf("partial failure promoted summary: %+v", summary)
-	}
-	current, _ = s.loadFact("a", old.ID)
-	if current.IsSuperseded() || !current.Pinned || current.Confidence != "verified" {
-		t.Fatalf("source pin/label overwritten: %+v", current)
-	}
-}
-
 func TestConfidenceReindexPatchPreservesConcurrentMetadata(t *testing.T) {
 	e := &confidenceBarrierEmbedder{text: "source", entered: make(chan struct{}, 1), release: make(chan struct{})}
 	s, err := Open(StoreConfig{DataDir: t.TempDir(), VectorBackend: newFlakyVectorStore(0)})
@@ -593,65 +502,6 @@ func TestConfidenceReindexPatchPreservesConcurrentMetadata(t *testing.T) {
 	got, _ := s.loadFact("a", old.ID)
 	if got.Confidence != "unverified" || !got.Pinned || len(got.Embedding) != 2 {
 		t.Fatalf("reindex replayed stale metadata: %+v", got)
-	}
-}
-
-func TestConfidenceSummaryUsesOnlyValidatedConsumes(t *testing.T) {
-	s, cleanup := openTestStore(t)
-	defer cleanup()
-	verified := mustConfidenceFact(t, s, "a", "verified source", "verified")
-	unverified := mustConfidenceFact(t, s, "a", "unverified source", "unverified")
-	batch := []Fact{verified, unverified}
-	for i, tc := range []struct {
-		ids  []string
-		want string
-	}{{[]string{verified.ID, "unknown", verified.ID}, "inferred"}, {[]string{unverified.ID}, "unverified"}} {
-		applied, err := s.applyProposal(context.Background(), "a", batch, &consolidationProposal{Summary: fmt.Sprintf("summary %d", i), Consumes: tc.ids})
-		if err != nil || applied != 1 {
-			t.Fatalf("apply %d: %d %v", i, applied, err)
-		}
-		id := s.factIDByText("a", fmt.Sprintf("summary %d", i))
-		f, _ := s.loadFact("a", id)
-		if f.Confidence != tc.want {
-			t.Fatalf("summary derived from wrong sources: %+v, want %s", f, tc.want)
-		}
-	}
-	before, _ := s.List("a")
-	_, err := s.applyProposal(context.Background(), "a", batch, &consolidationProposal{Summary: "orphan", Consumes: []string{"unknown"}})
-	if !errors.Is(err, ErrInvalidProposal) {
-		t.Fatalf("orphan accepted: %v", err)
-	}
-	after, _ := s.List("a")
-	if len(after) != len(before) {
-		t.Fatal("invalid consumes wrote a summary")
-	}
-}
-
-func TestConfidenceSummaryRejectsChangedSnapshot(t *testing.T) {
-	e := &confidenceBarrierEmbedder{text: "summary", entered: make(chan struct{}, 1), release: make(chan struct{})}
-	s, err := Open(StoreConfig{DataDir: t.TempDir(), Embedder: e, VectorBackend: newFlakyVectorStore(0)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	old := mustConfidenceFact(t, s, "a", "source", "verified")
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.applyProposal(context.Background(), "a", []Fact{old}, &consolidationProposal{Summary: "summary", Consumes: []string{old.ID}})
-		done <- err
-	}()
-	<-e.entered
-	old.Confidence = "unverified"
-	if err := s.UpdateFact("a", old); err != nil {
-		t.Fatal(err)
-	}
-	close(e.release)
-	if err := <-done; !errors.Is(err, ErrFactChanged) || !errors.Is(err, ErrInvalidProposal) {
-		t.Fatalf("stale summary returned %v", err)
-	}
-	facts, _ := s.List("a")
-	if len(facts) != 1 || facts[0].IsSuperseded() {
-		t.Fatalf("stale summary mutated source: %+v", facts)
 	}
 }
 
