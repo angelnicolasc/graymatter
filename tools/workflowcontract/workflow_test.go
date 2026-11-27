@@ -75,8 +75,8 @@ func TestActionPins(t *testing.T) {
 	}
 	re := regexp.MustCompile("(?m)^\\s+(?:-\\s+)?uses: ([A-Za-z0-9_./-]+)@([^\\r\\n]+)$")
 	files, err := filepath.Glob(filepath.Join(workflowDir, "*.yml"))
-	if err != nil || len(files) != 7 {
-		t.Fatalf("expected seven workflows, got %d: %v", len(files), err)
+	if err != nil || len(files) != 8 {
+		t.Fatalf("expected eight workflows, got %d: %v", len(files), err)
 	}
 	seen := make(map[string]bool)
 	for _, file := range files {
@@ -204,4 +204,8 @@ func TestProductionGuards(t *testing.T) {
 	contains(t, mutation, "continue-on-error: true", "python3 -m json.tool mutation-report.json",
 		"if-no-files-found: error")
 	absent(t, mutation, "--exclude-files")
+	mcpReg := read(t, "mcp-registry")
+	contains(t, mcpReg, "workflow_dispatch:", "packages: write", "id-token: write",
+		"mcp-publisher login github-oidc", "mcp-publisher publish")
+	absent(t, mcpReg, "  pull_request:", "pull_request_target:")
 }

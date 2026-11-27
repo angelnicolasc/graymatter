@@ -3,9 +3,19 @@
   "name": "io.github.angelnicolasc/graymatter",
   "title": "GrayMatter",
   "description": "Persistent agent memory as a single Go binary: knowledge graph, TUI observability, zero infra.",
+  "websiteUrl": "https://graymatter.nickcerutti.workers.dev",
   "repository": {
     "url": "https://github.com/angelnicolasc/graymatter",
     "source": "github"
   },
-  "version": "0.21.0"
+  "version": "0.21.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/angelnicolasc/graymatter:0.21.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
 }

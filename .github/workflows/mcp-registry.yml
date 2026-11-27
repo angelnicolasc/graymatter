@@ -1,0 +1,81 @@
+name: MCP Registry
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish OCI image and MCP Registry entry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify server.json and Dockerfile alignment
+        id: meta
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, re
+          from pathlib import Path
+
+          manifest = json.loads(Path("server.json").read_text(encoding="utf-8"))
+          version = manifest["version"]
+          name = manifest["name"]
+          packages = manifest.get("packages", [])
+          assert packages and packages[0]["registryType"] == "oci", "server.json must declare an oci package"
+          expected_ref = f"ghcr.io/angelnicolasc/graymatter:{version}"
+          assert packages[0]["identifier"] == expected_ref, f"identifier {packages[0]['identifier']!r} != {expected_ref!r}"
+
+          dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+          assert f'io.modelcontextprotocol.server.name="{name}"' in dockerfile, "Dockerfile missing MCP ownership label"
+          m = re.findall(r"releases/download/v([^/\s]+)/graymatter_([^_\s]+)_linux_\$\{TARGETARCH\}\.tar\.gz", dockerfile)
+          assert len(m) == 1 and m[0] == (version, version), f"Dockerfile version {m!r} does not match server.json {version!r}"
+
+          print(f"version={version}")
+          print(f"image_ref={expected_ref}")
+          PY
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push multi-arch OCI image
+        env:
+          IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-static
+          docker buildx create --name mcp-builder --use
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "$IMAGE_REF" \
+            --tag "ghcr.io/angelnicolasc/graymatter:latest" \
+            --push \
+            .
+
+      - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.16
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" -o /tmp/mcp-publisher.tar.gz
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /usr/local/bin mcp-publisher
+          chmod +x /usr/local/bin/mcp-publisher
+          rm /tmp/mcp-publisher.tar.gz
+          mcp-publisher --version
+
+      - name: Publish server.json to the official MCP Registry
+        run: |
+          mcp-publisher validate
+          mcp-publisher login github-oidc
+          mcp-publisher publish
