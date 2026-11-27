@@ -12,6 +12,7 @@
   <a href="https://github.com/angelnicolasc/graymatter/releases/latest"><img src="https://img.shields.io/github/v/release/angelnicolasc/graymatter" alt="Latest Release"></a>
   <a href="https://glama.ai/mcp/servers/angelnicolasc/graymatter"><img src="https://glama.ai/mcp/servers/angelnicolasc/graymatter/badges/score.svg" alt="Glama MCP server score"></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Go"></a>
+  <a href="https://mcpservers.org/servers/angelnicolasc/graymatter"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
   <a href="https://github.com/angelnicolasc/graymatter/actions/runs/44426388996/job/135238443022"><img src="https://img.shields.io/badge/coverage-core%2082.5%25%20%C2%B7%20cli%2080.8%25-brightgreen" alt="Measured cross-platform statement coverage, core 82.5% and CLI 80.8%"></a>
   <img src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-blue" alt="Platforms">
   <img src="https://img.shields.io/github/license/angelnicolasc/graymatter" alt="License">
